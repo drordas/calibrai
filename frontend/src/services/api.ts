@@ -621,6 +621,20 @@ export async function markExperimentNotificationRead(experimentId: string): Prom
   });
 }
 
+export async function markShareNotificationRead(shareType: "dataset" | "experiment", shareId: number): Promise<void> {
+  await fetch(`${API_BASE}/auth/notifications/shares/${shareType}/${shareId}/read`, {
+    method: "POST",
+    headers: getAuthHeaders(),
+  });
+}
+
+export async function markAllNotificationsRead(): Promise<void> {
+  await fetch(`${API_BASE}/auth/notifications/read-all`, {
+    method: "POST",
+    headers: getAuthHeaders(),
+  });
+}
+
 export async function recalculateExperimentMetrics(id: string, evalSpec?: Record<string, any>): Promise<ExperimentDetail> {
   const headers: Record<string, string> = {
     ...(getAuthHeaders() as Record<string, string>),

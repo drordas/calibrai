@@ -25,6 +25,8 @@ import {
   updateExperimentTemplate,
   fetchNotifications,
   markExperimentNotificationRead,
+  markShareNotificationRead,
+  markAllNotificationsRead,
 } from "./services/api";
 import { LoginPage } from "./components/LoginPage";
 import { DatasetViewer } from "./components/DatasetViewer";
@@ -70,7 +72,8 @@ import {
   Trash2,
   Loader2,
   Bell,
-  Eye,
+  Check,
+  CheckCheck,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -764,9 +767,23 @@ export function App() {
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-80 bg-card border border-border rounded-sm shadow-none p-1">
-                <DropdownMenuLabel className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground px-2 py-1.5 flex items-center justify-between">
-                  <span>{t("notifications.title")}</span>
-                  <span className="tabular-nums">{notifications.length}</span>
+                <DropdownMenuLabel className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground px-2 py-1.5 flex items-center justify-between gap-2">
+                  <span>{t("notifications.title")} ({notifications.length})</span>
+                  {notifications.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        try {
+                          await markAllNotificationsRead();
+                          setNotifications([]);
+                        } catch {}
+                      }}
+                      className="inline-flex items-center gap-1 text-[10px] font-sans normal-case font-medium text-primary hover:underline cursor-pointer"
+                    >
+                      <CheckCheck className="w-3 h-3" />
+                      <span>{t("notifications.markAllRead")}</span>
+                    </button>
+                  )}
                 </DropdownMenuLabel>
                 <DropdownMenuSeparator className="bg-border my-1" />
                 {notifications.length === 0 ? (
@@ -778,9 +795,42 @@ export function App() {
                     {notifications.map((n) => (
                       <div
                         key={n.id}
-                        className="flex items-center justify-between gap-2 px-2.5 py-2 rounded-sm hover:bg-muted/60 transition-colors"
+                        className="flex items-center justify-between gap-2 px-2 py-1.5 rounded-sm hover:bg-muted/60 transition-colors"
                       >
-                        <div className="min-w-0 flex-1">
+                        <button
+                          type="button"
+                          className="min-w-0 flex-1 text-left cursor-pointer group"
+                          onClick={async () => {
+                            try {
+                              if (n.type === "experiment_completed") {
+                                await markExperimentNotificationRead(n.resource_id);
+                                setNotifications((prev) => prev.filter((item) => item.id !== n.id));
+                                const detail = await fetchExperimentDetail(n.resource_id);
+                                handleInspectExperimentResults(detail);
+                              } else if (n.type === "dataset_shared") {
+                                if (n.share_id) {
+                                  await markShareNotificationRead("dataset", n.share_id);
+                                }
+                                setNotifications((prev) => prev.filter((item) => item.id !== n.id));
+                                setCurrentMode("dashboard");
+                                setOpenDatasetsSignal((k) => k + 1);
+                              } else if (n.type === "experiment_shared") {
+                                if (n.share_id) {
+                                  await markShareNotificationRead("experiment", n.share_id);
+                                }
+                                setNotifications((prev) => prev.filter((item) => item.id !== n.id));
+                                try {
+                                  const detail = await fetchExperimentDetail(n.resource_id);
+                                  handleInspectExperimentResults(detail);
+                                } catch {
+                                  setCurrentMode("dashboard");
+                                }
+                              }
+                            } catch (err) {
+                              console.error("Error handling notification:", err);
+                            }
+                          }}
+                        >
                           <div className="text-[10px] font-mono uppercase tracking-wider text-primary">
                             {n.type === "experiment_completed"
                               ? t("notifications.expCompleted")
@@ -788,67 +838,35 @@ export function App() {
                                 ? t("notifications.datasetShared", { username: n.from_username || "" })
                                 : t("notifications.expShared", { username: n.from_username || "" })}
                           </div>
-                          <div className="text-xs font-medium text-foreground truncate">
+                          <div className="text-xs font-medium text-foreground truncate group-hover:underline">
                             {n.title}
                           </div>
-                        </div>
+                        </button>
 
-                        {n.type === "experiment_completed" && (
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="icon"
-                            className="h-7 w-7 rounded-sm border-border shrink-0"
-                            title={t("notifications.viewExperiment")}
-                            onClick={async () => {
-                              try {
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7 rounded-sm text-muted-foreground hover:text-primary hover:bg-primary/10 shrink-0"
+                          title={t("notifications.markRead")}
+                          onClick={async (e) => {
+                            e.stopPropagation();
+                            try {
+                              if (n.type === "experiment_completed") {
                                 await markExperimentNotificationRead(n.resource_id);
-                                setNotifications((prev) => prev.filter((item) => item.id !== n.id));
-                                const detail = await fetchExperimentDetail(n.resource_id);
-                                handleInspectExperimentResults(detail);
-                              } catch (err) {
-                                console.error("Error opening completed experiment:", err);
+                              } else if (n.type === "dataset_shared" && n.share_id) {
+                                await markShareNotificationRead("dataset", n.share_id);
+                              } else if (n.type === "experiment_shared" && n.share_id) {
+                                await markShareNotificationRead("experiment", n.share_id);
                               }
-                            }}
-                          >
-                            <Eye className="w-3.5 h-3.5 text-primary" />
-                          </Button>
-                        )}
-
-                        {n.type === "dataset_shared" && (
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            className="h-7 px-2 text-[11px] rounded-sm border-border shrink-0"
-                            onClick={() => {
-                              setCurrentMode("dashboard");
-                              setOpenDatasetsSignal((k) => k + 1);
-                            }}
-                          >
-                            {t("notifications.openDatasets")}
-                          </Button>
-                        )}
-
-                        {n.type === "experiment_shared" && (
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="icon"
-                            className="h-7 w-7 rounded-sm border-border shrink-0"
-                            title={t("notifications.openExperiment")}
-                            onClick={async () => {
-                              try {
-                                const detail = await fetchExperimentDetail(n.resource_id);
-                                handleInspectExperimentResults(detail);
-                              } catch {
-                                setCurrentMode("dashboard");
-                              }
-                            }}
-                          >
-                            <Eye className="w-3.5 h-3.5 text-primary" />
-                          </Button>
-                        )}
+                              setNotifications((prev) => prev.filter((item) => item.id !== n.id));
+                            } catch (err) {
+                              console.error("Error marking notification read:", err);
+                            }
+                          }}
+                        >
+                          <Check className="w-3.5 h-3.5" />
+                        </Button>
                       </div>
                     ))}
                   </div>

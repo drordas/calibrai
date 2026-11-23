@@ -32,6 +32,7 @@ class DatasetShare(Base):
     target_user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     share_mode = Column(String(20), default="view", nullable=False)  # "view" | "edit" | "copy"
     status = Column(String(20), default="pending", nullable=False)  # "pending" | "accepted"
+    notification_read = Column(Boolean, default=False)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
 
 
@@ -44,6 +45,7 @@ class ExperimentShare(Base):
     target_user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     share_mode = Column(String(20), default="view", nullable=False)  # "view" | "edit"
     status = Column(String(20), default="pending", nullable=False)  # "pending" | "accepted"
+    notification_read = Column(Boolean, default=False)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
 
 class UserConfiguration(Base):

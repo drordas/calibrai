@@ -280,6 +280,7 @@ def get_notifications(
         .filter(
             DatasetShare.target_user_id == user.id,
             DatasetShare.status == "pending",
+            DatasetShare.notification_read == False,
         )
         .order_by(DatasetShare.created_at.desc())
         .all()
@@ -289,6 +290,7 @@ def get_notifications(
         .filter(
             ExperimentShare.target_user_id == user.id,
             ExperimentShare.status == "pending",
+            ExperimentShare.notification_read == False,
         )
         .order_by(ExperimentShare.created_at.desc())
         .all()
@@ -350,6 +352,54 @@ def mark_experiment_notification_read(
     if exp:
         exp.notification_read = True
         db.commit()
+    return {"status": "ok"}
+
+
+@router.post("/notifications/shares/{share_type}/{share_id}/read")
+def mark_share_notification_read(
+    share_type: str,
+    share_id: int,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    if share_type == "dataset":
+        share = db.query(DatasetShare).filter(
+            DatasetShare.id == share_id,
+            DatasetShare.target_user_id == user.id,
+        ).first()
+        if share:
+            share.notification_read = True
+            db.commit()
+    elif share_type == "experiment":
+        share = db.query(ExperimentShare).filter(
+            ExperimentShare.id == share_id,
+            ExperimentShare.target_user_id == user.id,
+        ).first()
+        if share:
+            share.notification_read = True
+            db.commit()
+    return {"status": "ok"}
+
+
+@router.post("/notifications/read-all")
+def mark_all_notifications_read(
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    db.query(Experiment).filter(
+        Experiment.user_id == user.id,
+        Experiment.status == "completed",
+        Experiment.notification_read == False,
+    ).update({"notification_read": True}, synchronize_session=False)
+    db.query(DatasetShare).filter(
+        DatasetShare.target_user_id == user.id,
+        DatasetShare.notification_read == False,
+    ).update({"notification_read": True}, synchronize_session=False)
+    db.query(ExperimentShare).filter(
+        ExperimentShare.target_user_id == user.id,
+        ExperimentShare.notification_read == False,
+    ).update({"notification_read": True}, synchronize_session=False)
+    db.commit()
     return {"status": "ok"}
 
 @router.put("/config", response_model=UserConfigOut)

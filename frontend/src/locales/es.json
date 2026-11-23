@@ -920,6 +920,8 @@
     "datasetShared": "Dataset compartido por @{username}",
     "openDatasets": "Gestionar Datasets",
     "expShared": "Experimento compartido por @{username}",
-    "openExperiment": "Ver experimento"
+    "openExperiment": "Ver experimento",
+    "markRead": "Marcar como leída",
+    "markAllRead": "Marcar todas"
   }
 }
