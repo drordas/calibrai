@@ -220,7 +220,11 @@ export const PairwiseMatrix: React.FC<PairwiseMatrixProps> = ({
                         <span className="text-xs font-semibold font-mono">
                           {isNumericTask ? `r = ${primaryScore.toFixed(3)}` : `κ = ${primaryScore.toFixed(3)}`}
                         </span>
-                        <span className="text-[10px] text-muted-foreground font-mono mt-0.5">
+                        <span
+                          className={`text-[10px] font-mono mt-0.5 ${
+                            primaryScore >= 0.75 ? "text-white" : "text-muted-foreground"
+                          }`}
+                        >
                           {isNumericTask
                             ? `Δ: ${pair.mean_absolute_difference?.toFixed(2) ?? "0.0"}`
                             : `${t("results.rawAgreement")}: ${pair.raw_agreement_rate.toFixed(0)}%`}
