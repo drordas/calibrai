@@ -2,6 +2,7 @@ import re
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 from backend.app.db.session import get_db
 from backend.app.db.models import DatasetShare, Experiment, ExperimentShare, User, UserConfiguration
@@ -136,7 +137,7 @@ def register(req: RegisterRequest, db: Session = Depends(get_db)):
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="La contraseña debe tener al menos 4 caracteres"
         )
-    existing = db.query(User).filter(User.username == clean_username).first()
+    existing = db.query(User).filter(func.lower(User.username) == clean_username.lower()).first()
     if existing:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
