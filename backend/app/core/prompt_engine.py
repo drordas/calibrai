@@ -760,7 +760,7 @@ REGLAS DE EVALUACIÓN:
             clean_for_sections = re.sub(r"\{[a-zA-Z0-9_.-]+\}", " ", target_template)
             top_keys = list(eval_spec.output_schema.keys())
             escaped_top = [re.escape(k) for k in sorted(top_keys, key=len, reverse=True)]
-            header_regex = re.compile(rf"\b({'|'.join(escaped_top)})\b", re.IGNORECASE)
+            header_regex = re.compile(rf"^[ \t]*({'|'.join(escaped_top)})\b", re.IGNORECASE | re.MULTILINE)
             header_matches = [(m.group(1).lower(), m.start()) for m in header_regex.finditer(clean_for_sections)]
 
             section_tokens_by_top: Dict[str, set] = {}

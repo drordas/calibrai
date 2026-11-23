@@ -1120,7 +1120,7 @@ export const PromptEditor: React.FC<PromptEditorProps> = ({
       .slice()
       .sort((a, b) => b.length - a.length)
       .map((k) => k.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
-    const headerRegex = new RegExp(`\\b(${escapedTopKeys.join("|")})\\b`, "gi");
+    const headerRegex = new RegExp(`^[ \\t]*(${escapedTopKeys.join("|")})\\b`, "gim");
     const headerMatches: Array<{ keyLower: string; index: number }> = [];
     let hm: RegExpExecArray | null;
     while ((hm = headerRegex.exec(cleanPromptForSections)) !== null) {

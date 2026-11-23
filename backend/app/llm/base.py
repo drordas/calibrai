@@ -178,7 +178,7 @@ def parse_schema_structured_blocks(text: str, output_schema: Dict[str, Any]) -> 
 
     escaped_keys = [re.escape(k) for k in sorted(dict_keys, key=len, reverse=True)]
     header_union = "|".join(escaped_keys)
-    pattern = rf"(?i)\b({header_union})\b([\s\S]*?)(?=\b(?:{header_union})\b|\Z)"
+    pattern = rf"(?im)^[ \t]*({header_union})\b([\s\S]*?)(?=^[ \t]*(?:{header_union})\b|\Z)"
     matches = list(re.finditer(pattern, text))
     if not matches:
         return {}
