@@ -1,0 +1,26 @@
+{
+  "brand_awareness": {
+    "sentiment": "Positive|Negative|Neutral|Mixed|blank",
+    "markers_positive": [],
+    "markers_negative": [],
+    "markers_neutral": []
+  },
+  "brand_associations": {
+    "sentiment": "Positive|Negative|Neutral|Mixed|blank",
+    "markers_positive": [],
+    "markers_negative": [],
+    "markers_neutral": []
+  },
+  "perceived_quality": {
+    "sentiment": "Positive|Negative|Neutral|Mixed|blank",
+    "markers_positive": [],
+    "markers_negative": [],
+    "markers_neutral": []
+  },
+  "brand_loyalty": {
+    "sentiment": "Positive|Negative|Neutral|Mixed|blank",
+    "markers_positive": [],
+    "markers_negative": [],
+    "markers_neutral": []
+  }
+}

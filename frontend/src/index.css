@@ -1,0 +1,163 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    color-scheme: light;
+    /* Archival Monograph Cream Paper (#FAF8F5) & Deep Charcoal Ink (#141413) */
+    --background: 36 33% 97%;
+    --foreground: 60 3% 8%;
+
+    /* Warm Vellum Paper Panels (#F4F0E8 / #FCFBF9) */
+    --card: 38 38% 98.5%;
+    --card-foreground: 60 3% 8%;
+    --popover: 38 38% 98.5%;
+    --popover-foreground: 60 3% 8%;
+
+    /* Scholarly JCR Crimson (#7C1D26) */
+    --primary: 354 62% 30%;
+    --primary-foreground: 36 33% 98%;
+
+    /* Archival Warm Stone (#EDE8DD) */
+    --secondary: 39 27% 90%;
+    --secondary-foreground: 60 3% 10%;
+
+    /* Muted Paper & Editorial Slate-Brown */
+    --muted: 38 24% 92%;
+    --muted-foreground: 36 9% 35%;
+
+    /* Prussian Academic Slate Accent (#1E3A5F) */
+    --accent: 39 27% 90%;
+    --accent-foreground: 214 52% 25%;
+
+    /* Alert Vermilion */
+    --destructive: 8 74% 42%;
+    --destructive-foreground: 36 33% 98%;
+
+    /* Crisp Booktabs Rules (#D5CFC2) */
+    --border: 39 18% 80%;
+    --input: 39 18% 78%;
+    --ring: 354 62% 30%;
+    --radius: 0.25rem;
+  }
+
+  .dark {
+    color-scheme: dark;
+    /* Nocturnal Archival Folio (#121316) & Warm Parchment Text (#EFECE6) */
+    --background: 225 10% 8%;
+    --foreground: 38 22% 92%;
+
+    --card: 225 10% 10.5%;
+    --card-foreground: 38 22% 92%;
+    --popover: 225 10% 10.5%;
+    --popover-foreground: 38 22% 92%;
+
+    /* Illuminated Crimson (#C83E4B) */
+    --primary: 354 56% 52%;
+    --primary-foreground: 38 33% 98%;
+
+    --secondary: 225 9% 16%;
+    --secondary-foreground: 38 22% 92%;
+
+    --muted: 225 9% 14.5%;
+    --muted-foreground: 36 10% 66%;
+
+    --accent: 225 9% 17%;
+    --accent-foreground: 38 22% 94%;
+
+    --destructive: 4 72% 54%;
+    --destructive-foreground: 38 33% 98%;
+
+    --border: 225 8% 21%;
+    --input: 225 8% 22%;
+    --ring: 354 56% 52%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-family: 'Source Sans 3', -apple-system, BlinkMacSystemFont, sans-serif;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  }
+  ::selection {
+    background-color: hsl(var(--primary) / 0.18);
+    color: hsl(var(--foreground));
+  }
+  h1, h2, h3, h4, .font-editorial {
+    font-family: 'Source Serif 4', Georgia, Cambria, serif;
+    letter-spacing: -0.015em;
+  }
+  code, pre, .font-mono, td.font-mono, span.font-mono {
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+@layer utilities {
+  /* Monograph & Booktabs Structural Surfaces */
+  .flat-panel,
+  .glass-panel,
+  .glass-panel-subtle,
+  .neo-panel {
+    background-color: hsl(var(--card));
+    border: 1px solid hsl(var(--border));
+  }
+
+  .booktabs-table {
+    border-top: 2px solid hsl(var(--foreground));
+    border-bottom: 2px solid hsl(var(--foreground));
+  }
+
+  .booktabs-header {
+    border-bottom: 1.5px solid hsl(var(--foreground));
+  }
+
+  .monograph-callout {
+    background-color: hsl(var(--muted) / 0.55);
+    border: 1px solid hsl(var(--border));
+  }
+
+  .subtle-border {
+    border: 1px solid hsl(var(--border));
+  }
+
+  .interactive-cell {
+    transition: background-color 140ms ease-out, border-color 140ms ease-out;
+  }
+  .interactive-cell:hover {
+    background-color: hsl(var(--muted));
+    border-color: hsl(var(--foreground) / 0.35);
+  }
+}
+
+/* Neutral minimal scrollbars */
+* {
+  --scrollbar-thumb: hsl(var(--border));
+  --scrollbar-track: transparent;
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
+}
+
+@supports not (scrollbar-color: auto) {
+  * {
+    scrollbar-width: auto;
+  }
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    background: var(--scrollbar-track);
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--scrollbar-thumb);
+    border-radius: 2px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: hsl(var(--muted-foreground) / 0.6);
+  }
+}

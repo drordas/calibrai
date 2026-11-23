@@ -1,0 +1,28 @@
+```evaluation-spec
+task_type: aaker_dimensions
+description: "Codificación de Brand Equity de David Aaker con polaridad verbatim, ICC y Rating Congruence"
+output_format: structured_blocks
+source_text_col: review_comment
+id_col: review_id
+rating_col: review_rating
+dimensions:
+  - name: BRAND_AWARENESS
+    sentiment_field: SENTIMENT
+    markers: [MARKERS_POSITIVE, MARKERS_NEGATIVE, MARKERS_NEUTRAL]
+  - name: BRAND_ASSOCIATIONS
+    sentiment_field: SENTIMENT
+    markers: [MARKERS_POSITIVE, MARKERS_NEGATIVE, MARKERS_NEUTRAL]
+  - name: PERCEIVED_QUALITY
+    sentiment_field: SENTIMENT
+    markers: [MARKERS_POSITIVE, MARKERS_NEGATIVE, MARKERS_NEUTRAL]
+  - name: BRAND_LOYALTY
+    sentiment_field: SENTIMENT
+    markers: [MARKERS_POSITIVE, MARKERS_NEGATIVE, MARKERS_NEUTRAL]
+metrics:
+  - internal_consistency_llm        # Pos ∩ Neg = ∅
+  - inter_rater_agreement           # Cohen's Kappa / Krippendorff's Alpha
+  - polarity_count_agreement_icc    # ICC(2,1) sobre fragmentos
+  - rating_congruence               # Validez convergente vs estrellas del cliente
+  - verbatim_faithfulness           # Verificación de citas textuales exactas
+  - rule_consistency                # Lógica de derivación del SENTIMENT
+```

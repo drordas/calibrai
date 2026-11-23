@@ -1,0 +1,69 @@
+services:
+  # 1. PostgreSQL 16 Database
+  db:
+    image: postgres:16-alpine
+    container_name: calibrai_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-llm_benchmark}
+      POSTGRES_USER: ${POSTGRES_USER:-benchmarker}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-benchmarker_secret}
+    ports:
+      - "${DB_PORT:-5434}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-benchmarker} -d ${POSTGRES_DB:-llm_benchmark}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # 2. FastAPI Backend
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: calibrai_backend
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-benchmarker}:${POSTGRES_PASSWORD:-benchmarker_secret}@db:5432/${POSTGRES_DB:-llm_benchmark}
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      UPLOAD_DIR: /app/uploads
+      SAMPLE_DIR: /app/dataset
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-calibrai-dev-jwt-secret-change-in-production}
+      DEFAULT_ADMIN_USER: ${DEFAULT_ADMIN_USER:-}
+      DEFAULT_ADMIN_PASSWORD: ${DEFAULT_ADMIN_PASSWORD:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "${BACKEND_PORT:-8001}:8000"
+    volumes:
+      - ./backend/app:/app/backend/app
+      - ./dataset:/app/dataset:ro
+      - backend_uploads:/app/uploads
+
+  # 3. React + Tailwind + Nginx Frontend
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: calibrai_frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "${FRONTEND_PORT:-5174}:80"
+
+volumes:
+  postgres_data:
+    external: true
+    name: llm_benchmarker_postgres_data
+  backend_uploads:
+    external: true
+    name: llm_benchmarker_backend_uploads

@@ -1,0 +1,241 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-11-19T16:50:30Z",
+  "title": "Design System: LLM Benchmark Studio",
+  "extensions": {
+    "colorMeta": {
+      "archival-cream": {
+        "role": "neutral",
+        "displayName": "Archival Monograph Cream",
+        "canonical": "hsl(36 33% 97%)",
+        "tonalRamp": ["#24211C", "#3D3830", "#5C5549", "#82796A", "#ABA292", "#D5CFC2", "#EFECE4", "#FAF8F5"]
+      },
+      "vellum-card": {
+        "role": "neutral",
+        "displayName": "Warm Vellum Card",
+        "canonical": "hsl(38 38% 98.5%)",
+        "tonalRamp": ["#26231D", "#403B32", "#615A4C", "#877E6C", "#B0A795", "#D8D1C3", "#F4F0E8", "#FCFBF9"]
+      },
+      "charcoal-ink": {
+        "role": "neutral",
+        "displayName": "Deep Charcoal Ink",
+        "canonical": "hsl(60 3% 8%)",
+        "tonalRamp": ["#141413", "#262624", "#3D3D3A", "#575753", "#787873", "#9E9E98", "#C7C7C1", "#EBEBE6"]
+      },
+      "scholarly-crimson": {
+        "role": "primary",
+        "displayName": "Scholarly JCR Crimson",
+        "canonical": "hsl(354 62% 30%)",
+        "tonalRamp": ["#330B0F", "#541319", "#7C1D26", "#A32935", "#C83E4B", "#DF6B76", "#F0A5AC", "#FBE9EB"]
+      },
+      "illuminated-crimson": {
+        "role": "primary",
+        "displayName": "Illuminated Crimson",
+        "canonical": "hsl(354 56% 52%)",
+        "tonalRamp": ["#360C10", "#59151C", "#7C1D26", "#A32935", "#C83E4B", "#E06C77", "#F2A7AE", "#FCEBED"]
+      },
+      "prussian-slate": {
+        "role": "secondary",
+        "displayName": "Prussian Academic Slate",
+        "canonical": "hsl(214 52% 25%)",
+        "tonalRamp": ["#101F33", "#1E3A5F", "#2B5182", "#3B6BA8", "#5B82B5", "#7BA3D4", "#B8CBE3", "#E8EFF7"]
+      },
+      "nocturnal-prussian": {
+        "role": "secondary",
+        "displayName": "Nocturnal Prussian Slate",
+        "canonical": "hsl(213 50% 66%)",
+        "tonalRamp": ["#101F33", "#1E3A5F", "#2B5182", "#3B6BA8", "#5B82B5", "#7BA3D4", "#B8CBE3", "#E8EFF7"]
+      },
+      "warm-stone": {
+        "role": "secondary",
+        "displayName": "Archival Warm Stone",
+        "canonical": "hsl(39 27% 90%)",
+        "tonalRamp": ["#29251E", "#453F34", "#635B4B", "#877D69", "#ADA38E", "#CFC6B4", "#EDE8DD", "#F8F6F2"]
+      },
+      "muted-paper": {
+        "role": "neutral",
+        "displayName": "Muted Paper",
+        "canonical": "hsl(38 24% 92%)",
+        "tonalRamp": ["#26231D", "#423D33", "#615A4C", "#857C6A", "#ABA290", "#CFC8B8", "#F0ECE3", "#FAF8F4"]
+      },
+      "editorial-slate-brown": {
+        "role": "neutral",
+        "displayName": "Editorial Slate-Brown",
+        "canonical": "hsl(36 9% 35%)",
+        "tonalRamp": ["#1F1D1A", "#36332E", "#4D4941", "#615C52", "#7D776C", "#9E988D", "#C4BFB6", "#E8E5DF"]
+      },
+      "booktabs-rule": {
+        "role": "neutral",
+        "displayName": "Crisp Booktabs Rule",
+        "canonical": "hsl(39 18% 80%)",
+        "tonalRamp": ["#2B2822", "#474238", "#665F52", "#8A8170", "#B0A796", "#D5CFC2", "#EAE6DE", "#F7F5F2"]
+      },
+      "alert-vermilion": {
+        "role": "tertiary",
+        "displayName": "Alert Vermilion",
+        "canonical": "hsl(8 74% 42%)",
+        "tonalRamp": ["#3B0F08", "#661A0E", "#912615", "#BA311C", "#DB4B35", "#E87A68", "#F3AEA3", "#FCEAE7"]
+      },
+      "nocturnal-folio": {
+        "role": "neutral",
+        "displayName": "Nocturnal Archival Folio",
+        "canonical": "hsl(225 10% 8%)",
+        "tonalRamp": ["#121316", "#18191E", "#212329", "#2D3038", "#434752", "#636875", "#9297A3", "#CFD2D9"]
+      },
+      "nocturnal-card": {
+        "role": "neutral",
+        "displayName": "Nocturnal Archival Card",
+        "canonical": "hsl(225 10% 10.5%)",
+        "tonalRamp": ["#121316", "#18191E", "#25272D", "#31333A", "#484B54", "#686C78", "#979BA6", "#D2D4DC"]
+      },
+      "warm-parchment": {
+        "role": "neutral",
+        "displayName": "Warm Parchment",
+        "canonical": "hsl(38 22% 92%)",
+        "tonalRamp": ["#26241F", "#423E36", "#615B50", "#857D6F", "#ABA393", "#CFC9BC", "#EFECE6", "#FAF9F6"]
+      }
+    },
+    "typographyMeta": {
+      "display": {
+        "displayName": "Display KPIs",
+        "purpose": "Top-ruled monograph summary figures (tabular-nums) in the experiment dashboard."
+      },
+      "headline": {
+        "displayName": "Headline",
+        "purpose": "Primary surface titles (ExperimentDashboard, Protocolo de Validación Psicométrica)."
+      },
+      "title": {
+        "displayName": "Title",
+        "purpose": "Masthead brand title, section ledger headers (Registro I.), Rank #1 model synthesis header, and individual experiment ledger titles."
+      },
+      "body": {
+        "displayName": "Body & UI Control",
+        "purpose": "Functional UI copy, methodology descriptions, and compact control labels."
+      },
+      "label": {
+        "displayName": "Label & Telemetry Mono",
+        "purpose": "Roman numeral prefixes (I., II., III.), Prussian slate KPI provenance captions, sample counts (N = 250), task identifiers, prompt templates, and statistical cells."
+      }
+    },
+    "shadows": [
+      {
+        "name": "subtle",
+        "value": "0 1px 2px 0 rgba(0, 0, 0, 0.05)",
+        "purpose": "Used sparingly on the Ψ crimson monograph seal in the masthead; cards, ledgers, and tables remain flat (shadow-none)."
+      }
+    ],
+    "motion": [
+      {
+        "name": "interactive-cell",
+        "value": "background-color 140ms ease-out, border-color 140ms ease-out",
+        "purpose": "Crisp color and rule contrast transitions on table cells, filter pills, and booktabs ledger rows."
+      }
+    ],
+    "breakpoints": [
+      { "name": "sm", "value": "640px" },
+      { "name": "md", "value": "768px" },
+      { "name": "lg", "value": "1024px" },
+      { "name": "2xl", "value": "1400px" }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Action Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "Scholarly JCR Crimson primary CTA button with 2px micro-radius for launching or creating experiments.",
+      "html": "<button class=\"ds-btn-primary\"><svg width=\"14\" height=\"14\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M5 12h14\"/><path d=\"M12 5v14\"/></svg><span>Crear Experimento</span></button>",
+      "css": ".ds-btn-primary { display: inline-flex; align-items: center; gap: 8px; height: 36px; padding: 0 16px; background-color: #7C1D26; color: #FAF8F5; font-family: 'Source Sans 3', sans-serif; font-size: 12px; font-weight: 600; border: 1px solid #7C1D26; border-radius: 2px; cursor: pointer; transition: background-color 140ms ease-out; } .ds-btn-primary:hover { background-color: #691820; } .ds-btn-primary:focus-visible { outline: 2px solid #7C1D26; outline-offset: 2px; }"
+    },
+    {
+      "name": "Utility Outline Button",
+      "kind": "button",
+      "refersTo": "button-outline",
+      "description": "Warm Vellum utility button with 1px booktabs stone border for history, refresh, and recalculation triggers.",
+      "html": "<button class=\"ds-btn-outline\"><svg width=\"14\" height=\"14\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"#7C1D26\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"m19 21-7-4-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v16z\"/></svg><span>Historial Guardado</span></button>",
+      "css": ".ds-btn-outline { display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 12px; background-color: #FCFBF9; color: #141413; font-family: 'Source Sans 3', sans-serif; font-size: 12px; font-weight: 500; border: 1px solid #D5CFC2; border-radius: 2px; cursor: pointer; transition: background-color 140ms ease-out, border-color 140ms ease-out; } .ds-btn-outline:hover { background-color: #F0ECE3; border-color: #ABA292; } .ds-btn-outline:focus-visible { outline: 2px solid #7C1D26; outline-offset: 2px; }"
+    },
+    {
+      "name": "Masthead Roman Section Switcher",
+      "kind": "nav",
+      "refersTo": "nav-tab-active",
+      "description": "Segmented monograph navigation bar with Roman numeral monospace indices and editorial serif labels.",
+      "html": "<nav class=\"ds-nav-bar\"><button class=\"ds-nav-tab ds-nav-tab-active\"><span class=\"ds-roman\">I.</span><span>Experimentos</span></button><button class=\"ds-nav-tab\"><span class=\"ds-roman\">II.</span><span>Configurar Benchmark</span></button><button class=\"ds-nav-tab\"><span class=\"ds-roman\">III.</span><span>Resultados &amp; Matriz</span><span class=\"ds-nav-count\">4</span></button></nav>",
+      "css": ".ds-nav-bar { display: inline-flex; align-items: center; gap: 4px; padding: 4px; background-color: #FCFBF9; border: 1px solid #D5CFC2; border-radius: 2px; } .ds-nav-tab { display: inline-flex; align-items: center; gap: 6px; padding: 6px 14px; font-family: 'Source Serif 4', Georgia, serif; font-size: 12px; font-weight: 500; color: #141413; background: transparent; border: none; border-radius: 2px; cursor: pointer; transition: background-color 140ms ease-out, color 140ms ease-out; } .ds-nav-tab:hover { background-color: #F0ECE3; } .ds-nav-tab-active { background-color: #7C1D26; color: #FAF8F5; font-weight: 700; } .ds-nav-tab-active:hover { background-color: #691820; } .ds-roman { font-family: 'JetBrains Mono', monospace; font-size: 10px; opacity: 0.85; } .ds-nav-count { font-family: 'JetBrains Mono', monospace; font-size: 10px; padding: 0 6px; background-color: #F0ECE3; color: #141413; border: 1px solid #D5CFC2; border-radius: 2px; }"
+    },
+    {
+      "name": "Telemetry & Human Baseline Chips",
+      "kind": "chip",
+      "refersTo": "badge-telemetry",
+      "description": "Tabular monospace metadata chips differentiating LLM evaluators, Human Expert ground truth, and Rank #1 insignias.",
+      "html": "<div class=\"ds-chip-row\"><span class=\"ds-chip ds-chip-rank\">RANK #1 &middot; LÍDER CALIDAD</span><span class=\"ds-chip ds-chip-human\">Experto Humano (Ground Truth)</span><span class=\"ds-chip ds-chip-model\">llama3.1:8b-instruct</span></div>",
+      "css": ".ds-chip-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; } .ds-chip { display: inline-flex; align-items: center; font-family: 'JetBrains Mono', monospace; font-size: 11px; font-variant-numeric: tabular-nums; padding: 2px 8px; border-radius: 2px; border: 1px solid #D5CFC2; } .ds-chip-rank { background-color: rgba(124, 29, 38, 0.1); color: #7C1D26; border-color: rgba(124, 29, 38, 0.4); font-weight: 700; font-size: 10px; } .ds-chip-human { background-color: rgba(16, 185, 129, 0.14); color: #047857; border-color: rgba(5, 150, 105, 0.35); font-weight: 600; } .ds-chip-model { background-color: #F0ECE3; color: #141413; border-color: #D5CFC2; }"
+    },
+    {
+      "name": "Booktabs Top-Ruled KPI Strip",
+      "kind": "custom",
+      "refersTo": "card-monograph",
+      "description": "Four-column publication KPI array anchored by 2px charcoal and crimson top rules, serif tabular numerals, and Prussian Academic Slate provenance captions.",
+      "html": "<div class=\"ds-kpi-grid\"><div class=\"ds-kpi-cell\"><span class=\"ds-kpi-label\">I. Total Experimentos</span><div class=\"ds-kpi-val\">14</div><span class=\"ds-kpi-meta\">Registro PostgreSQL</span></div><div class=\"ds-kpi-cell\"><span class=\"ds-kpi-label\">II. En Ejecución</span><div class=\"ds-kpi-val\">1</div><span class=\"ds-kpi-meta\">Inferencia SSE activa</span></div><div class=\"ds-kpi-cell\"><span class=\"ds-kpi-label\">III. En Cola</span><div class=\"ds-kpi-val\">2</div><span class=\"ds-kpi-meta\">En cola / pausados</span></div><div class=\"ds-kpi-cell ds-kpi-crimson\"><span class=\"ds-kpi-label ds-kpi-label-crimson\">IV. Completados</span><div class=\"ds-kpi-val ds-kpi-val-crimson\">11</div><span class=\"ds-kpi-meta\">Auditables JCR Q1/Q2</span></div></div>",
+      "css": ".ds-kpi-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 20px; background-color: #FAF8F5; padding: 12px; } .ds-kpi-cell { border-top: 2px solid #141413; padding-top: 12px; } .ds-kpi-crimson { border-top-color: #7C1D26; } .ds-kpi-label { display: block; font-family: 'Source Serif 4', Georgia, serif; font-size: 12px; font-weight: 600; color: #615C52; margin-bottom: 4px; } .ds-kpi-label-crimson { color: #7C1D26; } .ds-kpi-val { font-family: 'Source Serif 4', Georgia, serif; font-size: 30px; font-weight: 700; line-height: 1.15; color: #141413; font-variant-numeric: tabular-nums; } .ds-kpi-val-crimson { color: #7C1D26; } .ds-kpi-meta { display: block; margin-top: 4px; font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 500; color: #1E3A5F; }"
+    },
+    {
+      "name": "Monograph Double-Ruled Synthesis Card",
+      "kind": "card",
+      "refersTo": "card-monograph",
+      "description": "Square-cornered tripartite booktabs banner used for Leaderboard Rank #1 synthesis and the 4-Pillar Protocol header.",
+      "html": "<div class=\"ds-monograph-banner\"><div class=\"ds-banner-main\"><div class=\"ds-seal\">&Psi;</div><div><div class=\"ds-banner-title-row\"><h3 class=\"ds-banner-title\">Protocolo de Validación Psicométrica de LLMs</h3><span class=\"ds-banner-badge\">JCR Q1/Q2</span></div><p class=\"ds-banner-desc\">Batería de validación formal en 4 pilares contrastando consistencia interna, acuerdo inter-jueces (&kappa;, &alpha;) y validez convergente.</p></div></div></div>",
+      "css": ".ds-monograph-banner { background-color: #FCFBF9; border-top: 2px solid #141413; border-bottom: 2px solid #141413; border-left: 1px solid #D5CFC2; border-right: 1px solid #D5CFC2; border-radius: 0; padding: 20px 24px; } .ds-banner-main { display: flex; align-items: flex-start; gap: 16px; } .ds-seal { width: 38px; height: 38px; border-radius: 2px; background-color: #7C1D26; color: #FAF8F5; display: flex; align-items: center; justify-content: center; font-family: 'Source Serif 4', Georgia, serif; font-weight: 700; font-size: 18px; flex-shrink: 0; } .ds-banner-title-row { display: flex; align-items: center; gap: 10px; } .ds-banner-title { margin: 0; font-family: 'Source Serif 4', Georgia, serif; font-size: 20px; font-weight: 700; color: #141413; letter-spacing: -0.015em; } .ds-banner-badge { font-family: 'JetBrains Mono', monospace; font-size: 10px; font-weight: 700; padding: 2px 6px; background-color: rgba(124, 29, 38, 0.1); color: #7C1D26; border: 1px solid rgba(124, 29, 38, 0.35); border-radius: 2px; } .ds-banner-desc { margin: 6px 0 0 0; font-family: 'Source Sans 3', sans-serif; font-size: 12px; line-height: 1.5; color: #615C52; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "Monografía Científica JCR & Psicometría",
+    "overview": "LLM Benchmark Studio is designed as an interactive psychometric monograph and experimental apparatus inspired by Nature Methods and Edward Tufte. Rather than treating multi-model evaluation as a dark-SaaS analytics toy with glowing neon cards, the interface reads like an authoritative scientific publication where every aggregate claim—Cohen's κ, Krippendorff's α, ICC(2,1), and 3-level Verbatim Faithfulness—is transparent, traceable to its mathematical formula, and auditable down to the exact row and corpus quote.\n\nHigh information density is achieved through typographic hierarchy and horizontal rule discipline rather than decorative chrome. Surfaces sit flat on warm archival paper in light mode (the default) and nocturnal archival slate in dark mode. Double-ruled mastheads, Roman numeral section indices (I., II., III., IV.), tripartite booktabs tables, and tabular monospace matrices keep complex N × N inter-rater comparisons and row-level forensic audits effortlessly scannable during long research sessions.",
+    "keyCharacteristics": [
+      "Archival warm paper ground paired with deep charcoal ink, scholarly JCR crimson accents, and Prussian academic slate telemetry provenance labels.",
+      "Tripartite booktabs structural geometry (2px top/bottom ink rules, 1px crisp stone hairlines) replacing heavy box shadows, floating cards, and glassmorphic blur.",
+      "Editorial serif headings (Source Serif 4) with Roman numeral indexing (I., II., III., IV., Registro I.) paired with dense functional copy (Source Sans 3) and tabular monospace (JetBrains Mono) for metrics, formulas, and verbatim corpus quotes.",
+      "Full methodological transparency (\"zero black box\") exposing KaTeX equations, variable legends, evaluated field chips, and row-by-row discrepancy inspection."
+    ],
+    "rules": [
+      {
+        "name": "The Crimson Significance Rule",
+        "body": "Scholarly JCR Crimson is reserved exclusively for the primary interactive decision on a surface, active section state, section ledger prefixes (Registro I.), or the final publication-ready KPI column (such as Pillar IV Convergence or Completed Auditables). Never dilute it across decorative backgrounds or non-actionable badges.",
+        "section": "colors"
+      },
+      {
+        "name": "The Archival Paper Default Rule",
+        "body": "Light mode on warm archival cream is the canonical presentation of the workbench; dark mode shifts to nocturnal slate with warm parchment text while preserving identical booktabs rule contrast.",
+        "section": "colors"
+      },
+      {
+        "name": "The Tabular Numerals Mandate",
+        "body": "Every numeric cell, sample size (N = ...), correlation coefficient, percentage, and badge counter must enforce font-variant-numeric: tabular-nums so decimals and columns align vertically across rows.",
+        "section": "typography"
+      },
+      {
+        "name": "The Roman Numeral Indexing Rule",
+        "body": "Top-level navigation modes, KPI figures, experiment registries (Registro I.), and the four validation pillars are indexed with Roman numerals (I., II., III., IV.) in monospace or serif to reinforce the structure of a multi-part scientific monograph.",
+        "section": "typography"
+      },
+      {
+        "name": "The Booktabs Over Box-Shadow Rule",
+        "body": "Major synthesis banners, experiment registries, leaderboards, and KPI figures establish hierarchy with 2px solid top and bottom rules (border-t-2 border-b-2 border-foreground) rather than drop shadows or blurred glass backplates.",
+        "section": "elevation"
+      }
+    ],
+    "dos": [
+      "Do frame major synthesis headers, KPI strips, experiment registries (Registro I.), and comparative tables with 2px solid charcoal top/bottom rules (border-t-2 border-foreground) and 1px stone hairlines (border-border / divide-border).",
+      "Do use Source Serif 4 (font-serif) with Roman numeral prefixes (I., II., III., IV.) for section navigation, pillar headings, registry titles, and top-level KPI figures.",
+      "Do apply JetBrains Mono with tabular-nums (font-mono) to all statistical metrics, Prussian Academic Slate provenance sub-labels, sample sizes (N = ...), model IDs, prompt templates, and verbatim quotes.",
+      "Do keep surfaces flat (shadow-none) and rectangular (rounded-none on synthesis banners, executive abstracts, and experiment ledgers; rounded-sm / 2px on interactive controls).",
+      "Do expose the mathematical formula, evaluated fields, and row-level audit trigger (Eye inspection button) beside every aggregate psychometric metric."
+    ],
+    "donts": [
+      "Don't use glassmorphic blur panels (backdrop-blur-xl), glowing drop shadows (shadow-lg shadow-primary/20), or hover scale transforms (hover:scale-[1.02]) on cards or buttons.",
+      "Don't use large pill or card border radii (rounded-xl, rounded-2xl) on containers, wizard steppers, buttons, or tables.",
+      "Don't introduce off-palette neon accents (such as purple or emerald gradient CTA pills) where Scholarly JCR Crimson (--primary) or Prussian Academic Slate (--accent-foreground) belongs.",
+      "Don't render numerical columns or correlation matrices in proportional sans-serif figures without tabular-nums."
+    ]
+  }
+}

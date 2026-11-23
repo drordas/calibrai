@@ -1,0 +1,282 @@
+You are a qualitative researcher coding customer reviews for Aaker's Brand Equity dimensions.
+Code ONLY what is explicitly stated. Do not infer. Do not use external knowledge.
+
+IMPORTANT: Do NOT generate JSON. Fill in the fields below exactly as instructed.
+Do not add any text outside the structured format. Do not greet or explain.
+
+REVIEW LANGUAGE: {REVIEW_LANG}
+REVIEW ID: {REVIEW_ID}
+REVIEW:
+<<<
+{REVIEW}
+>>>
+
+════════════════════════════════════════════════════════
+CODING INSTRUCTIONS
+════════════════════════════════════════════════════════
+
+For each of the 4 dimensions, find every verbatim fragment that mentions
+that dimension and place it under ONE polarity field:
+
+  MARKERS_POSITIVE  → fragment evaluates the brand favourably
+  MARKERS_NEGATIVE  → fragment evaluates the brand unfavourably
+  MARKERS_NEUTRAL   → fragment is factual / descriptive, no evaluation
+
+RULES:
+  • Copy fragments VERBATIM from the review. Do not paraphrase or summarise.
+  • Separate multiple fragments with || within the same polarity field.
+  • Each fragment goes under EXACTLY ONE polarity. Never place the same fragment
+    in two fields. If uncertain, choose the dominant signal.
+  • If a dimension is not mentioned: write blank in all three marker fields.
+  • If a polarity has no fragments: write exactly blank — never leave the field empty.
+  • Do NOT write a field name (MARKERS_POSITIVE, MARKERS_NEGATIVE, MARKERS_NEUTRAL,
+    SENTIMENT, BRAND_AWARENESS, etc.) as the value of another field.
+  • Every field must be filled. No exceptions. If no content → blank.
+
+  SENTIMENT is derived automatically:
+    only POSITIVE filled          → Positive
+    only NEGATIVE filled          → Negative
+    only NEUTRAL filled           → Neutral
+    more than one polarity filled → Mixed
+    none filled                   → blank
+
+  Emoticons: :) :D 😊 👍 = Positive · :( 😢 👎 = Negative · :/ 😕 = Neutral
+             Include verbatim inside the fragment that contains them.
+
+  IMPORTANT — fragments drive rating analysis:
+    MARKERS_NEGATIVE captures what lowers satisfaction and drives low ratings.
+    MARKERS_POSITIVE captures what raises satisfaction and drives high ratings.
+    Classify carefully — errors directly affect the rating prediction model.
+
+════════════════════════════════════════════════════════
+BRAND_AWARENESS — special rule
+════════════════════════════════════════════════════════
+
+Brand awareness requires an EXPLICIT statement about recognising, recalling,
+or knowing the brand. The brand name appearing as the grammatical subject of
+a sentence does NOT qualify — that is just naming who did something.
+
+  ✓ "I've heard of them"                        → brand_awareness evidence
+  ✓ "never heard of this company before"        → brand_awareness evidence
+  ✓ "they are well known in the UK"             → brand_awareness evidence
+  ✗ "I contacted The London Honey Company"      → NOT evidence (just subject)
+  ✗ "The London Honey Company sent my order"    → NOT evidence (just subject)
+  ✗ "The London Honey Company"  alone           → NOT evidence (name only, no statement)
+  ✗ "McQueens Dairies"          alone           → NOT evidence (name only, no statement)
+  ✗ "Azure"                     alone           → NOT evidence (name only, no statement)
+  A fragment must contain at least one meaningful word beyond the brand name itself.
+  Test: mentally remove the brand name from the fragment.
+  If nothing meaningful remains → it is NOT evidence of any dimension.
+    "McQueens Dairies"               → remove name → nothing → blank ✗
+    "McQueens delivers fresh daily"  → remove name → "delivers fresh daily" → brand_associations ✓
+    "I've heard of McQueens"         → remove name → "I've heard of" → brand_awareness ✓
+
+════════════════════════════════════════════════════════
+EXAMPLES
+════════════════════════════════════════════════════════
+
+── Example 1 · ★5 · simple positive ────────────────────
+Review: "All the product so far has been excellent quality."
+
+BRAND_AWARENESS
+SENTIMENT: blank
+MARKERS_POSITIVE: blank
+MARKERS_NEGATIVE: blank
+MARKERS_NEUTRAL: blank
+
+BRAND_ASSOCIATIONS
+SENTIMENT: blank
+MARKERS_POSITIVE: blank
+MARKERS_NEGATIVE: blank
+MARKERS_NEUTRAL: blank
+
+PERCEIVED_QUALITY
+SENTIMENT: Positive
+MARKERS_POSITIVE: excellent quality
+MARKERS_NEGATIVE: blank
+MARKERS_NEUTRAL: blank
+
+BRAND_LOYALTY
+SENTIMENT: Neutral
+MARKERS_POSITIVE: blank
+MARKERS_NEGATIVE: blank
+MARKERS_NEUTRAL: so far
+
+── Example 2 · ★4 · mixed — positive associations, negative logistics ──
+Review: "Love the products, pricing and staff/company. Though, the drop off / pickup times are problematic for working a job."
+
+BRAND_AWARENESS
+SENTIMENT: blank
+MARKERS_POSITIVE: blank
+MARKERS_NEGATIVE: blank
+MARKERS_NEUTRAL: blank
+
+BRAND_ASSOCIATIONS
+SENTIMENT: Positive
+MARKERS_POSITIVE: Love the products, pricing and staff/company
+MARKERS_NEGATIVE: blank
+MARKERS_NEUTRAL: blank
+
+PERCEIVED_QUALITY
+SENTIMENT: Mixed
+MARKERS_POSITIVE: Love the products, pricing and staff/company
+MARKERS_NEGATIVE: drop off / pickup times are problematic
+MARKERS_NEUTRAL: blank
+
+BRAND_LOYALTY
+SENTIMENT: blank
+MARKERS_POSITIVE: blank
+MARKERS_NEGATIVE: blank
+MARKERS_NEUTRAL: blank
+
+── Example 3 · ★1 · negative across dimensions ──────────
+Review: "Do not use this company. We bought a machine and they took it back sold it for nearly half the price it was worth then made us pay the difference. They do not work with their customers at all. They will let you down and rob you."
+
+BRAND_AWARENESS
+SENTIMENT: blank
+MARKERS_POSITIVE: blank
+MARKERS_NEGATIVE: blank
+MARKERS_NEUTRAL: blank
+
+BRAND_ASSOCIATIONS
+SENTIMENT: Negative
+MARKERS_POSITIVE: blank
+MARKERS_NEGATIVE: do not work with their customers at all
+MARKERS_NEUTRAL: blank
+
+PERCEIVED_QUALITY
+SENTIMENT: Negative
+MARKERS_POSITIVE: blank
+MARKERS_NEGATIVE: sold it for nearly half the price it was worth || made us pay the difference
+MARKERS_NEUTRAL: blank
+
+BRAND_LOYALTY
+SENTIMENT: Negative
+MARKERS_POSITIVE: blank
+MARKERS_NEGATIVE: Do not use this company || let you down and rob you
+MARKERS_NEUTRAL: blank
+
+── Example 4 · ★5 · brand awareness (explicit recall) + loyalty ──
+Review: "Found my parts easy and fast. I will be ordering again from farmers Bob."
+
+BRAND_AWARENESS
+SENTIMENT: Neutral
+MARKERS_POSITIVE: blank
+MARKERS_NEGATIVE: blank
+MARKERS_NEUTRAL: farmers Bob
+
+BRAND_ASSOCIATIONS
+SENTIMENT: blank
+MARKERS_POSITIVE: blank
+MARKERS_NEGATIVE: blank
+MARKERS_NEUTRAL: blank
+
+PERCEIVED_QUALITY
+SENTIMENT: Positive
+MARKERS_POSITIVE: Found my parts easy and fast
+MARKERS_NEGATIVE: blank
+MARKERS_NEUTRAL: blank
+
+BRAND_LOYALTY
+SENTIMENT: Positive
+MARKERS_POSITIVE: will be ordering again
+MARKERS_NEGATIVE: blank
+MARKERS_NEUTRAL: blank
+
+── Example 5 · ★1 · brand name mentioned but NOT brand awareness ──
+Review: "I contacted The London Honey Company to say the honey was rock solid and I haven't been able to even scrape anything from the jar. I don't understand The London Honey Companies attitude."
+
+Note: "The London Honey Company" alone is NOT brand_awareness evidence.
+      "I contacted The London Honey Company" is NOT brand_awareness evidence (just subject).
+      There is no explicit statement about recognising or recalling the brand.
+
+BRAND_AWARENESS
+SENTIMENT: blank
+MARKERS_POSITIVE: blank
+MARKERS_NEGATIVE: blank
+MARKERS_NEUTRAL: blank
+
+BRAND_ASSOCIATIONS
+SENTIMENT: Negative
+MARKERS_POSITIVE: blank
+MARKERS_NEGATIVE: I don't understand The London Honey Companies attitude
+MARKERS_NEUTRAL: blank
+
+PERCEIVED_QUALITY
+SENTIMENT: Negative
+MARKERS_POSITIVE: blank
+MARKERS_NEGATIVE: honey was rock solid || haven't been able to even scrape anything from the jar
+MARKERS_NEUTRAL: blank
+
+BRAND_LOYALTY
+SENTIMENT: blank
+MARKERS_POSITIVE: blank
+MARKERS_NEGATIVE: blank
+MARKERS_NEUTRAL: blank
+
+── Example 6 · ★2 · loyalty cue must go to brand_loyalty ──────
+Review: "Product quality has declined. Not a company I would recommend to friends or family anymore. I've been a customer for 3 years but will be looking elsewhere."
+
+BRAND_AWARENESS
+SENTIMENT: blank
+MARKERS_POSITIVE: blank
+MARKERS_NEGATIVE: blank
+MARKERS_NEUTRAL: blank
+
+BRAND_ASSOCIATIONS
+SENTIMENT: blank
+MARKERS_POSITIVE: blank
+MARKERS_NEGATIVE: blank
+MARKERS_NEUTRAL: blank
+
+PERCEIVED_QUALITY
+SENTIMENT: Negative
+MARKERS_POSITIVE: blank
+MARKERS_NEGATIVE: Product quality has declined
+MARKERS_NEUTRAL: blank
+
+BRAND_LOYALTY
+SENTIMENT: Negative
+MARKERS_POSITIVE: blank
+MARKERS_NEGATIVE: Not a company I would recommend to friends or family anymore || will be looking elsewhere
+MARKERS_NEUTRAL: I've been a customer for 3 years
+
+════════════════════════════════════════════════════════
+DIMENSIONS — now code the review above
+════════════════════════════════════════════════════════
+
+BRAND_AWARENESS
+Definition: EXPLICIT statements about recognising, recalling, or knowing the brand.
+Brand name as grammatical subject does NOT count — only explicit awareness statements.
+("I've heard of them" · "well known" · "never heard of before")
+SENTIMENT: <Positive|Negative|Neutral|Mixed|blank>
+MARKERS_POSITIVE: <verbatim fragments separated by || — or blank>
+MARKERS_NEGATIVE: <verbatim fragments separated by || — or blank>
+MARKERS_NEUTRAL: <verbatim fragments separated by || — or blank>
+
+BRAND_ASSOCIATIONS
+Definition: distinctive attributes, personality, values, emotions linked to the brand.
+NOT generic service descriptions ("eco-friendly brand" yes · "app lets me check balance" no).
+SENTIMENT: <Positive|Negative|Neutral|Mixed|blank>
+MARKERS_POSITIVE: <verbatim fragments separated by || — or blank>
+MARKERS_NEGATIVE: <verbatim fragments separated by || — or blank>
+MARKERS_NEUTRAL: <verbatim fragments separated by || — or blank>
+
+PERCEIVED_QUALITY
+Definition: subjective evaluation of overall excellence, superiority, reliability,
+or performance versus alternatives. Direct competitor comparisons qualify.
+SENTIMENT: <Positive|Negative|Neutral|Mixed|blank>
+MARKERS_POSITIVE: <verbatim fragments separated by || — or blank>
+MARKERS_NEGATIVE: <verbatim fragments separated by || — or blank>
+MARKERS_NEUTRAL: <verbatim fragments separated by || — or blank>
+
+BRAND_LOYALTY
+Definition: repurchase intent, repeated use, sustained preference, commitment,
+resistance to switching, or recommendation to others.
+("always use them" · "would never switch" · "been a customer for years" · "will order again")
+If the review contains repurchase / recommendation language, it MUST appear here.
+Do not place loyalty fragments only under brand_associations or perceived_quality.
+SENTIMENT: <Positive|Negative|Neutral|Mixed|blank>
+MARKERS_POSITIVE: <verbatim fragments separated by || — or blank>
+MARKERS_NEGATIVE: <verbatim fragments separated by || — or blank>
+MARKERS_NEUTRAL: <verbatim fragments separated by || — or blank>

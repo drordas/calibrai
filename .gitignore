@@ -1,0 +1,30 @@
+# Environment & secrets
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+backend/venv/
+
+# Node / Frontend
+node_modules/
+frontend/dist/
+*.tsbuildinfo
+
+# Local data & uploads
+/backend/uploads/
+/uploads/
+/dataset/
+/data/
+*.db
+*.sqlite
+*.sqlite3
+
+# OS / Editor
+.DS_Store
+Thumbs.db

@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" fill="none">
+  <style>
+    .bg { fill: #7C1D26; }
+    .ring-outer { stroke: #FAF8F5; stroke-opacity: 0.35; }
+    .arc-c { stroke: #FAF8F5; }
+    .tick { stroke: #FAF8F5; stroke-opacity: 0.78; }
+    .needle { stroke: #FAF8F5; }
+    .dot-fill { fill: #FAF8F5; }
+    .dot-core { fill: #7C1D26; }
+    .accent { fill: #E8C589; }
+    @media (prefers-color-scheme: dark) {
+      .bg { fill: #8F242E; }
+      .dot-core { fill: #8F242E; }
+    }
+  </style>
+
+  <!-- Monograph Crimson Seal -->
+  <rect class="bg" x="2" y="2" width="60" height="60" rx="10" />
+
+  <!-- Subtle Outer Calibration Ring -->
+  <circle class="ring-outer" cx="32" cy="32" r="23" stroke-width="1.2" stroke-dasharray="2.5 3.5" />
+
+  <!-- Precision Calibrated "C" Arc -->
+  <path
+    class="arc-c"
+    d="M44.5 20.5A17 17 0 1 0 44.5 43.5"
+    stroke-width="4.5"
+    stroke-linecap="round"
+  />
+
+  <!-- Vernier Calibration Ticks -->
+  <line class="tick" x1="32" y1="8.5" x2="32" y2="12.5" stroke-width="2" stroke-linecap="round" />
+  <line class="tick" x1="32" y1="51.5" x2="32" y2="55.5" stroke-width="2" stroke-linecap="round" />
+  <line class="tick" x1="8.5" y1="32" x2="12.5" y2="32" stroke-width="2" stroke-linecap="round" />
+  <line class="tick" x1="51.5" y1="32" x2="55.5" y2="32" stroke-width="2" stroke-linecap="round" />
+
+  <!-- Dual-Signal Alignment Reticle & Calibration Needle -->
+  <line class="needle" x1="25" y1="32" x2="45" y2="32" stroke-width="2.2" stroke-linecap="round" />
+  <circle class="dot-fill" cx="32" cy="32" r="4.5" />
+  <circle class="dot-core" cx="32" cy="32" r="1.8" />
+
+  <!-- Calibrated Reference Node (Gold / Ivory) -->
+  <circle class="accent" cx="46.5" cy="32" r="3" />
+</svg>
