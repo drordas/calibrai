@@ -901,18 +901,6 @@ export const ExperimentDashboard: React.FC<ExperimentDashboardProps> = ({
             );
           })}
           </div>
-
-          {/* Persistent Crear Experimento button at the bottom of the experiments list */}
-          <div className="flex justify-center pt-2 pb-2">
-            <Button
-              type="button"
-              onClick={onNewExperiment}
-              className="h-8 px-4 text-xs font-medium bg-primary text-primary-foreground hover:bg-primary/90 gap-2 rounded-md cursor-pointer transition-all duration-150"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              <span>{t("dashboard.createExperiment")}</span>
-            </Button>
-          </div>
         </div>
       )}
 
