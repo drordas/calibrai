@@ -927,7 +927,9 @@
     "uploadNamePlaceholder": "Ej. Reseñas Q4",
     "uploadFileLabel": "Archivo",
     "uploading": "Subiendo...",
-    "uploadSuccess": "Dataset cargado correctamente."
+    "uploadSuccess": "Dataset cargado correctamente.",
+    "renameTooltip": "Editar nombre",
+    "copyTooltip": "Copia independiente"
   },
   "notifications": {
     "title": "Notificaciones",

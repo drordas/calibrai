@@ -7,6 +7,7 @@ import {
   fetchDatasetShares,
   fetchPaginatedRows,
   fetchShareableUsers,
+  renameDataset,
   respondToDatasetShare,
   revokeDatasetShare,
   shareDatasetWithUser,
@@ -49,10 +50,12 @@ import {
   AlertCircle,
   Check,
   CheckCircle2,
+  CopyPlus,
   Database,
   Download,
   Eye,
   Loader2,
+  Pencil,
   Plus,
   Share2,
   ShieldCheck,
@@ -114,6 +117,11 @@ export const DashboardDatasetsModal: React.FC<DashboardDatasetsModalProps> = ({
 
   // Export state
   const [exportingId, setExportingId] = useState<string | null>(null);
+
+  // Inline rename state
+  const [editingDatasetId, setEditingDatasetId] = useState<string | null>(null);
+  const [editingName, setEditingName] = useState("");
+  const [renaming, setRenaming] = useState(false);
 
   const loadDatasets = useCallback(async () => {
     setLoading(true);
@@ -267,6 +275,22 @@ export const DashboardDatasetsModal: React.FC<DashboardDatasetsModalProps> = ({
     }
   };
 
+  const handleSaveRename = async (datasetId: string) => {
+    const clean = editingName.trim();
+    if (!clean) return;
+    setRenaming(true);
+    setError(null);
+    try {
+      await renameDataset(datasetId, clean);
+      setEditingDatasetId(null);
+      await loadDatasets();
+    } catch (err: any) {
+      setError(err?.message || t("common.error"));
+    } finally {
+      setRenaming(false);
+    }
+  };
+
   const getModeLabel = (mode?: string | null) => {
     if (mode === "edit") return t("dashboardDatasets.modeShortEdit");
     if (mode === "copy") return t("dashboardDatasets.modeShortCopy");
@@ -321,37 +345,86 @@ export const DashboardDatasetsModal: React.FC<DashboardDatasetsModalProps> = ({
             items.map((ds) => {
               const isPendingShare = ds.is_shared && ds.share_status === "pending";
               const isSharedAny = Boolean(ds.is_shared || ds.is_shared_by_owner);
+              const isCopy = ds.share_mode === "copy";
+              const isEditing = editingDatasetId === ds.id;
               return (
-                <TableRow key={ds.id} className="border-b border-border/60">
+                <TableRow key={ds.id} className="border-b border-border/60 group">
                   <TableCell className="py-2.5">
-                    <div className="flex items-center gap-1.5 flex-wrap">
-                      {isSharedAny && (
-                        <span
-                          title={
-                            ds.shared_by
-                              ? t("dashboardDatasets.sharedBy", { username: ds.shared_by })
-                              : t("dashboardDatasets.sharedBadge")
-                          }
-                          className="inline-flex items-center text-primary shrink-0"
+                    {isEditing ? (
+                      <div className="flex items-center gap-1">
+                        <Input
+                          type="text"
+                          value={editingName}
+                          onChange={(e) => setEditingName(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") {
+                              e.preventDefault();
+                              handleSaveRename(ds.id);
+                            } else if (e.key === "Escape") {
+                              setEditingDatasetId(null);
+                            }
+                          }}
+                          autoFocus
+                          className="h-7 text-xs bg-background border-border rounded-sm"
+                        />
+                        <Button
+                          type="button"
+                          size="icon"
+                          disabled={renaming || !editingName.trim()}
+                          onClick={() => handleSaveRename(ds.id)}
+                          className="h-7 w-7 rounded-sm bg-primary text-primary-foreground hover:bg-primary/90 shrink-0"
                         >
-                          <Users className="w-3.5 h-3.5" />
-                        </span>
-                      )}
-                      <span className="font-medium text-xs text-foreground truncate">{ds.name}</span>
-                      {ds.is_shared && (
-                        <Badge
-                          variant="outline"
-                          className="text-[10px] font-mono rounded-sm border-primary/40 text-primary bg-primary/5"
-                          title={ds.shared_by ? t("dashboardDatasets.sharedBy", { username: ds.shared_by }) : undefined}
+                          {renaming ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />}
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          disabled={renaming}
+                          onClick={() => setEditingDatasetId(null)}
+                          className="h-7 w-7 rounded-sm text-muted-foreground hover:text-foreground shrink-0"
                         >
-                          {t("dashboardDatasets.sharedBadge")}
-                          {ds.share_mode ? ` · ${getModeLabel(ds.share_mode)}` : ""}
-                        </Badge>
-                      )}
-                    </div>
-                    <div className="text-[11px] font-mono text-muted-foreground truncate">
-                      {ds.filename}
-                    </div>
+                          <X className="w-3 h-3" />
+                        </Button>
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        {isSharedAny && (
+                          <span
+                            title={
+                              ds.shared_by
+                                ? t("dashboardDatasets.sharedBy", { username: ds.shared_by })
+                                : t("dashboardDatasets.sharedBadge")
+                            }
+                            className="inline-flex items-center text-primary shrink-0"
+                          >
+                            <Users className="w-3.5 h-3.5" />
+                          </span>
+                        )}
+                        {isCopy && (
+                          <span
+                            title={t("dashboardDatasets.copyTooltip")}
+                            className="inline-flex items-center text-primary shrink-0"
+                          >
+                            <CopyPlus className="w-3.5 h-3.5" />
+                          </span>
+                        )}
+                        <span className="font-medium text-xs text-foreground truncate">{ds.name}</span>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => {
+                            setEditingDatasetId(ds.id);
+                            setEditingName(ds.name);
+                          }}
+                          className="h-6 w-6 rounded-sm text-muted-foreground opacity-60 group-hover:opacity-100 hover:text-foreground hover:bg-muted shrink-0"
+                          title={t("dashboardDatasets.renameTooltip")}
+                        >
+                          <Pencil className="w-3 h-3" />
+                        </Button>
+                      </div>
+                    )}
                   </TableCell>
                   <TableCell className="py-2.5">
                     <Badge variant="outline" className="text-[10px] font-mono uppercase rounded-sm border-border">

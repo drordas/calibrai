@@ -927,7 +927,9 @@
     "uploadNamePlaceholder": "e.g. Q4 Reviews",
     "uploadFileLabel": "File",
     "uploading": "Uploading...",
-    "uploadSuccess": "Dataset uploaded successfully."
+    "uploadSuccess": "Dataset uploaded successfully.",
+    "renameTooltip": "Edit name",
+    "copyTooltip": "Independent copy"
   },
   "notifications": {
     "title": "Notifications",

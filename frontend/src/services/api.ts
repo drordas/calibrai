@@ -179,6 +179,19 @@ export async function fetchDatasets(): Promise<DatasetSummary[]> {
   return res.json();
 }
 
+export async function renameDataset(datasetId: string, name: string): Promise<DatasetSummary> {
+  const res = await fetch(`${API_BASE}/datasets/${datasetId}`, {
+    method: "PATCH",
+    headers: getAuthHeaders(),
+    body: JSON.stringify({ name }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: "Error renombrando dataset" }));
+    throw new Error(err.detail || "Error renombrando dataset");
+  }
+  return res.json();
+}
+
 export async function fetchShareableUsers(): Promise<Array<{ id: number; username: string; full_name?: string | null }>> {
   const res = await fetch(`${API_BASE}/datasets/share/users`, {
     headers: getAuthHeaders(),

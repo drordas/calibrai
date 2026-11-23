@@ -11,6 +11,7 @@ from backend.app.core.dataset_engine import dataset_engine
 from backend.app.db.models import DatasetRecord, DatasetShare, Experiment, User
 from backend.app.db.session import get_db
 from backend.app.schemas.dataset import (
+    DatasetRenameRequest,
     DatasetShareEntryOut,
     DatasetShareRequest,
     DatasetShareRespondRequest,
@@ -100,6 +101,8 @@ def list_datasets(
                 overrides["is_ground_truth"] = rec.is_ground_truth
 
         if share:
+            if share.custom_name:
+                overrides["name"] = share.custom_name
             overrides.update(
                 {
                     "is_shared": True,
@@ -314,6 +317,52 @@ def get_dataset(dataset_id: str):
     if not ds:
         raise HTTPException(status_code=404, detail="Dataset not found")
     return ds
+
+
+@router.patch("/{dataset_id}", response_model=DatasetSummary)
+def rename_dataset(
+    dataset_id: str,
+    req: DatasetRenameRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    ds = dataset_engine.get_dataset(dataset_id)
+    if not ds:
+        raise HTTPException(status_code=404, detail="Dataset not found")
+
+    clean_name = req.name.strip()
+    if not clean_name:
+        raise HTTPException(status_code=400, detail="El nombre del dataset no puede estar vacío")
+
+    share = (
+        db.query(DatasetShare)
+        .filter(
+            DatasetShare.dataset_id == dataset_id,
+            DatasetShare.target_user_id == current_user.id,
+        )
+        .first()
+    )
+    if share and share.share_mode != "copy":
+        share.custom_name = clean_name
+        db.commit()
+        return ds.model_copy(update={"name": clean_name})
+
+    rec = db.query(DatasetRecord).filter(DatasetRecord.dataset_id == dataset_id).first()
+    if rec:
+        rec.display_name = clean_name
+    else:
+        db.add(
+            DatasetRecord(
+                dataset_id=dataset_id,
+                owner_user_id=current_user.id,
+                display_name=clean_name,
+                is_ground_truth=ds.is_ground_truth,
+            )
+        )
+    if dataset_id in dataset_engine.datasets and dataset_engine.datasets[dataset_id].get("summary"):
+        dataset_engine.datasets[dataset_id]["summary"].name = clean_name
+    db.commit()
+    return ds.model_copy(update={"name": clean_name})
 
 @router.delete("/{dataset_id}")
 def delete_dataset(

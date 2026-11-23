@@ -52,6 +52,10 @@ class DatasetShareEntryOut(BaseModel):
     share_mode: str
     status: str
 
+
+class DatasetRenameRequest(BaseModel):
+    name: str = Field(..., min_length=1, max_length=255)
+
 class PaginatedRowsResponse(BaseModel):
     dataset_id: str
     total_rows: int
