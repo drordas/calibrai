@@ -1,5 +1,5 @@
-from typing import List
-from fastapi import APIRouter, Depends, HTTPException
+from typing import List, Optional
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from backend.app.db.session import get_db
@@ -18,12 +18,14 @@ router = APIRouter(prefix="/api/prompts", tags=["prompts"])
 
 class SavePromptRequest(BaseModel):
     name: str
+    dataset_id: str
     system_prompt: str = ""
     model_prompt: str
 
 
 class SavedPromptOut(BaseModel):
     id: int
+    dataset_id: Optional[str] = None
     name: str
     system_prompt: str
     model_prompt: str
@@ -47,18 +49,18 @@ def validate_prompt_template(req: PromptValidationRequest):
 
 @router.get("/saved", response_model=List[SavedPromptOut])
 def list_saved_prompts(
+    dataset_id: Optional[str] = Query(None),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    rows = (
-        db.query(SavedPrompt)
-        .filter(SavedPrompt.user_id == current_user.id)
-        .order_by(SavedPrompt.updated_at.desc(), SavedPrompt.id.desc())
-        .all()
-    )
+    query = db.query(SavedPrompt).filter(SavedPrompt.user_id == current_user.id)
+    if dataset_id:
+        query = query.filter(SavedPrompt.dataset_id == dataset_id)
+    rows = query.order_by(SavedPrompt.updated_at.desc(), SavedPrompt.id.desc()).all()
     return [
         SavedPromptOut(
             id=r.id,
+            dataset_id=r.dataset_id,
             name=r.name,
             system_prompt=r.system_prompt or "",
             model_prompt=r.model_prompt,
@@ -76,13 +78,17 @@ def create_saved_prompt(
     db: Session = Depends(get_db),
 ):
     clean_name = req.name.strip()
+    clean_dataset_id = (req.dataset_id or "").strip()
     if not clean_name:
         raise HTTPException(status_code=400, detail="El nombre del prompt es obligatorio.")
+    if not clean_dataset_id:
+        raise HTTPException(status_code=400, detail="El dataset asociado es obligatorio.")
     if not req.model_prompt or not req.model_prompt.strip():
         raise HTTPException(status_code=400, detail="El prompt del modelo no puede estar vacío.")
 
     row = SavedPrompt(
         user_id=current_user.id,
+        dataset_id=clean_dataset_id,
         name=clean_name,
         system_prompt=req.system_prompt or "",
         model_prompt=req.model_prompt,
@@ -92,6 +98,7 @@ def create_saved_prompt(
     db.refresh(row)
     return SavedPromptOut(
         id=row.id,
+        dataset_id=row.dataset_id,
         name=row.name,
         system_prompt=row.system_prompt or "",
         model_prompt=row.model_prompt,

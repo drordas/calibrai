@@ -1286,6 +1286,7 @@ export const PromptEditor: React.FC<PromptEditorProps> = ({
     try {
       await saveUserPrompt({
         name: cleanName,
+        dataset_id: dataset.id,
         system_prompt: systemPrompt || "",
         model_prompt: promptRealText,
       });
@@ -1303,7 +1304,7 @@ export const PromptEditor: React.FC<PromptEditorProps> = ({
     setShowLoadPromptModal(true);
     setLoadingSavedPrompts(true);
     try {
-      const items = await fetchSavedPrompts();
+      const items = await fetchSavedPrompts(dataset.id);
       setSavedPrompts(items);
     } catch (err: any) {
       setLoadPromptError(err.message || "Error cargando prompts guardados");

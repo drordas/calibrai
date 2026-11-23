@@ -164,6 +164,7 @@ class SavedPrompt(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    dataset_id = Column(String(100), nullable=True, index=True)
     name = Column(String(255), nullable=False)
     system_prompt = Column(Text, default="", nullable=False)
     model_prompt = Column(Text, nullable=False)

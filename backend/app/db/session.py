@@ -49,6 +49,7 @@ def init_db():
             conn.execute(text("ALTER TABLE dataset_shares ADD COLUMN IF NOT EXISTS notification_dismissed BOOLEAN DEFAULT FALSE"))
             conn.execute(text("ALTER TABLE experiment_shares ADD COLUMN IF NOT EXISTS notification_read BOOLEAN DEFAULT FALSE"))
             conn.execute(text("ALTER TABLE experiment_shares ADD COLUMN IF NOT EXISTS notification_dismissed BOOLEAN DEFAULT FALSE"))
+            conn.execute(text("ALTER TABLE saved_prompts ADD COLUMN IF NOT EXISTS dataset_id VARCHAR(100)"))
             conn.commit()
     except Exception as e:
         print(f"[init_db] Note on schema check: {e}")

@@ -374,6 +374,7 @@ export async function exportDataset(datasetId: string, format: "csv" | "json", f
 
 export interface SavedPromptItem {
   id: number;
+  dataset_id?: string | null;
   name: string;
   system_prompt: string;
   model_prompt: string;
@@ -381,8 +382,8 @@ export interface SavedPromptItem {
   updated_at: string;
 }
 
-export async function fetchSavedPrompts(): Promise<SavedPromptItem[]> {
-  const res = await fetch(`${API_BASE}/prompts/saved`, {
+export async function fetchSavedPrompts(datasetId: string): Promise<SavedPromptItem[]> {
+  const res = await fetch(`${API_BASE}/prompts/saved?dataset_id=${encodeURIComponent(datasetId)}`, {
     headers: getAuthHeaders(),
   });
   if (!res.ok) throw new Error("Error cargando prompts guardados");
@@ -391,6 +392,7 @@ export async function fetchSavedPrompts(): Promise<SavedPromptItem[]> {
 
 export async function saveUserPrompt(payload: {
   name: string;
+  dataset_id: string;
   system_prompt: string;
   model_prompt: string;
 }): Promise<SavedPromptItem> {
