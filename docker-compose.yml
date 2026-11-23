@@ -62,8 +62,4 @@ services:
 
 volumes:
   postgres_data:
-    external: true
-    name: llm_benchmarker_postgres_data
   backend_uploads:
-    external: true
-    name: llm_benchmarker_backend_uploads
