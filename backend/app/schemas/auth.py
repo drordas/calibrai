@@ -18,6 +18,7 @@ class UserOut(BaseModel):
     full_name: Optional[str] = None
     email: Optional[str] = None
     is_active: bool
+    allow_dataset_sharing: bool = True
 
 class UserConfigOut(BaseModel):
     ollama_url: str
@@ -39,6 +40,7 @@ class UserProfileUpdate(BaseModel):
     email: Optional[str] = None
     full_name: Optional[str] = None
     language: Optional[str] = None
+    allow_dataset_sharing: Optional[bool] = None
     current_password: Optional[str] = None
     new_password: Optional[str] = None
 

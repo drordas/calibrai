@@ -101,7 +101,11 @@ def list_shareable_users(
 ):
     users = (
         db.query(User)
-        .filter(User.is_active == True, User.id != current_user.id)
+        .filter(
+            User.is_active == True,
+            User.id != current_user.id,
+            User.allow_dataset_sharing == True,
+        )
         .order_by(User.username.asc())
         .all()
     )
@@ -178,10 +182,21 @@ def share_dataset(
     if req.target_user_id == current_user.id:
         raise HTTPException(status_code=400, detail="No puedes compartir un dataset contigo mismo")
 
+    if current_user.allow_dataset_sharing is False:
+        raise HTTPException(
+            status_code=403,
+            detail="Tienes deshabilitada la opción de compartir datasets en tu perfil.",
+        )
+
     mode = req.share_mode if req.share_mode in ("view", "edit", "copy") else "view"
     target_user = db.query(User).filter(User.id == req.target_user_id, User.is_active == True).first()
     if not target_user:
         raise HTTPException(status_code=404, detail="Usuario destino no encontrado")
+    if target_user.allow_dataset_sharing is False:
+        raise HTTPException(
+            status_code=400,
+            detail="Este usuario no tiene habilitada la recepción de datasets compartidos.",
+        )
 
     target_dataset_id = dataset_id
     if mode == "copy":

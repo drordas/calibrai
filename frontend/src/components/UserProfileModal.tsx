@@ -20,6 +20,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
 import {
   AlertCircle,
   CheckCircle2,
@@ -29,6 +30,7 @@ import {
   Loader2,
   Lock,
   Mail,
+  Share2,
   User as UserIcon,
 } from "lucide-react";
 
@@ -53,6 +55,7 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
   const [fullName, setFullName] = useState(user.full_name || "");
   const [email, setEmail] = useState(user.email || "");
   const [defaultLanguage, setDefaultLanguage] = useState<Language>(language);
+  const [allowDatasetSharing, setAllowDatasetSharing] = useState<boolean>(user.allow_dataset_sharing ?? true);
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -70,6 +73,7 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
       setFullName(user.full_name || "");
       setEmail(user.email || "");
       setDefaultLanguage(language);
+      setAllowDatasetSharing(user.allow_dataset_sharing ?? true);
       setCurrentPassword("");
       setNewPassword("");
       setConfirmPassword("");
@@ -114,6 +118,7 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
         full_name: fullName.trim(),
         email: trimmedEmail,
         language: defaultLanguage,
+        allow_dataset_sharing: allowDatasetSharing,
         ...(newPassword ? { current_password: currentPassword, new_password: newPassword } : {}),
       });
       onProfileUpdated(result.user, result.config);
@@ -203,6 +208,26 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
                 ))}
               </SelectContent>
             </Select>
+          </div>
+
+          <div className="flex items-center justify-between gap-3 p-3 rounded-sm border border-border bg-background">
+            <div className="space-y-0.5">
+              <Label
+                htmlFor="profile-dataset-sharing"
+                className="text-xs font-semibold text-foreground flex items-center gap-1.5 cursor-pointer"
+              >
+                <Share2 className="w-3.5 h-3.5 text-primary shrink-0" />
+                <span>{t("profile.allowDatasetSharingLabel")}</span>
+              </Label>
+              <p className="text-[11px] text-muted-foreground leading-snug">
+                {t("profile.allowDatasetSharingHint")}
+              </p>
+            </div>
+            <Switch
+              id="profile-dataset-sharing"
+              checked={allowDatasetSharing}
+              onCheckedChange={setAllowDatasetSharing}
+            />
           </div>
 
           <div className="border-t border-border pt-3 space-y-3">

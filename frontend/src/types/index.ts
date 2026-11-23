@@ -402,6 +402,7 @@ export interface User {
   full_name?: string;
   email?: string | null;
   is_active: boolean;
+  allow_dataset_sharing?: boolean;
 }
 
 export interface UserConfig {

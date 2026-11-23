@@ -865,7 +865,9 @@
     "passwordTooShort": "La nueva contraseña debe tener al menos 4 caracteres.",
     "invalidEmail": "Introduce una dirección de correo electrónico válida.",
     "savedSuccess": "Perfil actualizado correctamente.",
-    "saving": "Guardando..."
+    "saving": "Guardando...",
+    "allowDatasetSharingLabel": "Permitir recibir y compartir datasets",
+    "allowDatasetSharingHint": "Si está deshabilitado, no aparecerás en la lista de otros usuarios para compartir datasets."
   },
   "dashboardDatasets": {
     "newExperimentOption": "Nuevo Experimento",

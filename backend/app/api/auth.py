@@ -39,6 +39,7 @@ def _build_user_out(user: User) -> UserOut:
         full_name=user.full_name,
         email=user.email,
         is_active=user.is_active,
+        allow_dataset_sharing=True if user.allow_dataset_sharing is None else bool(user.allow_dataset_sharing),
     )
 
 
@@ -216,6 +217,9 @@ def update_user_profile(
 
     if update.full_name is not None:
         user.full_name = update.full_name.strip() or None
+
+    if update.allow_dataset_sharing is not None:
+        user.allow_dataset_sharing = bool(update.allow_dataset_sharing)
 
     if update.new_password is not None and update.new_password != "":
         if not update.current_password or not verify_password(update.current_password, user.hashed_password):

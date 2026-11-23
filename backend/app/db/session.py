@@ -33,6 +33,7 @@ def init_db():
     try:
         with engine.connect() as conn:
             conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS email VARCHAR(255)"))
+            conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS allow_dataset_sharing BOOLEAN DEFAULT TRUE"))
             conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS ix_users_email ON users (email) WHERE email IS NOT NULL"))
             conn.execute(text("ALTER TABLE user_configurations ADD COLUMN IF NOT EXISTS language VARCHAR(10) DEFAULT 'es'"))
             conn.execute(text("ALTER TABLE experiments ADD COLUMN IF NOT EXISTS ground_truth_dataset_id VARCHAR(100)"))

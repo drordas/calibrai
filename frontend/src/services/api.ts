@@ -107,6 +107,7 @@ export async function updateUserProfile(payload: {
   email?: string;
   full_name?: string;
   language?: string;
+  allow_dataset_sharing?: boolean;
   current_password?: string;
   new_password?: string;
 }): Promise<{ user: User; config: UserConfig }> {
