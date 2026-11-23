@@ -33,6 +33,7 @@ class DatasetShare(Base):
     share_mode = Column(String(20), default="view", nullable=False)  # "view" | "edit" | "copy"
     status = Column(String(20), default="pending", nullable=False)  # "pending" | "accepted"
     notification_read = Column(Boolean, default=False)
+    notification_dismissed = Column(Boolean, default=False)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
 
 
@@ -46,6 +47,7 @@ class ExperimentShare(Base):
     share_mode = Column(String(20), default="view", nullable=False)  # "view" | "edit"
     status = Column(String(20), default="pending", nullable=False)  # "pending" | "accepted"
     notification_read = Column(Boolean, default=False)
+    notification_dismissed = Column(Boolean, default=False)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
 
 class UserConfiguration(Base):
@@ -138,5 +140,6 @@ class Experiment(Base):
     completed_at = Column(DateTime, nullable=True)
     updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
     notification_read = Column(Boolean, default=False)
+    notification_dismissed = Column(Boolean, default=False)
 
     user = relationship("User", back_populates="experiments")

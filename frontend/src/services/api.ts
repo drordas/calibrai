@@ -603,6 +603,7 @@ export async function fetchNotifications(): Promise<{
     share_id?: number;
     share_mode?: string;
     from_username?: string;
+    is_read?: boolean;
     created_at?: string | null;
   }>;
   unread_count: number;
@@ -631,6 +632,20 @@ export async function markShareNotificationRead(shareType: "dataset" | "experime
 export async function markAllNotificationsRead(): Promise<void> {
   await fetch(`${API_BASE}/auth/notifications/read-all`, {
     method: "POST",
+    headers: getAuthHeaders(),
+  });
+}
+
+export async function dismissExperimentNotification(experimentId: string): Promise<void> {
+  await fetch(`${API_BASE}/auth/notifications/experiments/${experimentId}`, {
+    method: "DELETE",
+    headers: getAuthHeaders(),
+  });
+}
+
+export async function dismissShareNotification(shareType: "dataset" | "experiment", shareId: number): Promise<void> {
+  await fetch(`${API_BASE}/auth/notifications/shares/${shareType}/${shareId}`, {
+    method: "DELETE",
     headers: getAuthHeaders(),
   });
 }

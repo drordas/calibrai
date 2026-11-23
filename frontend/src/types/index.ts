@@ -50,6 +50,7 @@ export interface AppNotification {
   share_id?: number;
   share_mode?: string;
   from_username?: string;
+  is_read?: boolean;
   created_at?: string | null;
 }
 

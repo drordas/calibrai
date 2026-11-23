@@ -27,6 +27,8 @@ import {
   markExperimentNotificationRead,
   markShareNotificationRead,
   markAllNotificationsRead,
+  dismissExperimentNotification,
+  dismissShareNotification,
 } from "./services/api";
 import { LoginPage } from "./components/LoginPage";
 import { DatasetViewer } from "./components/DatasetViewer";
@@ -746,133 +748,189 @@ export function App() {
             </Button>
 
             {/* Notifications Bell */}
-            <DropdownMenu onOpenChange={(open) => {
-              if (open && currentUser) {
-                fetchNotifications().then((res) => setNotifications(res.notifications || [])).catch(() => {});
-              }
-            }}>
-              <DropdownMenuTrigger asChild>
-                <Button
-                  variant="outline"
-                  size="icon"
-                  className="relative h-8 w-8 rounded-sm border-border bg-card text-foreground hover:bg-muted transition-colors"
-                  title={t("notifications.title")}
-                >
-                  <Bell className="w-3.5 h-3.5" />
-                  {notifications.length > 0 && (
-                    <span className="absolute -top-1 -right-1 min-w-[16px] h-4 px-1 rounded-full bg-primary text-primary-foreground text-[9px] font-mono font-bold flex items-center justify-center tabular-nums">
-                      {notifications.length}
-                    </span>
-                  )}
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-80 bg-card border border-border rounded-sm shadow-none p-1">
-                <DropdownMenuLabel className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground px-2 py-1.5 flex items-center justify-between gap-2">
-                  <span>{t("notifications.title")} ({notifications.length})</span>
-                  {notifications.length > 0 && (
-                    <button
-                      type="button"
-                      onClick={async () => {
-                        try {
-                          await markAllNotificationsRead();
-                          setNotifications([]);
-                        } catch {}
-                      }}
-                      className="inline-flex items-center gap-1 text-[10px] font-sans normal-case font-medium text-primary hover:underline cursor-pointer"
+            {(() => {
+              const unreadCount = notifications.filter((n) => !n.is_read).length;
+              return (
+                <DropdownMenu onOpenChange={(open) => {
+                  if (open && currentUser) {
+                    fetchNotifications().then((res) => setNotifications(res.notifications || [])).catch(() => {});
+                  }
+                }}>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      className="relative h-8 w-8 rounded-sm border-border bg-card text-foreground hover:bg-muted transition-colors"
+                      title={t("notifications.title")}
                     >
-                      <CheckCheck className="w-3 h-3" />
-                      <span>{t("notifications.markAllRead")}</span>
-                    </button>
-                  )}
-                </DropdownMenuLabel>
-                <DropdownMenuSeparator className="bg-border my-1" />
-                {notifications.length === 0 ? (
-                  <div className="px-3 py-4 text-center text-xs text-muted-foreground">
-                    {t("notifications.empty")}
-                  </div>
-                ) : (
-                  <div className="max-h-72 overflow-y-auto space-y-1">
-                    {notifications.map((n) => (
-                      <div
-                        key={n.id}
-                        className="flex items-center justify-between gap-2 px-2 py-1.5 rounded-sm hover:bg-muted/60 transition-colors"
-                      >
+                      <Bell className="w-3.5 h-3.5" />
+                      {unreadCount > 0 && (
+                        <span className="absolute -top-1 -right-1 min-w-[16px] h-4 px-1 rounded-full bg-primary text-primary-foreground text-[9px] font-mono font-bold flex items-center justify-center tabular-nums">
+                          {unreadCount}
+                        </span>
+                      )}
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-80 bg-card border border-border rounded-sm shadow-none p-1">
+                    <DropdownMenuLabel className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground px-2 py-1.5 flex items-center justify-between gap-2">
+                      <span>{t("notifications.title")} ({unreadCount})</span>
+                      {unreadCount > 0 && (
                         <button
                           type="button"
-                          className="min-w-0 flex-1 text-left cursor-pointer group"
                           onClick={async () => {
                             try {
-                              if (n.type === "experiment_completed") {
-                                await markExperimentNotificationRead(n.resource_id);
-                                setNotifications((prev) => prev.filter((item) => item.id !== n.id));
-                                const detail = await fetchExperimentDetail(n.resource_id);
-                                handleInspectExperimentResults(detail);
-                              } else if (n.type === "dataset_shared") {
-                                if (n.share_id) {
-                                  await markShareNotificationRead("dataset", n.share_id);
-                                }
-                                setNotifications((prev) => prev.filter((item) => item.id !== n.id));
-                                setCurrentMode("dashboard");
-                                setOpenDatasetsSignal((k) => k + 1);
-                              } else if (n.type === "experiment_shared") {
-                                if (n.share_id) {
-                                  await markShareNotificationRead("experiment", n.share_id);
-                                }
-                                setNotifications((prev) => prev.filter((item) => item.id !== n.id));
-                                try {
-                                  const detail = await fetchExperimentDetail(n.resource_id);
-                                  handleInspectExperimentResults(detail);
-                                } catch {
-                                  setCurrentMode("dashboard");
-                                }
-                              }
-                            } catch (err) {
-                              console.error("Error handling notification:", err);
-                            }
+                              await markAllNotificationsRead();
+                              setNotifications((prev) => prev.map((item) => ({ ...item, is_read: true })));
+                            } catch {}
                           }}
+                          className="inline-flex items-center gap-1 text-[10px] font-sans normal-case font-medium text-primary hover:underline cursor-pointer"
                         >
-                          <div className="text-[10px] font-mono uppercase tracking-wider text-primary">
-                            {n.type === "experiment_completed"
-                              ? t("notifications.expCompleted")
-                              : n.type === "dataset_shared"
-                                ? t("notifications.datasetShared", { username: n.from_username || "" })
-                                : t("notifications.expShared", { username: n.from_username || "" })}
-                          </div>
-                          <div className="text-xs font-medium text-foreground truncate group-hover:underline">
-                            {n.title}
-                          </div>
+                          <CheckCheck className="w-3 h-3" />
+                          <span>{t("notifications.markAllRead")}</span>
                         </button>
-
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon"
-                          className="h-7 w-7 rounded-sm text-muted-foreground hover:text-primary hover:bg-primary/10 shrink-0"
-                          title={t("notifications.markRead")}
-                          onClick={async (e) => {
-                            e.stopPropagation();
-                            try {
-                              if (n.type === "experiment_completed") {
-                                await markExperimentNotificationRead(n.resource_id);
-                              } else if (n.type === "dataset_shared" && n.share_id) {
-                                await markShareNotificationRead("dataset", n.share_id);
-                              } else if (n.type === "experiment_shared" && n.share_id) {
-                                await markShareNotificationRead("experiment", n.share_id);
-                              }
-                              setNotifications((prev) => prev.filter((item) => item.id !== n.id));
-                            } catch (err) {
-                              console.error("Error marking notification read:", err);
-                            }
-                          }}
-                        >
-                          <Check className="w-3.5 h-3.5" />
-                        </Button>
+                      )}
+                    </DropdownMenuLabel>
+                    <DropdownMenuSeparator className="bg-border my-1" />
+                    {notifications.length === 0 ? (
+                      <div className="px-3 py-4 text-center text-xs text-muted-foreground">
+                        {t("notifications.empty")}
                       </div>
-                    ))}
-                  </div>
-                )}
-              </DropdownMenuContent>
-            </DropdownMenu>
+                    ) : (
+                      <div className="max-h-72 overflow-y-auto space-y-1">
+                        {notifications.map((n) => {
+                          const isRead = Boolean(n.is_read);
+                          return (
+                            <div
+                              key={n.id}
+                              className={`flex items-center justify-between gap-2 px-2 py-1.5 rounded-sm transition-colors ${
+                                isRead
+                                  ? "opacity-70 hover:bg-muted/40"
+                                  : "bg-primary/5 hover:bg-primary/10"
+                              }`}
+                            >
+                              <button
+                                type="button"
+                                className="min-w-0 flex-1 text-left cursor-pointer group"
+                                onClick={async () => {
+                                  try {
+                                    if (n.type === "experiment_completed") {
+                                      await markExperimentNotificationRead(n.resource_id);
+                                      setNotifications((prev) =>
+                                        prev.map((item) => (item.id === n.id ? { ...item, is_read: true } : item))
+                                      );
+                                      const detail = await fetchExperimentDetail(n.resource_id);
+                                      handleInspectExperimentResults(detail);
+                                    } else if (n.type === "dataset_shared") {
+                                      if (n.share_id) {
+                                        await markShareNotificationRead("dataset", n.share_id);
+                                      }
+                                      setNotifications((prev) =>
+                                        prev.map((item) => (item.id === n.id ? { ...item, is_read: true } : item))
+                                      );
+                                      setCurrentMode("dashboard");
+                                      setOpenDatasetsSignal((k) => k + 1);
+                                    } else if (n.type === "experiment_shared") {
+                                      if (n.share_id) {
+                                        await markShareNotificationRead("experiment", n.share_id);
+                                      }
+                                      setNotifications((prev) =>
+                                        prev.map((item) => (item.id === n.id ? { ...item, is_read: true } : item))
+                                      );
+                                      try {
+                                        const detail = await fetchExperimentDetail(n.resource_id);
+                                        handleInspectExperimentResults(detail);
+                                      } catch {
+                                        setCurrentMode("dashboard");
+                                      }
+                                    }
+                                  } catch (err) {
+                                    console.error("Error handling notification:", err);
+                                  }
+                                }}
+                              >
+                                <div
+                                  className={`text-[10px] font-mono uppercase tracking-wider ${
+                                    isRead ? "text-muted-foreground" : "text-primary font-semibold"
+                                  }`}
+                                >
+                                  {n.type === "experiment_completed"
+                                    ? t("notifications.expCompleted")
+                                    : n.type === "dataset_shared"
+                                      ? t("notifications.datasetShared", { username: n.from_username || "" })
+                                      : t("notifications.expShared", { username: n.from_username || "" })}
+                                </div>
+                                <div
+                                  className={`text-xs truncate group-hover:underline ${
+                                    isRead ? "text-muted-foreground font-normal" : "text-foreground font-semibold"
+                                  }`}
+                                >
+                                  {n.title}
+                                </div>
+                              </button>
+
+                              <div className="flex items-center gap-0.5 shrink-0">
+                                {!isRead && (
+                                  <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-7 w-7 rounded-sm text-muted-foreground hover:text-primary hover:bg-primary/10"
+                                    title={t("notifications.markRead")}
+                                    onClick={async (e) => {
+                                      e.stopPropagation();
+                                      try {
+                                        if (n.type === "experiment_completed") {
+                                          await markExperimentNotificationRead(n.resource_id);
+                                        } else if (n.type === "dataset_shared" && n.share_id) {
+                                          await markShareNotificationRead("dataset", n.share_id);
+                                        } else if (n.type === "experiment_shared" && n.share_id) {
+                                          await markShareNotificationRead("experiment", n.share_id);
+                                        }
+                                        setNotifications((prev) =>
+                                          prev.map((item) => (item.id === n.id ? { ...item, is_read: true } : item))
+                                        );
+                                      } catch (err) {
+                                        console.error("Error marking notification read:", err);
+                                      }
+                                    }}
+                                  >
+                                    <Check className="w-3.5 h-3.5" />
+                                  </Button>
+                                )}
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-7 w-7 rounded-sm text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                                  title={t("notifications.deleteNotification")}
+                                  onClick={async (e) => {
+                                    e.stopPropagation();
+                                    try {
+                                      if (n.type === "experiment_completed") {
+                                        await dismissExperimentNotification(n.resource_id);
+                                      } else if (n.type === "dataset_shared" && n.share_id) {
+                                        await dismissShareNotification("dataset", n.share_id);
+                                      } else if (n.type === "experiment_shared" && n.share_id) {
+                                        await dismissShareNotification("experiment", n.share_id);
+                                      }
+                                      setNotifications((prev) => prev.filter((item) => item.id !== n.id));
+                                    } catch (err) {
+                                      console.error("Error deleting notification:", err);
+                                    }
+                                  }}
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </Button>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              );
+            })()}
 
             {/* Language Selector (only short code: ES, UK, US) */}
             <LanguageSelector variant="outline" showLabel={false} />

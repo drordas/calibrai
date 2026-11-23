@@ -260,7 +260,7 @@ def get_notifications(
         .filter(
             Experiment.user_id == user.id,
             Experiment.status == "completed",
-            Experiment.notification_read == False,
+            Experiment.notification_dismissed == False,
         )
         .order_by(Experiment.completed_at.desc())
         .limit(15)
@@ -272,6 +272,7 @@ def get_notifications(
             "type": "experiment_completed",
             "title": exp.name,
             "resource_id": exp.id,
+            "is_read": bool(exp.notification_read),
             "created_at": (exp.completed_at or exp.created_at).isoformat() if (exp.completed_at or exp.created_at) else None,
         })
 
@@ -280,7 +281,7 @@ def get_notifications(
         .filter(
             DatasetShare.target_user_id == user.id,
             DatasetShare.status == "pending",
-            DatasetShare.notification_read == False,
+            DatasetShare.notification_dismissed == False,
         )
         .order_by(DatasetShare.created_at.desc())
         .all()
@@ -290,7 +291,7 @@ def get_notifications(
         .filter(
             ExperimentShare.target_user_id == user.id,
             ExperimentShare.status == "pending",
-            ExperimentShare.notification_read == False,
+            ExperimentShare.notification_dismissed == False,
         )
         .order_by(ExperimentShare.created_at.desc())
         .all()
@@ -313,6 +314,7 @@ def get_notifications(
             "share_id": s.id,
             "share_mode": s.share_mode,
             "from_username": owners.get(s.owner_user_id, ""),
+            "is_read": bool(s.notification_read),
             "created_at": s.created_at.isoformat() if s.created_at else None,
         })
 
@@ -332,11 +334,13 @@ def get_notifications(
             "share_id": s.id,
             "share_mode": s.share_mode,
             "from_username": owners.get(s.owner_user_id, ""),
+            "is_read": bool(s.notification_read),
             "created_at": s.created_at.isoformat() if s.created_at else None,
         })
 
     items.sort(key=lambda x: x.get("created_at") or "", reverse=True)
-    return {"notifications": items, "unread_count": len(items)}
+    unread_count = sum(1 for item in items if not item.get("is_read"))
+    return {"notifications": items, "unread_count": unread_count}
 
 
 @router.post("/notifications/experiments/{experiment_id}/read")
@@ -352,6 +356,51 @@ def mark_experiment_notification_read(
     if exp:
         exp.notification_read = True
         db.commit()
+    return {"status": "ok"}
+
+
+@router.delete("/notifications/experiments/{experiment_id}")
+def dismiss_experiment_notification(
+    experiment_id: str,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    exp = db.query(Experiment).filter(
+        Experiment.id == experiment_id,
+        Experiment.user_id == user.id,
+    ).first()
+    if exp:
+        exp.notification_dismissed = True
+        exp.notification_read = True
+        db.commit()
+    return {"status": "ok"}
+
+
+@router.delete("/notifications/shares/{share_type}/{share_id}")
+def dismiss_share_notification(
+    share_type: str,
+    share_id: int,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    if share_type == "dataset":
+        share = db.query(DatasetShare).filter(
+            DatasetShare.id == share_id,
+            DatasetShare.target_user_id == user.id,
+        ).first()
+        if share:
+            share.notification_dismissed = True
+            share.notification_read = True
+            db.commit()
+    elif share_type == "experiment":
+        share = db.query(ExperimentShare).filter(
+            ExperimentShare.id == share_id,
+            ExperimentShare.target_user_id == user.id,
+        ).first()
+        if share:
+            share.notification_dismissed = True
+            share.notification_read = True
+            db.commit()
     return {"status": "ok"}
 
 
@@ -381,6 +430,51 @@ def mark_share_notification_read(
     return {"status": "ok"}
 
 
+@router.delete("/notifications/experiments/{experiment_id}")
+def dismiss_experiment_notification(
+    experiment_id: str,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    exp = db.query(Experiment).filter(
+        Experiment.id == experiment_id,
+        Experiment.user_id == user.id,
+    ).first()
+    if exp:
+        exp.notification_dismissed = True
+        exp.notification_read = True
+        db.commit()
+    return {"status": "ok"}
+
+
+@router.delete("/notifications/shares/{share_type}/{share_id}")
+def dismiss_share_notification(
+    share_type: str,
+    share_id: int,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    if share_type == "dataset":
+        share = db.query(DatasetShare).filter(
+            DatasetShare.id == share_id,
+            DatasetShare.target_user_id == user.id,
+        ).first()
+        if share:
+            share.notification_dismissed = True
+            share.notification_read = True
+            db.commit()
+    elif share_type == "experiment":
+        share = db.query(ExperimentShare).filter(
+            ExperimentShare.id == share_id,
+            ExperimentShare.target_user_id == user.id,
+        ).first()
+        if share:
+            share.notification_dismissed = True
+            share.notification_read = True
+            db.commit()
+    return {"status": "ok"}
+
+
 @router.post("/notifications/read-all")
 def mark_all_notifications_read(
     user: User = Depends(get_current_user),
@@ -400,6 +494,51 @@ def mark_all_notifications_read(
         ExperimentShare.notification_read == False,
     ).update({"notification_read": True}, synchronize_session=False)
     db.commit()
+    return {"status": "ok"}
+
+
+@router.delete("/notifications/experiments/{experiment_id}")
+def dismiss_experiment_notification(
+    experiment_id: str,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    exp = db.query(Experiment).filter(
+        Experiment.id == experiment_id,
+        Experiment.user_id == user.id,
+    ).first()
+    if exp:
+        exp.notification_dismissed = True
+        exp.notification_read = True
+        db.commit()
+    return {"status": "ok"}
+
+
+@router.delete("/notifications/shares/{share_type}/{share_id}")
+def dismiss_share_notification(
+    share_type: str,
+    share_id: int,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    if share_type == "dataset":
+        share = db.query(DatasetShare).filter(
+            DatasetShare.id == share_id,
+            DatasetShare.target_user_id == user.id,
+        ).first()
+        if share:
+            share.notification_dismissed = True
+            share.notification_read = True
+            db.commit()
+    elif share_type == "experiment":
+        share = db.query(ExperimentShare).filter(
+            ExperimentShare.id == share_id,
+            ExperimentShare.target_user_id == user.id,
+        ).first()
+        if share:
+            share.notification_dismissed = True
+            share.notification_read = True
+            db.commit()
     return {"status": "ok"}
 
 @router.put("/config", response_model=UserConfigOut)

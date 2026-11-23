@@ -922,6 +922,7 @@
     "expShared": "Experimento compartido por @{username}",
     "openExperiment": "Ver experimento",
     "markRead": "Marcar como leída",
-    "markAllRead": "Marcar todas"
+    "markAllRead": "Marcar todas",
+    "deleteNotification": "Eliminar notificación"
   }
 }

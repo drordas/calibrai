@@ -40,9 +40,12 @@ def init_db():
             conn.execute(text("ALTER TABLE experiments ADD COLUMN IF NOT EXISTS ground_truth_name VARCHAR(255) DEFAULT 'Experto Humano'"))
             conn.execute(text("ALTER TABLE experiments ADD COLUMN IF NOT EXISTS model_temperatures JSONB DEFAULT '{}'::jsonb"))
             conn.execute(text("ALTER TABLE experiments ADD COLUMN IF NOT EXISTS notification_read BOOLEAN DEFAULT FALSE"))
+            conn.execute(text("ALTER TABLE experiments ADD COLUMN IF NOT EXISTS notification_dismissed BOOLEAN DEFAULT FALSE"))
             conn.execute(text("ALTER TABLE dataset_shares ADD COLUMN IF NOT EXISTS share_mode VARCHAR(20) DEFAULT 'view'"))
             conn.execute(text("ALTER TABLE dataset_shares ADD COLUMN IF NOT EXISTS notification_read BOOLEAN DEFAULT FALSE"))
+            conn.execute(text("ALTER TABLE dataset_shares ADD COLUMN IF NOT EXISTS notification_dismissed BOOLEAN DEFAULT FALSE"))
             conn.execute(text("ALTER TABLE experiment_shares ADD COLUMN IF NOT EXISTS notification_read BOOLEAN DEFAULT FALSE"))
+            conn.execute(text("ALTER TABLE experiment_shares ADD COLUMN IF NOT EXISTS notification_dismissed BOOLEAN DEFAULT FALSE"))
             conn.commit()
     except Exception as e:
         print(f"[init_db] Note on schema check: {e}")
