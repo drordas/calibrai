@@ -98,9 +98,14 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
 
         <CardContent className="space-y-4 p-0 pt-1">
           {error && (
-            <Alert variant="destructive" role="alert" aria-live="assertive" className="bg-destructive/10 border-destructive/20 text-destructive text-xs py-2 rounded-md">
-              <AlertCircle className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
-              <AlertDescription className="text-xs font-medium ml-2">{error}</AlertDescription>
+            <Alert
+              variant="destructive"
+              role="alert"
+              aria-live="assertive"
+              className="flex items-center gap-2.5 px-3 py-2.5 bg-destructive/10 border-destructive/20 text-destructive text-xs rounded-sm [&>svg]:static [&>svg~*]:pl-0 [&>svg+div]:translate-y-0"
+            >
+              <AlertCircle className="w-4 h-4 shrink-0" aria-hidden="true" />
+              <AlertDescription className="text-xs font-medium leading-snug">{error}</AlertDescription>
             </Alert>
           )}
 
