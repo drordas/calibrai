@@ -321,9 +321,6 @@ export const ExperimentDashboard: React.FC<ExperimentDashboardProps> = ({
             <div className="font-serif text-3xl font-bold tracking-tight text-foreground tabular-nums">
               {experiments.length}
             </div>
-            <span className="text-[11px] font-mono text-[#1E3A5F] dark:text-[#7BA3D4] font-medium block">
-              Registro PostgreSQL
-            </span>
           </div>
 
           <div className="border-t-2 border-foreground pt-3 space-y-1">
@@ -334,9 +331,6 @@ export const ExperimentDashboard: React.FC<ExperimentDashboardProps> = ({
             <div className="font-serif text-3xl font-bold tracking-tight text-foreground tabular-nums">
               {runningCount}
             </div>
-            <span className="text-[11px] font-mono text-[#1E3A5F] dark:text-[#7BA3D4] font-medium block">
-              Inferencia SSE activa
-            </span>
           </div>
 
           <div className="border-t-2 border-foreground pt-3 space-y-1">
@@ -346,9 +340,6 @@ export const ExperimentDashboard: React.FC<ExperimentDashboardProps> = ({
             <div className="font-serif text-3xl font-bold tracking-tight text-foreground tabular-nums">
               {queuedCount + pausedCount}
             </div>
-            <span className="text-[11px] font-mono text-[#1E3A5F] dark:text-[#7BA3D4] font-medium block">
-              En cola / pausados
-            </span>
           </div>
 
           <div className="border-t-2 border-primary pt-3 space-y-1">
@@ -358,9 +349,6 @@ export const ExperimentDashboard: React.FC<ExperimentDashboardProps> = ({
             <div className="font-serif text-3xl font-bold tracking-tight text-primary tabular-nums">
               {completedCount}
             </div>
-            <span className="text-[11px] font-mono text-[#1E3A5F] dark:text-[#7BA3D4] font-medium block">
-              Auditables
-            </span>
           </div>
         </div>
       </section>
