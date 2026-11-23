@@ -1175,7 +1175,7 @@ export function App() {
                       }`}
                     >
                       <ShieldCheck className="w-3.5 h-3.5 text-primary" />
-                      <span>4 Pilares Metodológicos</span>
+                      <span>Validación Metodológica</span>
                     </button>
                   )}
                 </div>
@@ -1530,19 +1530,7 @@ export function App() {
                   contextColumns={contextColumns.length > 0 ? contextColumns : currentExperimentDetail?.context_columns}
                 />
 
-                <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-2">
-                  {hasBenchmarkResults && (
-                    <Button
-                      id="btn-save-benchmark"
-                      variant="outline"
-                      onClick={() => setShowSavedModal(true)}
-                      className="gap-2 h-10 px-4 text-xs font-bold border-border bg-card hover:bg-muted text-foreground rounded-sm transition-colors"
-                    >
-                      <Save className="w-4 h-4 text-primary" />
-                      <span>{t("results.saveToPostgres")}</span>
-                    </Button>
-                  )}
-
+                <div className="flex flex-col sm:flex-row items-center justify-end gap-3 pt-2">
                   <div className="flex flex-wrap items-center gap-2 ml-auto">
                     {pairwiseList.length > 0 && (
                       <Button
@@ -1563,7 +1551,7 @@ export function App() {
                         className="gap-2 h-10 px-5 text-xs font-bold bg-primary text-primary-foreground hover:bg-primary/90 rounded-sm transition-colors"
                       >
                         <ShieldCheck className="w-4 h-4" />
-                        <span>4 Pilares Metodológicos</span>
+                        <span>Validación Metodológica</span>
                         <ArrowRight className="w-4 h-4" />
                       </Button>
                     )}
@@ -1593,7 +1581,7 @@ export function App() {
                       className="h-9 px-4 text-xs font-semibold rounded-sm gap-1.5 border-border"
                     >
                       <ShieldCheck className="w-3.5 h-3.5 text-primary" />
-                      <span>Ver 4 Pilares Metodológicos</span>
+                      <span>Validación Metodológica</span>
                       <ArrowRight className="w-3.5 h-3.5" />
                     </Button>
                   )}
@@ -1626,7 +1614,7 @@ export function App() {
                     className="h-9 px-4 text-xs font-semibold rounded-sm gap-1.5 border-border"
                   >
                     <Grid className="w-3.5 h-3.5" />
-                    <span>Ver Matriz 1 vs 1</span>
+                    <span>Matriz de Concordancia 1vs1</span>
                     <ArrowRight className="w-3.5 h-3.5" />
                   </Button>
                 </div>
