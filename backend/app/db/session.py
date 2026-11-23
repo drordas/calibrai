@@ -29,9 +29,11 @@ def init_db():
     """Initializes PostgreSQL tables, schema migrations, and optional env-configured seed user."""
     Base.metadata.create_all(bind=engine)
 
-    # Ensure schema migrations for language and ground_truth columns
+    # Ensure schema migrations for user email, language, and ground_truth columns
     try:
         with engine.connect() as conn:
+            conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS email VARCHAR(255)"))
+            conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS ix_users_email ON users (email) WHERE email IS NOT NULL"))
             conn.execute(text("ALTER TABLE user_configurations ADD COLUMN IF NOT EXISTS language VARCHAR(10) DEFAULT 'es'"))
             conn.execute(text("ALTER TABLE experiments ADD COLUMN IF NOT EXISTS ground_truth_dataset_id VARCHAR(100)"))
             conn.execute(text("ALTER TABLE experiments ADD COLUMN IF NOT EXISTS ground_truth_dataset_ids JSONB DEFAULT '[]'::jsonb"))

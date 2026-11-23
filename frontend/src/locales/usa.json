@@ -840,5 +840,29 @@
     "unusedSpecDesc": "The following SPECs are not used in Evaluation Specs, Metric Catalog, or YAML:",
     "allSpecsUsed": "All declared SPECs are in use",
     "formulaParamsLabel": "Formula parameters (assign each variable explicitly):"
+  },
+  "profile": {
+    "title": "User Profile",
+    "subtitle": "Manage your email address, default language, and password.",
+    "openTooltip": "Edit user profile",
+    "usernameLabel": "Username",
+    "fullNameLabel": "Full name",
+    "fullNamePlaceholder": "Your full name",
+    "emailLabel": "Email address",
+    "emailPlaceholder": "name@example.com",
+    "defaultLanguageLabel": "Default language",
+    "passwordSectionTitle": "Change password",
+    "passwordSectionHint": "Leave blank if you do not want to change your current password.",
+    "currentPasswordLabel": "Current password",
+    "currentPasswordPlaceholder": "Enter your current password",
+    "newPasswordLabel": "New password",
+    "newPasswordPlaceholder": "At least 4 characters",
+    "confirmPasswordLabel": "Confirm new password",
+    "confirmPasswordPlaceholder": "Repeat the new password",
+    "passwordMismatch": "The new passwords do not match.",
+    "currentPasswordRequired": "You must enter your current password to change it.",
+    "passwordTooShort": "The new password must be at least 4 characters long.",
+    "savedSuccess": "Profile updated successfully.",
+    "saving": "Saving..."
   }
 }

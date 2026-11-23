@@ -840,5 +840,29 @@
     "unusedSpecDesc": "Las siguientes SPECs no se utilizan en Evaluation Specs, Catálogo de métricas ni YAML:",
     "allSpecsUsed": "Todas las SPECs declaradas están en uso",
     "formulaParamsLabel": "Parámetros de la fórmula (asigna cada variable explícitamente):"
+  },
+  "profile": {
+    "title": "Perfil de Usuario",
+    "subtitle": "Gestiona tu correo electrónico, idioma por defecto y contraseña.",
+    "openTooltip": "Editar perfil de usuario",
+    "usernameLabel": "Usuario",
+    "fullNameLabel": "Nombre completo",
+    "fullNamePlaceholder": "Tu nombre y apellidos",
+    "emailLabel": "Correo electrónico",
+    "emailPlaceholder": "nombre@ejemplo.com",
+    "defaultLanguageLabel": "Idioma por defecto",
+    "passwordSectionTitle": "Cambiar contraseña",
+    "passwordSectionHint": "Déjalo vacío si no deseas cambiar tu contraseña actual.",
+    "currentPasswordLabel": "Contraseña actual",
+    "currentPasswordPlaceholder": "Introduce tu contraseña actual",
+    "newPasswordLabel": "Nueva contraseña",
+    "newPasswordPlaceholder": "Mínimo 4 caracteres",
+    "confirmPasswordLabel": "Confirmar nueva contraseña",
+    "confirmPasswordPlaceholder": "Repite la nueva contraseña",
+    "passwordMismatch": "Las nuevas contraseñas no coinciden.",
+    "currentPasswordRequired": "Debes indicar tu contraseña actual para cambiarla.",
+    "passwordTooShort": "La nueva contraseña debe tener al menos 4 caracteres.",
+    "savedSuccess": "Perfil actualizado correctamente.",
+    "saving": "Guardando..."
   }
 }

@@ -35,6 +35,7 @@ import { LiveBenchmarkView } from "./components/LiveBenchmarkView";
 import { ExperimentDashboard } from "./components/ExperimentDashboard";
 import { LaunchExperimentView } from "./components/LaunchExperimentView";
 import { LanguageSelector } from "./components/LanguageSelector";
+import { UserProfileModal } from "./components/UserProfileModal";
 import { ValidationMethodologyView } from "./components/ValidationMethodologyView";
 import { useTranslation } from "./i18n";
 import { ExperimentDetail } from "./types";
@@ -133,6 +134,7 @@ export function App() {
   const [wizardStep, setWizardStep] = useState<1 | 2 | 3 | 4>(1);
   const [resultsTab, setResultsTab] = useState<"leaderboard" | "matrix" | "methodology">("leaderboard");
   const [showSavedModal, setShowSavedModal] = useState<boolean>(false);
+  const [showProfileModal, setShowProfileModal] = useState<boolean>(false);
   const [currentExperimentId, setCurrentExperimentId] = useState<string | null>(null);
   const [currentExperimentDetail, setCurrentExperimentDetail] = useState<ExperimentDetail | null>(null);
   const [isRecalculating, setIsRecalculating] = useState<boolean>(false);
@@ -699,14 +701,17 @@ export function App() {
               </Button>
             )}
 
-            {/* User Session Badge */}
-            <Badge
+            {/* User Session / Profile Button */}
+            <Button
               variant="outline"
-              className="hidden lg:flex items-center gap-1.5 h-8 px-2.5 bg-card text-xs border-border font-mono font-medium rounded-sm"
+              size="sm"
+              onClick={() => setShowProfileModal(true)}
+              className="flex items-center gap-1.5 h-8 px-2.5 bg-card hover:bg-muted text-xs border-border font-mono font-medium rounded-sm transition-colors"
+              title={t("profile.openTooltip")}
             >
-              <UserIcon className="w-3 h-3 text-primary" />
-              <span className="text-foreground">{currentUser.username}</span>
-            </Badge>
+              <UserIcon className="w-3.5 h-3.5 text-primary" />
+              <span className="hidden sm:inline text-foreground">{currentUser.username}</span>
+            </Button>
 
             {/* Language Selector */}
             <LanguageSelector variant="outline" showLabel={true} />
@@ -1535,6 +1540,16 @@ export function App() {
           </div>
         </DialogContent>
       </Dialog>
+
+      <UserProfileModal
+        isOpen={showProfileModal}
+        onClose={() => setShowProfileModal(false)}
+        user={currentUser}
+        onProfileUpdated={(updatedUser, updatedConfig) => {
+          setCurrentUser(updatedUser);
+          syncWithUserConfig(updatedConfig.language);
+        }}
+      />
 
     </div>
   );

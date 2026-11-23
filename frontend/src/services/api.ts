@@ -103,6 +103,25 @@ export async function updateUserConfig(config: Partial<UserConfig>): Promise<Use
   return res.json();
 }
 
+export async function updateUserProfile(payload: {
+  email?: string;
+  full_name?: string;
+  language?: string;
+  current_password?: string;
+  new_password?: string;
+}): Promise<{ user: User; config: UserConfig }> {
+  const res = await fetch(`${API_BASE}/auth/profile`, {
+    method: "PUT",
+    headers: getAuthHeaders(),
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: "Error actualizando perfil" }));
+    throw new Error(err.detail || "Error actualizando perfil");
+  }
+  return res.json();
+}
+
 export async function saveBenchmarkRun(payload: {
   benchmark_id?: string;
   name: string;

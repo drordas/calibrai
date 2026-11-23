@@ -9,12 +9,14 @@ class RegisterRequest(BaseModel):
     username: str
     password: str
     full_name: Optional[str] = None
+    email: Optional[str] = None
     language: Optional[str] = "es"
 
 class UserOut(BaseModel):
     id: int
     username: str
     full_name: Optional[str] = None
+    email: Optional[str] = None
     is_active: bool
 
 class UserConfigOut(BaseModel):
@@ -32,6 +34,17 @@ class UserConfigUpdate(BaseModel):
     selected_models: Optional[List[str]] = None
     api_keys: Optional[Dict[str, str]] = None
     language: Optional[str] = None
+
+class UserProfileUpdate(BaseModel):
+    email: Optional[str] = None
+    full_name: Optional[str] = None
+    language: Optional[str] = None
+    current_password: Optional[str] = None
+    new_password: Optional[str] = None
+
+class UserProfileResponse(BaseModel):
+    user: UserOut
+    config: UserConfigOut
 
 class TokenResponse(BaseModel):
     access_token: str
