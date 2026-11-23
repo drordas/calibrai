@@ -23,6 +23,12 @@ class SavePromptRequest(BaseModel):
     model_prompt: str
 
 
+class UpdatePromptRequest(BaseModel):
+    name: str
+    system_prompt: str = ""
+    model_prompt: str
+
+
 class SavedPromptOut(BaseModel):
     id: int
     dataset_id: Optional[str] = None
@@ -94,6 +100,42 @@ def create_saved_prompt(
         model_prompt=req.model_prompt,
     )
     db.add(row)
+    db.commit()
+    db.refresh(row)
+    return SavedPromptOut(
+        id=row.id,
+        dataset_id=row.dataset_id,
+        name=row.name,
+        system_prompt=row.system_prompt or "",
+        model_prompt=row.model_prompt,
+        created_at=row.created_at.isoformat() if row.created_at else "",
+        updated_at=row.updated_at.isoformat() if row.updated_at else "",
+    )
+
+
+@router.put("/saved/{prompt_id}", response_model=SavedPromptOut)
+def update_saved_prompt(
+    prompt_id: int,
+    req: UpdatePromptRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    row = (
+        db.query(SavedPrompt)
+        .filter(SavedPrompt.id == prompt_id, SavedPrompt.user_id == current_user.id)
+        .first()
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="Prompt guardado no encontrado.")
+    clean_name = req.name.strip()
+    if not clean_name:
+        raise HTTPException(status_code=400, detail="El nombre del prompt es obligatorio.")
+    if not req.model_prompt or not req.model_prompt.strip():
+        raise HTTPException(status_code=400, detail="El prompt del modelo no puede estar vacío.")
+
+    row.name = clean_name
+    row.system_prompt = req.system_prompt or ""
+    row.model_prompt = req.model_prompt
     db.commit()
     db.refresh(row)
     return SavedPromptOut(

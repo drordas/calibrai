@@ -54,6 +54,7 @@ import {
   X,
 } from "lucide-react";
 import { DashboardDatasetsModal } from "./DashboardDatasetsModal";
+import { DashboardPromptsModal } from "./DashboardPromptsModal";
 import { Label } from "@/components/ui/label";
 import {
   Select,
@@ -110,6 +111,7 @@ export const ExperimentDashboard: React.FC<ExperimentDashboardProps> = ({
   const [showDetailModal, setShowDetailModal] = useState<boolean>(false);
   const [showCreateMenu, setShowCreateMenu] = useState<boolean>(false);
   const [showDatasetsModal, setShowDatasetsModal] = useState<boolean>(false);
+  const [showPromptsModal, setShowPromptsModal] = useState<boolean>(false);
   const [actionLoadingId, setActionLoadingId] = useState<string | null>(null);
   const [dashboardError, setDashboardError] = useState<string | null>(null);
   const [dashboardFeedback, setDashboardFeedback] = useState<string | null>(null);
@@ -423,6 +425,16 @@ export const ExperimentDashboard: React.FC<ExperimentDashboardProps> = ({
             >
               <Database className="w-3.5 h-3.5 text-primary shrink-0" />
               <span>{t("dashboardDatasets.viewDatasets")}</span>
+            </Button>
+
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setShowPromptsModal(true)}
+              className="h-9 w-full justify-start px-3.5 text-xs font-semibold border-border bg-card hover:bg-muted text-foreground gap-1.5 rounded-sm cursor-pointer transition-colors"
+            >
+              <FileCode className="w-3.5 h-3.5 text-primary shrink-0" />
+              <span>Gestionar Prompts</span>
             </Button>
           </div>
         </div>
@@ -1110,6 +1122,11 @@ export const ExperimentDashboard: React.FC<ExperimentDashboardProps> = ({
           setShowDatasetsModal(false);
           onDatasetsChanged?.();
         }}
+      />
+
+      <DashboardPromptsModal
+        isOpen={showPromptsModal}
+        onClose={() => setShowPromptsModal(false)}
       />
 
       {/* Share Experiment Dialog */}

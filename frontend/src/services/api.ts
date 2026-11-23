@@ -382,11 +382,32 @@ export interface SavedPromptItem {
   updated_at: string;
 }
 
-export async function fetchSavedPrompts(datasetId: string): Promise<SavedPromptItem[]> {
-  const res = await fetch(`${API_BASE}/prompts/saved?dataset_id=${encodeURIComponent(datasetId)}`, {
+export async function fetchSavedPrompts(datasetId?: string): Promise<SavedPromptItem[]> {
+  const qs = datasetId ? `?dataset_id=${encodeURIComponent(datasetId)}` : "";
+  const res = await fetch(`${API_BASE}/prompts/saved${qs}`, {
     headers: getAuthHeaders(),
   });
   if (!res.ok) throw new Error("Error cargando prompts guardados");
+  return res.json();
+}
+
+export async function updateSavedPrompt(
+  promptId: number,
+  payload: {
+    name: string;
+    system_prompt: string;
+    model_prompt: string;
+  }
+): Promise<SavedPromptItem> {
+  const res = await fetch(`${API_BASE}/prompts/saved/${promptId}`, {
+    method: "PUT",
+    headers: getAuthHeaders(),
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: "Error actualizando prompt" }));
+    throw new Error(err.detail || "Error actualizando prompt");
+  }
   return res.json();
 }
 
