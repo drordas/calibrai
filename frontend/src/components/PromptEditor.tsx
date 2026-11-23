@@ -47,6 +47,8 @@ import {
   Save,
   FolderOpen,
   Loader2,
+  Download,
+  ArrowLeft,
 } from "lucide-react";
 import {
   Dialog,
@@ -1050,6 +1052,7 @@ export const PromptEditor: React.FC<PromptEditorProps> = ({
   const [savedPrompts, setSavedPrompts] = useState<SavedPromptItem[]>([]);
   const [loadingSavedPrompts, setLoadingSavedPrompts] = useState(false);
   const [loadPromptError, setLoadPromptError] = useState<string | null>(null);
+  const [previewSavedPrompt, setPreviewSavedPrompt] = useState<SavedPromptItem | null>(null);
 
   const handleOpenSavePromptModal = () => {
     setSavePromptName("");
@@ -1086,6 +1089,7 @@ export const PromptEditor: React.FC<PromptEditorProps> = ({
 
   const handleOpenLoadPromptModal = async () => {
     setLoadPromptError(null);
+    setPreviewSavedPrompt(null);
     setShowLoadPromptModal(true);
     setLoadingSavedPrompts(true);
     try {
@@ -3266,19 +3270,31 @@ export const PromptEditor: React.FC<PromptEditorProps> = ({
       </Dialog>
 
       {/* Load Saved Prompt Dialog */}
-      <Dialog open={showLoadPromptModal} onOpenChange={(open) => !open && setShowLoadPromptModal(false)}>
-        <DialogContent className="sm:max-w-lg bg-card border-border rounded-sm shadow-none">
+      <Dialog
+        open={showLoadPromptModal}
+        onOpenChange={(open) => {
+          if (!open) {
+            setShowLoadPromptModal(false);
+            setPreviewSavedPrompt(null);
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-lg bg-card border-border rounded-sm shadow-none overflow-hidden">
           <DialogHeader className="border-b border-border pb-3">
-            <DialogTitle className="font-serif text-base font-bold text-foreground flex items-center gap-2">
-              <FolderOpen className="w-4 h-4 text-primary" />
-              <span>{t("prompt.loadPromptTitle")}</span>
+            <DialogTitle className="font-serif text-base font-bold text-foreground flex items-center gap-2 truncate pr-6">
+              <FolderOpen className="w-4 h-4 text-primary shrink-0" />
+              <span className="truncate">
+                {previewSavedPrompt ? previewSavedPrompt.name : t("prompt.loadPromptTitle")}
+              </span>
             </DialogTitle>
             <DialogDescription className="text-xs text-muted-foreground">
-              {t("prompt.loadPromptDesc")}
+              {previewSavedPrompt
+                ? "Vista previa del Prompt del Sistema y del Prompt del Modelo."
+                : t("prompt.loadPromptDesc")}
             </DialogDescription>
           </DialogHeader>
 
-          <div className="space-y-3 pt-1">
+          <div className="space-y-3 pt-1 min-w-0">
             {loadPromptError && (
               <div className="p-2.5 rounded-sm bg-destructive/10 border border-destructive/30 flex items-center gap-2 text-xs text-destructive">
                 <AlertCircle className="w-4 h-4 shrink-0" />
@@ -3286,7 +3302,49 @@ export const PromptEditor: React.FC<PromptEditorProps> = ({
               </div>
             )}
 
-            {loadingSavedPrompts ? (
+            {previewSavedPrompt ? (
+              <div className="space-y-3">
+                <div className="space-y-1">
+                  <Label className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground">
+                    {t("prompt.systemPromptLabel")}
+                  </Label>
+                  <pre className="p-2.5 rounded-sm border border-border bg-background text-xs font-mono whitespace-pre-wrap break-words max-h-32 overflow-y-auto leading-relaxed text-foreground">
+                    {previewSavedPrompt.system_prompt || "—"}
+                  </pre>
+                </div>
+
+                <div className="space-y-1">
+                  <Label className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground">
+                    {t("prompt.modelPromptLabel")}
+                  </Label>
+                  <pre className="p-2.5 rounded-sm border border-border bg-background text-xs font-mono whitespace-pre-wrap break-words max-h-56 overflow-y-auto leading-relaxed text-foreground">
+                    {previewSavedPrompt.model_prompt}
+                  </pre>
+                </div>
+
+                <div className="flex items-center justify-between gap-2 pt-2 border-t border-border">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setPreviewSavedPrompt(null)}
+                    className="h-8 text-xs rounded-sm border-border gap-1.5"
+                  >
+                    <ArrowLeft className="w-3.5 h-3.5" />
+                    <span>Volver</span>
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    onClick={() => handleApplySavedPrompt(previewSavedPrompt)}
+                    className="h-8 text-xs rounded-sm bg-primary text-primary-foreground hover:bg-primary/90 gap-1.5"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    <span>{t("prompt.loadPromptApply")}</span>
+                  </Button>
+                </div>
+              </div>
+            ) : loadingSavedPrompts ? (
               <div className="py-8 flex items-center justify-center gap-2 text-xs text-muted-foreground">
                 <Loader2 className="w-4 h-4 animate-spin text-primary" />
                 <span>{t("common.loading")}</span>
@@ -3296,58 +3354,65 @@ export const PromptEditor: React.FC<PromptEditorProps> = ({
                 {t("prompt.loadPromptEmpty")}
               </div>
             ) : (
-              <div className="max-h-80 overflow-y-auto space-y-2 pr-1">
-                {savedPrompts.map((item) => (
-                  <div
-                    key={item.id}
-                    className="p-3 rounded-sm border border-border bg-background flex items-start justify-between gap-3"
-                  >
-                    <div className="min-w-0 flex-1 space-y-1">
-                      <div className="text-xs font-semibold text-foreground truncate">{item.name}</div>
-                      {item.system_prompt && (
-                        <div className="text-[11px] font-mono text-muted-foreground truncate">
-                          System: {item.system_prompt}
-                        </div>
-                      )}
-                      <div className="text-[11px] font-mono text-muted-foreground line-clamp-2">
-                        {item.model_prompt}
+              <>
+                <div className="max-h-80 overflow-y-auto space-y-2 pr-1">
+                  {savedPrompts.map((item) => (
+                    <div
+                      key={item.id}
+                      className="px-3 py-2.5 rounded-sm border border-border bg-background flex items-center justify-between gap-3"
+                    >
+                      <div className="min-w-0 flex-1 text-xs font-semibold text-foreground truncate">
+                        {item.name}
+                      </div>
+                      <div className="flex items-center gap-1 shrink-0">
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => setPreviewSavedPrompt(item)}
+                          className="h-7 w-7 rounded-sm text-muted-foreground hover:text-foreground hover:bg-muted"
+                          title="Ver prompt"
+                        >
+                          <Eye className="w-3.5 h-3.5" />
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => handleApplySavedPrompt(item)}
+                          className="h-7 w-7 rounded-sm text-muted-foreground hover:text-primary hover:bg-primary/10"
+                          title={t("prompt.loadPromptApply")}
+                        >
+                          <Download className="w-3.5 h-3.5" />
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => handleDeleteSavedPrompt(item.id)}
+                          className="h-7 w-7 rounded-sm text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                          title={t("common.delete")}
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </Button>
                       </div>
                     </div>
-                    <div className="flex items-center gap-1.5 shrink-0">
-                      <Button
-                        type="button"
-                        size="sm"
-                        onClick={() => handleApplySavedPrompt(item)}
-                        className="h-7 px-2.5 text-xs rounded-sm bg-primary text-primary-foreground hover:bg-primary/90"
-                      >
-                        {t("prompt.loadPromptApply")}
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => handleDeleteSavedPrompt(item.id)}
-                        className="h-7 w-7 p-0 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </Button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
+                  ))}
+                </div>
 
-            <div className="flex justify-end pt-2 border-t border-border">
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => setShowLoadPromptModal(false)}
-                className="h-8 text-xs rounded-sm border-border"
-              >
-                {t("common.close")}
-              </Button>
-            </div>
+                <div className="flex justify-end pt-2 border-t border-border">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setShowLoadPromptModal(false)}
+                    className="h-8 text-xs rounded-sm border-border"
+                  >
+                    {t("common.close")}
+                  </Button>
+                </div>
+              </>
+            )}
           </div>
         </DialogContent>
       </Dialog>
