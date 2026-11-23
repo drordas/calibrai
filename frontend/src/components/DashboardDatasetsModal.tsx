@@ -19,7 +19,6 @@ import {
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { AlertCircle, Database, Loader2, ShieldCheck } from "lucide-react";
 
 interface DashboardDatasetsModalProps {
@@ -159,7 +158,7 @@ export const DashboardDatasetsModal: React.FC<DashboardDatasetsModalProps> = ({
           </DialogDescription>
         </DialogHeader>
 
-        <ScrollArea className="max-h-[65vh] pr-2">
+        <div className="max-h-[65vh] overflow-y-auto pr-1">
           {loading ? (
             <div className="py-10 flex items-center justify-center gap-2 text-xs text-muted-foreground">
               <Loader2 className="w-4 h-4 animate-spin text-primary" />
@@ -199,7 +198,7 @@ export const DashboardDatasetsModal: React.FC<DashboardDatasetsModalProps> = ({
               </div>
             </div>
           )}
-        </ScrollArea>
+        </div>
 
         <div className="flex justify-end pt-2 border-t border-border">
           <Button
