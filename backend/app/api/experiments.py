@@ -369,19 +369,20 @@ def share_experiment(
         .first()
     )
     if existing:
-        existing.owner_user_id = current_user.id
-        existing.share_mode = mode
-        existing.status = "pending"
-    else:
-        db.add(
-            ExperimentShare(
-                experiment_id=target_exp_id,
-                owner_user_id=current_user.id,
-                target_user_id=target_user.id,
-                share_mode=mode,
-                status="pending",
-            )
+        raise HTTPException(
+            status_code=400,
+            detail="Este experimento ya está compartido con ese usuario.",
         )
+
+    db.add(
+        ExperimentShare(
+            experiment_id=target_exp_id,
+            owner_user_id=current_user.id,
+            target_user_id=target_user.id,
+            share_mode=mode,
+            status="pending",
+        )
+    )
     db.commit()
     return {"status": "shared", "experiment_id": target_exp_id, "share_mode": mode, "target_username": target_user.username}
 

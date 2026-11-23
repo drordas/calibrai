@@ -832,12 +832,18 @@ export const DashboardDatasetsModal: React.FC<DashboardDatasetsModalProps> = ({
                   <Loader2 className="w-4 h-4 animate-spin text-primary" />
                   <span>{t("common.loading")}</span>
                 </div>
-              ) : shareUsers.length === 0 ? (
-                <div className="py-6 text-center text-xs text-muted-foreground">
-                  {t("dashboardDatasets.shareNoUsers")}
-                </div>
-              ) : (
-                shareUsers.map((u) => (
+              ) : (() => {
+                const availableShareUsers = shareUsers.filter(
+                  (u) => !activeShares.some((sh) => sh.target_user_id === u.id)
+                );
+                if (availableShareUsers.length === 0) {
+                  return (
+                    <div className="py-6 text-center text-xs text-muted-foreground">
+                      {t("dashboardDatasets.shareNoUsers")}
+                    </div>
+                  );
+                }
+                return availableShareUsers.map((u) => (
                   <div
                     key={u.id}
                     className="flex items-center justify-between gap-3 p-2.5 border border-border rounded-sm bg-background"
@@ -866,8 +872,8 @@ export const DashboardDatasetsModal: React.FC<DashboardDatasetsModalProps> = ({
                       )}
                     </Button>
                   </div>
-                ))
-              )}
+                ));
+              })()}
             </div>
           </div>
 

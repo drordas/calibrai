@@ -260,21 +260,21 @@ def share_dataset(
         .first()
     )
     if existing:
-        existing.owner_user_id = current_user.id
-        existing.source_dataset_id = dataset_id
-        existing.share_mode = mode
-        existing.status = "pending"
-    else:
-        db.add(
-            DatasetShare(
-                dataset_id=target_dataset_id,
-                source_dataset_id=dataset_id,
-                owner_user_id=current_user.id,
-                target_user_id=target_user.id,
-                share_mode=mode,
-                status="pending",
-            )
+        raise HTTPException(
+            status_code=400,
+            detail="Este dataset ya está compartido con ese usuario.",
         )
+
+    db.add(
+        DatasetShare(
+            dataset_id=target_dataset_id,
+            source_dataset_id=dataset_id,
+            owner_user_id=current_user.id,
+            target_user_id=target_user.id,
+            share_mode=mode,
+            status="pending",
+        )
+    )
     db.commit()
     return {"status": "shared", "dataset_id": target_dataset_id, "share_mode": mode, "target_username": target_user.username}
 
