@@ -910,7 +910,21 @@
     "revokeShareTooltip": "Dejar de compartir",
     "shareExperimentTitle": "Compartir experimento",
     "shareExperimentDesc": "Selecciona un usuario registrado y el modo para compartir \"{name}\".",
-    "shareExpSuccess": "Experimento compartido con @{username}."
+    "shareExpSuccess": "Experimento compartido con @{username}.",
+    "exportTooltip": "Exportar dataset",
+    "exportCsv": "Exportar como CSV",
+    "exportJson": "Exportar como JSON",
+    "uploadBtn": "Cargar Dataset",
+    "uploadTitle": "Cargar nuevo dataset",
+    "uploadDesc": "Sube un archivo CSV, JSON, JSONL o Excel como dataset de tareas o Ground Truth.",
+    "uploadTypeLabel": "Tipo de dataset",
+    "uploadTypeTask": "Dataset de tareas",
+    "uploadTypeGroundTruth": "Ground Truth",
+    "uploadNameLabel": "Nombre (opcional)",
+    "uploadNamePlaceholder": "Ej. Reseñas Q4",
+    "uploadFileLabel": "Archivo",
+    "uploading": "Subiendo...",
+    "uploadSuccess": "Dataset cargado correctamente."
   },
   "notifications": {
     "title": "Notificaciones",

@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useState } from "react";
 import { DatasetSummary, PaginatedRowsResponse, ShareEntry, ShareUser } from "../types";
 import {
   deleteDataset,
+  exportDataset,
   fetchDatasets,
   fetchDatasetShares,
   fetchPaginatedRows,
@@ -9,6 +10,7 @@ import {
   respondToDatasetShare,
   revokeDatasetShare,
   shareDatasetWithUser,
+  uploadDataset,
 } from "../services/api";
 import { useTranslation } from "../i18n";
 import {
@@ -35,17 +37,27 @@ import {
 } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import {
   AlertCircle,
   Check,
   CheckCircle2,
   Database,
+  Download,
   Eye,
   Loader2,
+  Plus,
   Share2,
   ShieldCheck,
   Trash2,
+  Upload,
   Users,
   X,
 } from "lucide-react";
@@ -92,6 +104,16 @@ export const DashboardDatasetsModal: React.FC<DashboardDatasetsModalProps> = ({
 
   // Respond to incoming share
   const [respondingShareId, setRespondingShareId] = useState<number | null>(null);
+
+  // Upload dataset state
+  const [showUploadModal, setShowUploadModal] = useState(false);
+  const [uploadType, setUploadType] = useState<"task" | "ground_truth">("task");
+  const [uploadName, setUploadName] = useState("");
+  const [uploadFile, setUploadFile] = useState<File | null>(null);
+  const [uploading, setUploading] = useState(false);
+
+  // Export state
+  const [exportingId, setExportingId] = useState<string | null>(null);
 
   const loadDatasets = useCallback(async () => {
     setLoading(true);
@@ -208,6 +230,43 @@ export const DashboardDatasetsModal: React.FC<DashboardDatasetsModalProps> = ({
     }
   };
 
+  const handleExport = async (ds: DatasetSummary, format: "csv" | "json") => {
+    setExportingId(ds.id);
+    setError(null);
+    try {
+      await exportDataset(ds.id, format, ds.name || ds.id);
+    } catch (err: any) {
+      setError(err?.message || t("common.error"));
+    } finally {
+      setExportingId(null);
+    }
+  };
+
+  const handleUploadSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!uploadFile) return;
+    setUploading(true);
+    setError(null);
+    try {
+      await uploadDataset(
+        uploadFile,
+        uploadName.trim() || undefined,
+        undefined,
+        uploadType === "ground_truth"
+      );
+      setShowUploadModal(false);
+      setUploadFile(null);
+      setUploadName("");
+      setUploadType("task");
+      setFeedback(t("dashboardDatasets.uploadSuccess"));
+      await loadDatasets();
+    } catch (err: any) {
+      setError(err?.message || t("common.error"));
+    } finally {
+      setUploading(false);
+    }
+  };
+
   const getModeLabel = (mode?: string | null) => {
     if (mode === "edit") return t("dashboardDatasets.modeShortEdit");
     if (mode === "copy") return t("dashboardDatasets.modeShortCopy");
@@ -221,12 +280,12 @@ export const DashboardDatasetsModal: React.FC<DashboardDatasetsModalProps> = ({
     <div className="border-t-2 border-b-2 border-foreground bg-card">
       <Table className="table-fixed w-full">
         <colgroup>
-          <col className="w-[38%]" />
+          <col className="w-[34%]" />
           <col className="w-[10%]" />
+          <col className="w-[9%]" />
           <col className="w-[10%]" />
           <col className="w-[12%]" />
-          <col className="w-[12%]" />
-          <col className="w-[18%]" />
+          <col className="w-[25%]" />
         </colgroup>
         <TableHeader>
           <TableRow className="border-b border-border hover:bg-transparent">
@@ -348,6 +407,38 @@ export const DashboardDatasetsModal: React.FC<DashboardDatasetsModalProps> = ({
                           >
                             <Eye className="w-3.5 h-3.5" />
                           </Button>
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon"
+                                disabled={exportingId === ds.id}
+                                className="h-7 w-7 rounded-sm text-muted-foreground hover:text-foreground hover:bg-muted"
+                                title={t("dashboardDatasets.exportTooltip")}
+                              >
+                                {exportingId === ds.id ? (
+                                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                ) : (
+                                  <Download className="w-3.5 h-3.5" />
+                                )}
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end" className="bg-card border-border rounded-sm shadow-none p-1">
+                              <DropdownMenuItem
+                                onClick={() => handleExport(ds, "csv")}
+                                className="text-xs cursor-pointer rounded-sm"
+                              >
+                                {t("dashboardDatasets.exportCsv")}
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
+                                onClick={() => handleExport(ds, "json")}
+                                className="text-xs cursor-pointer rounded-sm"
+                              >
+                                {t("dashboardDatasets.exportJson")}
+                              </DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
                           <Button
                             type="button"
                             variant="ghost"
@@ -446,7 +537,21 @@ export const DashboardDatasetsModal: React.FC<DashboardDatasetsModalProps> = ({
             )}
           </div>
 
-          <div className="flex justify-end pt-2 border-t border-border">
+          <div className="flex items-center justify-between gap-2 pt-2 border-t border-border">
+            <Button
+              type="button"
+              size="sm"
+              onClick={() => {
+                setUploadFile(null);
+                setUploadName("");
+                setUploadType("task");
+                setShowUploadModal(true);
+              }}
+              className="h-8 text-xs rounded-sm bg-primary text-primary-foreground hover:bg-primary/90 gap-1.5"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span>{t("dashboardDatasets.uploadBtn")}</span>
+            </Button>
             <Button
               type="button"
               variant="outline"
@@ -704,6 +809,97 @@ export const DashboardDatasetsModal: React.FC<DashboardDatasetsModalProps> = ({
               {t("common.close")}
             </Button>
           </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Upload Dataset Dialog */}
+      <Dialog open={showUploadModal} onOpenChange={(open) => !open && setShowUploadModal(false)}>
+        <DialogContent className="sm:max-w-md bg-card border-border rounded-sm shadow-none">
+          <DialogHeader className="border-b border-border pb-3">
+            <DialogTitle className="font-serif text-base font-bold text-foreground flex items-center gap-2">
+              <Upload className="w-4 h-4 text-primary" />
+              {t("dashboardDatasets.uploadTitle")}
+            </DialogTitle>
+            <DialogDescription className="text-xs text-muted-foreground">
+              {t("dashboardDatasets.uploadDesc")}
+            </DialogDescription>
+          </DialogHeader>
+
+          <form onSubmit={handleUploadSubmit} className="space-y-3 py-2">
+            <div className="space-y-1.5">
+              <Label className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground">
+                {t("dashboardDatasets.uploadTypeLabel")}
+              </Label>
+              <Select value={uploadType} onValueChange={(v) => setUploadType(v as "task" | "ground_truth")}>
+                <SelectTrigger className="h-9 text-xs bg-background border-border rounded-sm">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent className="bg-card border-border rounded-sm shadow-none">
+                  <SelectItem value="task" className="text-xs">{t("dashboardDatasets.uploadTypeTask")}</SelectItem>
+                  <SelectItem value="ground_truth" className="text-xs">{t("dashboardDatasets.uploadTypeGroundTruth")}</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="upload-ds-name" className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground">
+                {t("dashboardDatasets.uploadNameLabel")}
+              </Label>
+              <Input
+                id="upload-ds-name"
+                type="text"
+                value={uploadName}
+                onChange={(e) => setUploadName(e.target.value)}
+                placeholder={t("dashboardDatasets.uploadNamePlaceholder")}
+                className="h-9 text-xs bg-background border-border rounded-sm"
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="upload-ds-file" className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground">
+                {t("dashboardDatasets.uploadFileLabel")}
+              </Label>
+              <Input
+                id="upload-ds-file"
+                type="file"
+                accept=".csv,.json,.jsonl,.xlsx,.xls"
+                onChange={(e) => setUploadFile(e.target.files?.[0] || null)}
+                required
+                className="h-9 text-xs bg-background border-border rounded-sm file:mr-2 file:text-xs file:font-medium file:text-primary"
+              />
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2 border-t border-border">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setShowUploadModal(false)}
+                disabled={uploading}
+                className="h-8 text-xs rounded-sm border-border"
+              >
+                {t("common.cancel")}
+              </Button>
+              <Button
+                type="submit"
+                size="sm"
+                disabled={uploading || !uploadFile}
+                className="h-8 text-xs rounded-sm bg-primary text-primary-foreground hover:bg-primary/90 gap-1.5"
+              >
+                {uploading ? (
+                  <>
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    <span>{t("dashboardDatasets.uploading")}</span>
+                  </>
+                ) : (
+                  <>
+                    <Upload className="w-3.5 h-3.5" />
+                    <span>{t("dashboardDatasets.uploadBtn")}</span>
+                  </>
+                )}
+              </Button>
+            </div>
+          </form>
         </DialogContent>
       </Dialog>
     </>

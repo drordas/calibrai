@@ -2,7 +2,7 @@ import shutil
 import uuid
 from pathlib import Path
 from typing import List, Optional
-from fastapi import APIRouter, Depends, UploadFile, File, Form, HTTPException, Query
+from fastapi import APIRouter, Depends, UploadFile, File, Form, HTTPException, Query, Response
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 from backend.app.api.auth import get_current_user, get_optional_current_user
@@ -358,11 +358,30 @@ def check_compatibility(
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@router.get("/{dataset_id}/export")
+def export_dataset(
+    dataset_id: str,
+    format: str = Query("csv", pattern="^(csv|json)$"),
+):
+    try:
+        content, media_type, filename = dataset_engine.export_dataset(dataset_id, fmt=format)
+        return Response(
+            content=content,
+            media_type=media_type,
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Dataset not found")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.post("/upload", response_model=DatasetSummary)
 async def upload_dataset(
     file: UploadFile = File(...),
     name: Optional[str] = Form(None),
-    expected_input_dataset_id: Optional[str] = Form(None)
+    expected_input_dataset_id: Optional[str] = Form(None),
+    is_ground_truth: Optional[bool] = Form(None),
 ):
     ext = Path(file.filename).suffix.lower()
     if ext not in [".csv", ".json", ".jsonl", ".xlsx", ".xls"]:
@@ -378,7 +397,8 @@ async def upload_dataset(
         
         summary = dataset_engine.register_dataset(
             file_path=file_path,
-            name=name or Path(file.filename).stem.replace("_", " ").title()
+            name=name or Path(file.filename).stem.replace("_", " ").title(),
+            is_ground_truth=is_ground_truth,
         )
 
         # If an expected input dataset ID is provided, validate compatibility

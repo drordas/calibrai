@@ -58,7 +58,8 @@ class DatasetEngine:
         file_path: Path,
         name: Optional[str] = None,
         is_sample: bool = False,
-        dataset_id: Optional[str] = None
+        dataset_id: Optional[str] = None,
+        is_ground_truth: Optional[bool] = None
     ) -> DatasetSummary:
         name = name or file_path.stem.replace("_", " ").title()
         file_ext = file_path.suffix.lower()
@@ -276,10 +277,10 @@ class DatasetEngine:
                     if col.name == best_id_col:
                         col.is_id_candidate = True
 
-        # Determine if dataset is Ground Truth (contains ground_truth annotations or dimensions)
+        # Determine if dataset is Ground Truth (explicit override or auto-detected)
         has_gt_cols = any(c.name.startswith("ground_truth.") or c.name.startswith("target.") for c in columns)
         has_eval_dims = any("." in c.name and not c.name.startswith("input.") for c in columns)
-        is_gt = bool(has_gt_cols or has_eval_dims)
+        is_gt = bool(is_ground_truth) if is_ground_truth is not None else bool(has_gt_cols or has_eval_dims)
 
         file_size = file_path.stat().st_size if file_path.exists() else 0
 
@@ -558,6 +559,24 @@ class DatasetEngine:
                     "schema": res.get("schema")
                 })
         return compatibles
+
+    def export_dataset(self, dataset_id: str, fmt: str = "csv") -> tuple[bytes, str, str]:
+        meta = self.datasets.get(dataset_id)
+        if not meta:
+            raise KeyError(f"Dataset {dataset_id} not found")
+        table_name = meta["table_name"]
+        summary: DatasetSummary = meta["summary"]
+        stem = Path(summary.filename).stem or dataset_id
+
+        with self._lock:
+            df = self.conn.execute(f"SELECT * FROM {table_name}").fetchdf()
+
+        if fmt == "json":
+            content = df.to_json(orient="records", force_ascii=False, indent=2).encode("utf-8")
+            return content, "application/json", f"{stem}.json"
+
+        content = df.to_csv(index=False).encode("utf-8")
+        return content, "text/csv; charset=utf-8", f"{stem}.csv"
 
 dataset_engine = DatasetEngine()
 

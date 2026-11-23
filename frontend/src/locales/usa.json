@@ -910,7 +910,21 @@
     "revokeShareTooltip": "Stop sharing",
     "shareExperimentTitle": "Share experiment",
     "shareExperimentDesc": "Select a registered user and mode to share \"{name}\".",
-    "shareExpSuccess": "Experiment shared with @{username}."
+    "shareExpSuccess": "Experiment shared with @{username}.",
+    "exportTooltip": "Export dataset",
+    "exportCsv": "Export as CSV",
+    "exportJson": "Export as JSON",
+    "uploadBtn": "Upload Dataset",
+    "uploadTitle": "Upload new dataset",
+    "uploadDesc": "Upload a CSV, JSON, JSONL or Excel file as a task dataset or Ground Truth.",
+    "uploadTypeLabel": "Dataset type",
+    "uploadTypeTask": "Task dataset",
+    "uploadTypeGroundTruth": "Ground Truth",
+    "uploadNameLabel": "Name (optional)",
+    "uploadNamePlaceholder": "e.g. Q4 Reviews",
+    "uploadFileLabel": "File",
+    "uploading": "Uploading...",
+    "uploadSuccess": "Dataset uploaded successfully."
   },
   "notifications": {
     "title": "Notifications",

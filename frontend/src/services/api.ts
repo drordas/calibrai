@@ -287,11 +287,17 @@ export async function fetchCompatibleGroundTruths(inputDatasetId: string): Promi
   return res.json();
 }
 
-export async function uploadDataset(file: File, name?: string, expectedInputDatasetId?: string): Promise<DatasetSummary> {
+export async function uploadDataset(
+  file: File,
+  name?: string,
+  expectedInputDatasetId?: string,
+  isGroundTruth?: boolean
+): Promise<DatasetSummary> {
   const formData = new FormData();
   formData.append("file", file);
   if (name) formData.append("name", name);
   if (expectedInputDatasetId) formData.append("expected_input_dataset_id", expectedInputDatasetId);
+  if (isGroundTruth !== undefined) formData.append("is_ground_truth", String(isGroundTruth));
 
   const res = await fetch(`${API_BASE}/datasets/upload`, {
     method: "POST",
@@ -303,6 +309,28 @@ export async function uploadDataset(file: File, name?: string, expectedInputData
     throw new Error(err.detail || "Error subiendo archivo");
   }
   return res.json();
+}
+
+export async function exportDataset(datasetId: string, format: "csv" | "json", fallbackFilename?: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/datasets/${datasetId}/export?format=${format}`, {
+    headers: getToken() ? { Authorization: `Bearer ${getToken()}` } : {},
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: "Error exportando dataset" }));
+    throw new Error(err.detail || "Error exportando dataset");
+  }
+  const blob = await res.blob();
+  const disposition = res.headers.get("Content-Disposition") || "";
+  const match = disposition.match(/filename="([^"]+)"/);
+  const filename = match?.[1] || `${fallbackFilename || datasetId}.${format}`;
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
 }
 
 export async function generatePromptTemplate(
