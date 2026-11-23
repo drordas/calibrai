@@ -1181,7 +1181,7 @@ export function App() {
                 </div>
               </div>
 
-              {currentExperimentId && (
+              {currentExperimentId && !(currentExperimentDetail?.is_shared && currentExperimentDetail?.share_mode === "view") && (
                 <Button
                   variant="outline"
                   size="sm"
@@ -1636,7 +1636,11 @@ export function App() {
                   selectedModelIds={selectedModelIds}
                   experimentId={currentExperimentId || undefined}
                   evalSpec={currentExperimentDetail?.eval_spec}
-                  onRecalculate={handleRecalculateMetrics}
+                  onRecalculate={
+                    currentExperimentDetail?.is_shared && currentExperimentDetail?.share_mode === "view"
+                      ? undefined
+                      : handleRecalculateMetrics
+                  }
                 />
               </div>
             )}
