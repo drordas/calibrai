@@ -419,7 +419,7 @@ export const ExperimentDashboard: React.FC<ExperimentDashboardProps> = ({
               <Plus className="w-3.5 h-3.5" />
               <span>{t("templates.createTemplate")}</span>
             </Button>
-          ) : (
+          ) : !["running", "queued", "paused"].includes(statusFilter) ? (
             <Button
               type="button"
               onClick={onNewExperiment}
@@ -428,7 +428,7 @@ export const ExperimentDashboard: React.FC<ExperimentDashboardProps> = ({
               <Plus className="w-3.5 h-3.5" />
               <span>{t("dashboard.createExperiment")}</span>
             </Button>
-          )}
+          ) : null}
         </Card>
       ) : (
         <div className="space-y-4">
