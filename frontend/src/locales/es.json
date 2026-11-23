@@ -867,7 +867,15 @@
     "savedSuccess": "Perfil actualizado correctamente.",
     "saving": "Guardando...",
     "allowDatasetSharingLabel": "Permitir recibir y compartir datasets",
-    "allowDatasetSharingHint": "Si está deshabilitado, no aparecerás en la lista de otros usuarios para compartir datasets."
+    "allowDatasetSharingHint": "Si está deshabilitado, no aparecerás en la lista de otros usuarios para compartir datasets.",
+    "deleteButton": "Borrar perfil",
+    "deleteConfirmTitle": "Eliminar perfil de usuario",
+    "deleteConfirmWarning": "Esta acción es irreversible. Se eliminarán tu cuenta, todos tus experimentos y todos tus datasets propios. Si tienes datasets compartidos por otros usuarios, los del propietario nunca se eliminarán.",
+    "deletePasswordLabel": "Contraseña para confirmar",
+    "deletePasswordPlaceholder": "Introduce tu contraseña",
+    "deletePasswordRequired": "Debes introducir tu contraseña para borrar tu perfil.",
+    "deleteConfirmAction": "Confirmar y borrar perfil",
+    "deleting": "Eliminando perfil..."
   },
   "dashboardDatasets": {
     "newExperimentOption": "Nuevo Experimento",

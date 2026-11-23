@@ -1760,6 +1760,10 @@ export function App() {
           setCurrentUser(updatedUser);
           syncWithUserConfig(updatedConfig.language);
         }}
+        onAccountDeleted={() => {
+          setShowProfileModal(false);
+          handleLogout();
+        }}
       />
 
     </div>

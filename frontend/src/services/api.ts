@@ -123,6 +123,19 @@ export async function updateUserProfile(payload: {
   return res.json();
 }
 
+export async function deleteUserProfile(password: string): Promise<{ status: string }> {
+  const res = await fetch(`${API_BASE}/auth/profile/delete`, {
+    method: "POST",
+    headers: getAuthHeaders(),
+    body: JSON.stringify({ password }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: "Error eliminando perfil" }));
+    throw new Error(err.detail || "Error eliminando perfil");
+  }
+  return res.json();
+}
+
 export async function saveBenchmarkRun(payload: {
   benchmark_id?: string;
   name: string;

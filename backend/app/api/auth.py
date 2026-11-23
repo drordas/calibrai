@@ -2,11 +2,13 @@ import re
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from pydantic import BaseModel
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 from backend.app.db.session import get_db
-from backend.app.db.models import DatasetShare, Experiment, ExperimentShare, User, UserConfiguration
+from backend.app.db.models import DatasetRecord, DatasetShare, Experiment, ExperimentShare, User, UserConfiguration
 from backend.app.core.dataset_engine import dataset_engine
+from backend.app.core.experiment_queue import experiment_queue
 from backend.app.core.security import verify_password, get_password_hash, create_access_token, decode_access_token
 from backend.app.schemas.auth import (
     LoginRequest,
@@ -251,6 +253,50 @@ def update_user_profile(
         user=_build_user_out(user),
         config=_build_config_out(config),
     )
+
+
+class DeleteProfileRequest(BaseModel):
+    password: str
+
+
+@router.post("/profile/delete")
+async def delete_user_profile(
+    req: DeleteProfileRequest,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    if not req.password or not verify_password(req.password, user.hashed_password):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="La contraseña actual es incorrecta",
+        )
+
+    user_experiments = db.query(Experiment).filter(Experiment.user_id == user.id).all()
+    for exp in user_experiments:
+        if exp.status == "running":
+            await experiment_queue.cancel_experiment(exp.id)
+
+    user_exp_ids = [exp.id for exp in user_experiments]
+    if user_exp_ids:
+        db.query(ExperimentShare).filter(ExperimentShare.experiment_id.in_(user_exp_ids)).delete(synchronize_session=False)
+    db.query(Experiment).filter(Experiment.user_id == user.id).delete(synchronize_session=False)
+
+    # Delete only datasets owned by this user (never datasets owned by other users and shared with this user)
+    owned_dataset_ids = [
+        row.dataset_id
+        for row in db.query(DatasetRecord).filter(DatasetRecord.owner_user_id == user.id).all()
+    ]
+    if owned_dataset_ids:
+        db.query(DatasetShare).filter(DatasetShare.dataset_id.in_(owned_dataset_ids)).delete(synchronize_session=False)
+        db.query(DatasetRecord).filter(DatasetRecord.dataset_id.in_(owned_dataset_ids)).delete(synchronize_session=False)
+
+    db.delete(user)
+    db.commit()
+
+    for ds_id in owned_dataset_ids:
+        dataset_engine.delete_dataset(ds_id)
+
+    return {"status": "deleted"}
 
 
 @router.get("/notifications")

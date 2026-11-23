@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import { User, UserConfig } from "../types";
-import { updateUserProfile } from "../services/api";
+import { updateUserProfile, deleteUserProfile } from "../services/api";
 import { useTranslation, AVAILABLE_LANGUAGES, Language } from "../i18n";
 import {
   Dialog,
@@ -31,6 +31,7 @@ import {
   Lock,
   Mail,
   Share2,
+  Trash2,
   User as UserIcon,
 } from "lucide-react";
 
@@ -39,6 +40,7 @@ interface UserProfileModalProps {
   onClose: () => void;
   user: User;
   onProfileUpdated: (user: User, config: UserConfig) => void;
+  onAccountDeleted?: () => void;
 }
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -48,6 +50,7 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
   onClose,
   user,
   onProfileUpdated,
+  onAccountDeleted,
 }) => {
   const { t, language } = useTranslation();
   const prevOpenRef = useRef(false);
@@ -68,6 +71,12 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [deletePassword, setDeletePassword] = useState("");
+  const [showDeletePassword, setShowDeletePassword] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+
   useEffect(() => {
     if (isOpen && !prevOpenRef.current) {
       setFullName(user.full_name || "");
@@ -82,6 +91,10 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
       setShowConfirmPassword(false);
       setError(null);
       setSuccess(null);
+      setShowDeleteConfirm(false);
+      setDeletePassword("");
+      setShowDeletePassword(false);
+      setDeleteError(null);
     }
     prevOpenRef.current = isOpen;
   }, [isOpen, user, language]);
@@ -130,6 +143,24 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
       setError(err.message || t("common.error"));
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleDeleteProfile = async () => {
+    setDeleteError(null);
+    if (!deletePassword) {
+      setDeleteError(t("profile.deletePasswordRequired"));
+      return;
+    }
+    setDeleting(true);
+    try {
+      await deleteUserProfile(deletePassword);
+      onClose();
+      onAccountDeleted?.();
+    } catch (err: any) {
+      setDeleteError(err.message || t("common.error"));
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -342,31 +373,135 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
             </div>
           )}
 
-          <div className="flex items-center justify-end gap-2 pt-2 border-t border-border">
+          {showDeleteConfirm && (
+            <div className="p-3 rounded-sm border border-destructive/40 bg-destructive/5 space-y-3">
+              <div className="space-y-1">
+                <h4 className="text-xs font-semibold text-destructive flex items-center gap-1.5">
+                  <Trash2 className="w-3.5 h-3.5 shrink-0" />
+                  <span>{t("profile.deleteConfirmTitle")}</span>
+                </h4>
+                <p className="text-[11px] text-muted-foreground leading-snug">
+                  {t("profile.deleteConfirmWarning")}
+                </p>
+              </div>
+
+              <div className="space-y-1.5">
+                <Label
+                  htmlFor="profile-delete-pass"
+                  className="h-4 flex items-center text-[11px] font-mono uppercase tracking-wider text-muted-foreground"
+                >
+                  {t("profile.deletePasswordLabel")}
+                </Label>
+                <div className="relative">
+                  <Input
+                    id="profile-delete-pass"
+                    type={showDeletePassword ? "text" : "password"}
+                    value={deletePassword}
+                    onChange={(e) => setDeletePassword(e.target.value)}
+                    placeholder={t("profile.deletePasswordPlaceholder")}
+                    autoComplete="current-password"
+                    className="h-9 pr-9 text-xs bg-background border-border rounded-sm"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowDeletePassword((prev) => !prev)}
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+                    tabIndex={-1}
+                  >
+                    {showDeletePassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                  </button>
+                </div>
+              </div>
+
+              {deleteError && (
+                <div className="p-2 rounded-sm bg-destructive/10 border border-destructive/30 flex items-center gap-2 text-xs text-destructive">
+                  <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                  <span>{deleteError}</span>
+                </div>
+              )}
+
+              <div className="flex items-center justify-end gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={deleting}
+                  onClick={() => {
+                    setShowDeleteConfirm(false);
+                    setDeletePassword("");
+                    setDeleteError(null);
+                  }}
+                  className="h-8 text-xs rounded-sm border-border"
+                >
+                  {t("common.cancel")}
+                </Button>
+                <Button
+                  type="button"
+                  variant="destructive"
+                  size="sm"
+                  disabled={deleting}
+                  onClick={handleDeleteProfile}
+                  className="h-8 text-xs rounded-sm gap-1.5"
+                >
+                  {deleting ? (
+                    <>
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      {t("profile.deleting")}
+                    </>
+                  ) : (
+                    <>
+                      <Trash2 className="w-3.5 h-3.5" />
+                      {t("profile.deleteConfirmAction")}
+                    </>
+                  )}
+                </Button>
+              </div>
+            </div>
+          )}
+
+          <div className="flex items-center justify-between gap-2 pt-2 border-t border-border">
             <Button
               type="button"
               variant="outline"
               size="sm"
-              onClick={onClose}
-              className="h-8 text-xs rounded-sm border-border"
+              disabled={saving || deleting}
+              onClick={() => {
+                setShowDeleteConfirm((prev) => !prev);
+                setDeletePassword("");
+                setDeleteError(null);
+              }}
+              className="h-8 text-xs rounded-sm border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive gap-1.5"
             >
-              {t("common.close")}
+              <Trash2 className="w-3.5 h-3.5" />
+              <span>{t("profile.deleteButton")}</span>
             </Button>
-            <Button
-              type="submit"
-              size="sm"
-              disabled={saving}
-              className="h-8 text-xs rounded-sm bg-primary text-primary-foreground hover:bg-primary/90 gap-1.5"
-            >
-              {saving ? (
-                <>
-                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                  {t("profile.saving")}
-                </>
-              ) : (
-                t("common.save")
-              )}
-            </Button>
+
+            <div className="flex items-center gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={onClose}
+                className="h-8 text-xs rounded-sm border-border"
+              >
+                {t("common.close")}
+              </Button>
+              <Button
+                type="submit"
+                size="sm"
+                disabled={saving || deleting}
+                className="h-8 text-xs rounded-sm bg-primary text-primary-foreground hover:bg-primary/90 gap-1.5"
+              >
+                {saving ? (
+                  <>
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    {t("profile.saving")}
+                  </>
+                ) : (
+                  t("common.save")
+                )}
+              </Button>
+            </div>
           </div>
         </form>
       </DialogContent>
