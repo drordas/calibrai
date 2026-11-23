@@ -1,6 +1,14 @@
 import React, { useState, useEffect, useLayoutEffect, useRef, useMemo } from "react";
 import { DatasetSummary, PromptValidationResponse, MetricCatalogItem, ComputedSpec } from "../types";
-import { generatePromptTemplate, validatePrompt, fetchCompatibleGroundTruths } from "../services/api";
+import {
+  generatePromptTemplate,
+  validatePrompt,
+  fetchCompatibleGroundTruths,
+  fetchSavedPrompts,
+  saveUserPrompt,
+  deleteSavedPrompt,
+  SavedPromptItem,
+} from "../services/api";
 import { METRIC_CATALOG } from "../data/metricCatalog";
 import { useTranslation } from "../i18n";
 
@@ -36,7 +44,17 @@ import {
   Pencil,
   RotateCcw,
   X,
+  Save,
+  FolderOpen,
+  Loader2,
 } from "lucide-react";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import {
   Card,
   CardHeader,
@@ -843,6 +861,79 @@ export const PromptEditor: React.FC<PromptEditorProps> = ({
     onValidationStateChange?.(Boolean(validation?.is_valid), isValidating);
   }, [validation, isValidating, onValidationStateChange]);
 
+  const [showSavePromptModal, setShowSavePromptModal] = useState(false);
+  const [savePromptName, setSavePromptName] = useState("");
+  const [savingPrompt, setSavingPrompt] = useState(false);
+  const [savePromptError, setSavePromptError] = useState<string | null>(null);
+
+  const [showLoadPromptModal, setShowLoadPromptModal] = useState(false);
+  const [savedPrompts, setSavedPrompts] = useState<SavedPromptItem[]>([]);
+  const [loadingSavedPrompts, setLoadingSavedPrompts] = useState(false);
+  const [loadPromptError, setLoadPromptError] = useState<string | null>(null);
+
+  const handleOpenSavePromptModal = () => {
+    setSavePromptName("");
+    setSavePromptError(null);
+    setShowSavePromptModal(true);
+  };
+
+  const handleSavePrompt = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSavePromptError(null);
+    const cleanName = savePromptName.trim();
+    if (!cleanName) {
+      setSavePromptError("El nombre del prompt es obligatorio.");
+      return;
+    }
+    if (!promptRealText.trim()) {
+      setSavePromptError("El Prompt del Modelo no puede estar vacío.");
+      return;
+    }
+    setSavingPrompt(true);
+    try {
+      await saveUserPrompt({
+        name: cleanName,
+        system_prompt: systemPrompt || "",
+        model_prompt: promptRealText,
+      });
+      setShowSavePromptModal(false);
+    } catch (err: any) {
+      setSavePromptError(err.message || "Error guardando prompt");
+    } finally {
+      setSavingPrompt(false);
+    }
+  };
+
+  const handleOpenLoadPromptModal = async () => {
+    setLoadPromptError(null);
+    setShowLoadPromptModal(true);
+    setLoadingSavedPrompts(true);
+    try {
+      const items = await fetchSavedPrompts();
+      setSavedPrompts(items);
+    } catch (err: any) {
+      setLoadPromptError(err.message || "Error cargando prompts guardados");
+    } finally {
+      setLoadingSavedPrompts(false);
+    }
+  };
+
+  const handleApplySavedPrompt = (item: SavedPromptItem) => {
+    setSystemPrompt(item.system_prompt || "");
+    setPromptRealText(item.model_prompt);
+    syncAndValidate(item.model_prompt, outputSchemaText, computedSpecs);
+    setShowLoadPromptModal(false);
+  };
+
+  const handleDeleteSavedPrompt = async (id: number) => {
+    try {
+      await deleteSavedPrompt(id);
+      setSavedPrompts((prev) => prev.filter((p) => p.id !== id));
+    } catch (err: any) {
+      setLoadPromptError(err.message || "Error eliminando prompt");
+    }
+  };
+
   // -------------------------------------------------------
   // Handlers for 3 Parts
   // -------------------------------------------------------
@@ -1562,32 +1653,8 @@ export const PromptEditor: React.FC<PromptEditorProps> = ({
 
             {/* TAB 1: 3-PART TEMPLATE EDITOR */}
             <TabsContent value="editor" className="p-4 flex-1 flex flex-col space-y-6 m-0">
-              {/* System Prompt Row */}
-              <div className="space-y-1.5">
-                <div className="flex items-center justify-between gap-2 flex-wrap">
-                  <Label htmlFor="system-prompt" className="text-xs font-semibold text-muted-foreground">
-                    {t("prompt.systemPromptLabel")}
-                  </Label>
-                  <div className="flex items-center gap-2">
-                    <span className="text-[11px] text-muted-foreground">
-                      {t("prompt.systemPromptHelp")}
-                    </span>
-                    <Badge variant="outline" className="text-[10px] font-mono py-0 px-1.5 bg-background/80 text-muted-foreground border-border">
-                      {(systemPrompt || "").length} chars &middot; ~{Math.ceil((systemPrompt || "").length / 4)} tokens
-                    </Badge>
-                  </div>
-                </div>
-                <Textarea
-                  id="system-prompt"
-                  rows={3}
-                  value={systemPrompt}
-                  onChange={(e) => setSystemPrompt(e.target.value)}
-                  className="font-mono text-xs bg-background/60 border-border/80 resize-y leading-relaxed"
-                />
-              </div>
-
               {/* ----------------------------------------------------------------- */}
-              {/* PARTE 1: PROMPT REAL (Instrucciones para el Modelo) */}
+              {/* PARTE 1: PROMPT (System Prompt + Model Prompt) */}
               {/* ----------------------------------------------------------------- */}
               <Card className="border border-border/80 bg-card/60 shadow-none overflow-hidden">
                 <CardHeader className="py-2.5 px-3.5 border-b border-border/60 bg-muted/20">
@@ -1603,8 +1670,37 @@ export const PromptEditor: React.FC<PromptEditorProps> = ({
                     </p>
                   </div>
                 </CardHeader>
-                <CardContent className="p-3 space-y-2 relative">
-                  {braceAutocomplete && filteredAutocompleteVars.length > 0 && (
+                <CardContent className="p-3 space-y-4 relative">
+                  {/* System Prompt */}
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                      <Label htmlFor="system-prompt" className="text-xs font-semibold text-foreground">
+                        {t("prompt.systemPromptLabel")}
+                      </Label>
+                      <div className="flex items-center gap-2">
+                        <span className="text-[11px] text-muted-foreground">
+                          {t("prompt.systemPromptHelp")}
+                        </span>
+                        <Badge variant="outline" className="text-[10px] font-mono py-0 px-1.5 bg-background/80 text-muted-foreground border-border">
+                          {(systemPrompt || "").length} chars &middot; ~{Math.ceil((systemPrompt || "").length / 4)} tokens
+                        </Badge>
+                      </div>
+                    </div>
+                    <Textarea
+                      id="system-prompt"
+                      rows={3}
+                      value={systemPrompt}
+                      onChange={(e) => setSystemPrompt(e.target.value)}
+                      className="font-mono text-xs bg-background/60 border-border/80 resize-y leading-relaxed"
+                    />
+                  </div>
+
+                  {/* Model Prompt */}
+                  <div className="space-y-2">
+                    <Label htmlFor="template-real-prompt" className="text-xs font-semibold text-foreground block">
+                      {t("prompt.modelPromptLabel")}
+                    </Label>
+                    {braceAutocomplete && filteredAutocompleteVars.length > 0 && (
                     <div className="p-2 rounded-sm bg-card border-2 border-primary/50 shadow-md space-y-1.5 z-20">
                       <div className="flex items-center justify-between text-[10px] font-mono text-muted-foreground">
                         <span className="font-semibold text-foreground flex items-center gap-1">
@@ -1678,10 +1774,34 @@ export const PromptEditor: React.FC<PromptEditorProps> = ({
                       };
                     }}
                     rows={7}
-                    aria-label={t("prompt.part1Title")}
+                    aria-label={t("prompt.modelPromptLabel")}
                     className="w-full p-3 text-xs font-mono bg-background/80 border-border/80 focus:ring-primary/20 resize-y leading-relaxed"
                     placeholder={t("prompt.promptRealPlaceholder")}
                   />
+                  </div>
+
+                  <div className="flex items-center justify-end gap-2 pt-1">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={handleOpenLoadPromptModal}
+                      className="h-8 text-xs rounded-sm border-border gap-1.5"
+                    >
+                      <FolderOpen className="w-3.5 h-3.5 text-primary" />
+                      <span>{t("prompt.loadPromptBtn")}</span>
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={handleOpenSavePromptModal}
+                      className="h-8 text-xs rounded-sm border-border gap-1.5"
+                    >
+                      <Save className="w-3.5 h-3.5 text-primary" />
+                      <span>{t("prompt.savePromptBtn")}</span>
+                    </Button>
+                  </div>
                 </CardContent>
               </Card>
 
@@ -2746,6 +2866,158 @@ export const PromptEditor: React.FC<PromptEditorProps> = ({
           />
         </React.Suspense>
       )}
+
+      {/* Save Prompt Dialog */}
+      <Dialog open={showSavePromptModal} onOpenChange={(open) => !open && setShowSavePromptModal(false)}>
+        <DialogContent className="sm:max-w-md bg-card border-border rounded-sm shadow-none">
+          <DialogHeader className="border-b border-border pb-3">
+            <DialogTitle className="font-serif text-base font-bold text-foreground flex items-center gap-2">
+              <Save className="w-4 h-4 text-primary" />
+              <span>{t("prompt.savePromptTitle")}</span>
+            </DialogTitle>
+            <DialogDescription className="text-xs text-muted-foreground">
+              {t("prompt.savePromptDesc")}
+            </DialogDescription>
+          </DialogHeader>
+          <form onSubmit={handleSavePrompt} className="space-y-4 pt-1">
+            <div className="space-y-1.5">
+              <Label htmlFor="save-prompt-name" className="text-xs font-semibold text-foreground">
+                {t("prompt.savePromptNameLabel")}
+              </Label>
+              <Input
+                id="save-prompt-name"
+                type="text"
+                value={savePromptName}
+                onChange={(e) => setSavePromptName(e.target.value)}
+                placeholder={t("prompt.savePromptNamePlaceholder")}
+                className="h-9 text-xs bg-background border-border rounded-sm"
+                autoFocus
+              />
+            </div>
+
+            {savePromptError && (
+              <div className="p-2.5 rounded-sm bg-destructive/10 border border-destructive/30 flex items-center gap-2 text-xs text-destructive">
+                <AlertCircle className="w-4 h-4 shrink-0" />
+                <span>{savePromptError}</span>
+              </div>
+            )}
+
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-border">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setShowSavePromptModal(false)}
+                className="h-8 text-xs rounded-sm border-border"
+              >
+                {t("common.cancel")}
+              </Button>
+              <Button
+                type="submit"
+                size="sm"
+                disabled={savingPrompt}
+                className="h-8 text-xs rounded-sm bg-primary text-primary-foreground hover:bg-primary/90 gap-1.5"
+              >
+                {savingPrompt ? (
+                  <>
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    <span>{t("prompt.savingPrompt")}</span>
+                  </>
+                ) : (
+                  <span>{t("prompt.savePromptAction")}</span>
+                )}
+              </Button>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Load Saved Prompt Dialog */}
+      <Dialog open={showLoadPromptModal} onOpenChange={(open) => !open && setShowLoadPromptModal(false)}>
+        <DialogContent className="sm:max-w-lg bg-card border-border rounded-sm shadow-none">
+          <DialogHeader className="border-b border-border pb-3">
+            <DialogTitle className="font-serif text-base font-bold text-foreground flex items-center gap-2">
+              <FolderOpen className="w-4 h-4 text-primary" />
+              <span>{t("prompt.loadPromptTitle")}</span>
+            </DialogTitle>
+            <DialogDescription className="text-xs text-muted-foreground">
+              {t("prompt.loadPromptDesc")}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-3 pt-1">
+            {loadPromptError && (
+              <div className="p-2.5 rounded-sm bg-destructive/10 border border-destructive/30 flex items-center gap-2 text-xs text-destructive">
+                <AlertCircle className="w-4 h-4 shrink-0" />
+                <span>{loadPromptError}</span>
+              </div>
+            )}
+
+            {loadingSavedPrompts ? (
+              <div className="py-8 flex items-center justify-center gap-2 text-xs text-muted-foreground">
+                <Loader2 className="w-4 h-4 animate-spin text-primary" />
+                <span>{t("common.loading")}</span>
+              </div>
+            ) : savedPrompts.length === 0 ? (
+              <div className="py-8 text-center text-xs text-muted-foreground border border-dashed border-border rounded-sm">
+                {t("prompt.loadPromptEmpty")}
+              </div>
+            ) : (
+              <div className="max-h-80 overflow-y-auto space-y-2 pr-1">
+                {savedPrompts.map((item) => (
+                  <div
+                    key={item.id}
+                    className="p-3 rounded-sm border border-border bg-background flex items-start justify-between gap-3"
+                  >
+                    <div className="min-w-0 flex-1 space-y-1">
+                      <div className="text-xs font-semibold text-foreground truncate">{item.name}</div>
+                      {item.system_prompt && (
+                        <div className="text-[11px] font-mono text-muted-foreground truncate">
+                          System: {item.system_prompt}
+                        </div>
+                      )}
+                      <div className="text-[11px] font-mono text-muted-foreground line-clamp-2">
+                        {item.model_prompt}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <Button
+                        type="button"
+                        size="sm"
+                        onClick={() => handleApplySavedPrompt(item)}
+                        className="h-7 px-2.5 text-xs rounded-sm bg-primary text-primary-foreground hover:bg-primary/90"
+                      >
+                        {t("prompt.loadPromptApply")}
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => handleDeleteSavedPrompt(item.id)}
+                        className="h-7 w-7 p-0 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div className="flex justify-end pt-2 border-t border-border">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setShowLoadPromptModal(false)}
+                className="h-8 text-xs rounded-sm border-border"
+              >
+                {t("common.close")}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

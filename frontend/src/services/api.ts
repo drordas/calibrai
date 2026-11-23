@@ -360,6 +360,49 @@ export async function exportDataset(datasetId: string, format: "csv" | "json", f
   URL.revokeObjectURL(url);
 }
 
+export interface SavedPromptItem {
+  id: number;
+  name: string;
+  system_prompt: string;
+  model_prompt: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export async function fetchSavedPrompts(): Promise<SavedPromptItem[]> {
+  const res = await fetch(`${API_BASE}/prompts/saved`, {
+    headers: getAuthHeaders(),
+  });
+  if (!res.ok) throw new Error("Error cargando prompts guardados");
+  return res.json();
+}
+
+export async function saveUserPrompt(payload: {
+  name: string;
+  system_prompt: string;
+  model_prompt: string;
+}): Promise<SavedPromptItem> {
+  const res = await fetch(`${API_BASE}/prompts/saved`, {
+    method: "POST",
+    headers: getAuthHeaders(),
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: "Error guardando prompt" }));
+    throw new Error(err.detail || "Error guardando prompt");
+  }
+  return res.json();
+}
+
+export async function deleteSavedPrompt(promptId: number): Promise<{ status: string }> {
+  const res = await fetch(`${API_BASE}/prompts/saved/${promptId}`, {
+    method: "DELETE",
+    headers: getAuthHeaders(),
+  });
+  if (!res.ok) throw new Error("Error eliminando prompt guardado");
+  return res.json();
+}
+
 export async function generatePromptTemplate(
   dataset_id: string,
   task_type: string,

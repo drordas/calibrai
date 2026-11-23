@@ -22,6 +22,7 @@ class User(Base):
     configuration = relationship("UserConfiguration", back_populates="user", uselist=False, cascade="all, delete-orphan")
     saved_benchmarks = relationship("SavedBenchmark", back_populates="user", cascade="all, delete-orphan")
     experiments = relationship("Experiment", back_populates="user", cascade="all, delete-orphan")
+    saved_prompts = relationship("SavedPrompt", back_populates="user", cascade="all, delete-orphan")
 
 
 class DatasetRecord(Base):
@@ -156,3 +157,17 @@ class Experiment(Base):
     notification_dismissed = Column(Boolean, default=False)
 
     user = relationship("User", back_populates="experiments")
+
+
+class SavedPrompt(Base):
+    __tablename__ = "saved_prompts"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    name = Column(String(255), nullable=False)
+    system_prompt = Column(Text, default="", nullable=False)
+    model_prompt = Column(Text, nullable=False)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+
+    user = relationship("User", back_populates="saved_prompts")
