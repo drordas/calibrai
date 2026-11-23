@@ -896,7 +896,6 @@ export const PromptEditor: React.FC<PromptEditorProps> = ({
     },
   ];
 
-  const promptBackdropRef = useRef<HTMLDivElement>(null);
   const schemaTextareaRef = useRef<HTMLTextAreaElement>(null);
   const [jsonKeyAutocomplete, setJsonKeyAutocomplete] = useState<{
     query: string;
@@ -1021,53 +1020,6 @@ export const PromptEditor: React.FC<PromptEditorProps> = ({
       isValidating
     );
   }, [validation, isValidating, jsonPromptCoherence.isCoherent, onValidationStateChange]);
-
-  // Build highlighted segments for Prompt del Modelo backdrop based on JSON objects
-  const highlightedPromptSegments = useMemo(() => {
-    const text = promptRealText || "";
-    if (!text || !parsedOutputSchema) {
-      return [{ text, markClass: "" }];
-    }
-    const topKeys = Object.keys(parsedOutputSchema);
-    if (topKeys.length === 0) {
-      return [{ text, markClass: "" }];
-    }
-
-    const escaped = topKeys
-      .slice()
-      .sort((a, b) => b.length - a.length)
-      .map((k) => k.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
-    const headerRegex = new RegExp(`\\b(${escaped.join("|")})\\b`, "gi");
-
-    const matches: Array<{ index: number; key: string; colorIdx: number }> = [];
-    let m: RegExpExecArray | null;
-    while ((m = headerRegex.exec(text)) !== null) {
-      const foundLower = m[1].toLowerCase();
-      const idx = topKeys.findIndex((k) => k.toLowerCase() === foundLower);
-      if (idx >= 0) {
-        matches.push({ index: m.index, key: topKeys[idx], colorIdx: idx % JSON_OBJECT_PALETTE.length });
-      }
-    }
-
-    if (matches.length === 0) {
-      return [{ text, markClass: "" }];
-    }
-
-    const segments: Array<{ text: string; markClass: string }> = [];
-    if (matches[0].index > 0) {
-      segments.push({ text: text.slice(0, matches[0].index), markClass: "" });
-    }
-    for (let i = 0; i < matches.length; i++) {
-      const start = matches[i].index;
-      const end = i + 1 < matches.length ? matches[i + 1].index : text.length;
-      const slice = text.slice(start, end);
-      segments.push({
-        text: slice,
-        markClass: JSON_OBJECT_PALETTE[matches[i].colorIdx].mark,
-      });
-    }
-    return segments;
-  }, [promptRealText, parsedOutputSchema]);
 
   const [showSavePromptModal, setShowSavePromptModal] = useState(false);
   const [savePromptName, setSavePromptName] = useState("");
@@ -2037,58 +1989,35 @@ export const PromptEditor: React.FC<PromptEditorProps> = ({
                     </div>
                   )}
 
-                  <div className="relative rounded-md border border-border/80 bg-background/80 overflow-hidden">
-                    <div
-                      ref={promptBackdropRef}
-                      aria-hidden="true"
-                      className="pointer-events-none absolute inset-0 p-3 text-xs font-mono leading-relaxed whitespace-pre-wrap break-words overflow-hidden text-transparent select-none"
-                    >
-                      {highlightedPromptSegments.map((seg, idx) =>
-                        seg.markClass ? (
-                          <mark key={idx} className={`${seg.markClass} text-transparent`}>
-                            {seg.text}
-                          </mark>
-                        ) : (
-                          <span key={idx}>{seg.text}</span>
-                        )
-                      )}
-                    </div>
-                    <Textarea
-                      ref={promptTextareaRef}
-                      id="template-real-prompt"
-                      value={promptRealText}
-                      onChange={handlePromptRealChange}
-                      onKeyDown={handlePromptKeyDown}
-                      onScroll={(e) => {
-                        if (promptBackdropRef.current) {
-                          promptBackdropRef.current.scrollTop = e.currentTarget.scrollTop;
-                          promptBackdropRef.current.scrollLeft = e.currentTarget.scrollLeft;
-                        }
-                      }}
-                      onSelect={(e) => {
-                        lastCursorRef.current = {
-                          start: e.currentTarget.selectionStart,
-                          end: e.currentTarget.selectionEnd,
-                        };
-                      }}
-                      onClick={(e) => {
-                        lastCursorRef.current = {
-                          start: e.currentTarget.selectionStart,
-                          end: e.currentTarget.selectionEnd,
-                        };
-                      }}
-                      onKeyUp={(e) => {
-                        lastCursorRef.current = {
-                          start: e.currentTarget.selectionStart,
-                          end: e.currentTarget.selectionEnd,
-                        };
-                      }}
-                      rows={7}
-                      aria-label={t("prompt.modelPromptLabel")}
-                      className="relative z-10 w-full p-3 text-xs font-mono bg-transparent border-0 focus:ring-primary/20 resize-y leading-relaxed caret-foreground"
-                      placeholder={t("prompt.promptRealPlaceholder")}
-                    />
-                  </div>
+                  <Textarea
+                    ref={promptTextareaRef}
+                    id="template-real-prompt"
+                    value={promptRealText}
+                    onChange={handlePromptRealChange}
+                    onKeyDown={handlePromptKeyDown}
+                    onSelect={(e) => {
+                      lastCursorRef.current = {
+                        start: e.currentTarget.selectionStart,
+                        end: e.currentTarget.selectionEnd,
+                      };
+                    }}
+                    onClick={(e) => {
+                      lastCursorRef.current = {
+                        start: e.currentTarget.selectionStart,
+                        end: e.currentTarget.selectionEnd,
+                      };
+                    }}
+                    onKeyUp={(e) => {
+                      lastCursorRef.current = {
+                        start: e.currentTarget.selectionStart,
+                        end: e.currentTarget.selectionEnd,
+                      };
+                    }}
+                    rows={7}
+                    aria-label={t("prompt.modelPromptLabel")}
+                    className="w-full p-3 text-xs font-mono bg-background/80 border-border/80 focus:ring-primary/20 resize-y leading-relaxed"
+                    placeholder={t("prompt.promptRealPlaceholder")}
+                  />
                   </div>
 
                   <div className="flex items-center justify-end gap-2 pt-1">
