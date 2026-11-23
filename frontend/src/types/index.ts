@@ -20,6 +20,16 @@ export interface DatasetSummary {
   detected_id_column?: string;
   is_ground_truth?: boolean;
   benchmark_id?: string;
+  is_shared?: boolean;
+  share_status?: "pending" | "accepted" | string | null;
+  shared_by?: string | null;
+  share_id?: number | null;
+}
+
+export interface ShareUser {
+  id: number;
+  username: string;
+  full_name?: string | null;
 }
 
 export interface PaginatedRowsResponse {

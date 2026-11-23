@@ -862,13 +862,14 @@
     "passwordMismatch": "The new passwords do not match.",
     "currentPasswordRequired": "You must enter your current password to change it.",
     "passwordTooShort": "The new password must be at least 4 characters long.",
+    "invalidEmail": "Please enter a valid email address.",
     "savedSuccess": "Profile updated successfully.",
     "saving": "Saving..."
   },
   "dashboardDatasets": {
     "newExperimentOption": "New Experiment",
     "fromTemplateOption": "Experiment from Template",
-    "viewDatasets": "View Datasets",
+    "viewDatasets": "Manage Datasets",
     "modalTitle": "Stored Datasets",
     "modalDesc": "Overview of task datasets and Ground Truth files available in your account.",
     "taskDatasetsTitle": "Available Datasets (Tasks)",
@@ -879,8 +880,24 @@
     "colRows": "Rows",
     "colCols": "Columns",
     "colSize": "Size",
-    "colOrigin": "Origin",
-    "originSample": "Sample",
-    "originUploaded": "Uploaded"
+    "previewTitle": "Dataset Preview",
+    "previewRowsInfo": "Showing {shown} of {total} rows",
+    "deleteTitle": "Delete dataset",
+    "deleteWarning": "You are about to delete \"{name}\". Deleting this dataset will also delete any experiments associated with it. This action cannot be undone.",
+    "deleteConfirm": "Delete dataset & experiments",
+    "deleting": "Deleting...",
+    "shareTitle": "Share dataset",
+    "shareDesc": "Select a registered user to share \"{name}\" with.",
+    "shareNoUsers": "No other registered users available.",
+    "shareBtn": "Share",
+    "sharing": "Sharing...",
+    "shareSuccess": "Dataset shared with @{username}.",
+    "sharedBadge": "Shared",
+    "sharedBy": "Shared by @{username}",
+    "acceptShare": "Accept",
+    "rejectShare": "Decline",
+    "viewTooltip": "View dataset",
+    "deleteTooltip": "Delete dataset",
+    "shareTooltip": "Share dataset"
   }
 }

@@ -22,6 +22,24 @@ class DatasetSummary(BaseModel):
     detected_id_column: Optional[str] = None
     is_ground_truth: bool = False
     benchmark_id: Optional[str] = None
+    is_shared: bool = False
+    share_status: Optional[str] = None
+    shared_by: Optional[str] = None
+    share_id: Optional[int] = None
+
+
+class ShareUserOut(BaseModel):
+    id: int
+    username: str
+    full_name: Optional[str] = None
+
+
+class DatasetShareRequest(BaseModel):
+    target_user_id: int
+
+
+class DatasetShareRespondRequest(BaseModel):
+    accept: bool
 
 class PaginatedRowsResponse(BaseModel):
     dataset_id: str

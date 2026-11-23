@@ -171,9 +171,43 @@ export async function deleteSavedBenchmark(id: string): Promise<void> {
 }
 
 export async function fetchDatasets(): Promise<DatasetSummary[]> {
-  const res = await fetch(`${API_BASE}/datasets`);
+  const res = await fetch(`${API_BASE}/datasets`, {
+    headers: getAuthHeaders(),
+  });
   if (!res.ok) throw new Error("Error fetching datasets");
   return res.json();
+}
+
+export async function fetchShareableUsers(): Promise<Array<{ id: number; username: string; full_name?: string | null }>> {
+  const res = await fetch(`${API_BASE}/datasets/share/users`, {
+    headers: getAuthHeaders(),
+  });
+  if (!res.ok) throw new Error("Error fetching users");
+  return res.json();
+}
+
+export async function shareDatasetWithUser(datasetId: string, targetUserId: number): Promise<void> {
+  const res = await fetch(`${API_BASE}/datasets/${datasetId}/share`, {
+    method: "POST",
+    headers: getAuthHeaders(),
+    body: JSON.stringify({ target_user_id: targetUserId }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: "Error compartiendo dataset" }));
+    throw new Error(err.detail || "Error compartiendo dataset");
+  }
+}
+
+export async function respondToDatasetShare(shareId: number, accept: boolean): Promise<void> {
+  const res = await fetch(`${API_BASE}/datasets/shares/${shareId}/respond`, {
+    method: "POST",
+    headers: getAuthHeaders(),
+    body: JSON.stringify({ accept }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: "Error respondiendo invitación" }));
+    throw new Error(err.detail || "Error respondiendo invitación");
+  }
 }
 
 export async function deleteDataset(id: string): Promise<void> {

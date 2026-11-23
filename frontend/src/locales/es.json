@@ -862,13 +862,14 @@
     "passwordMismatch": "Las nuevas contraseñas no coinciden.",
     "currentPasswordRequired": "Debes indicar tu contraseña actual para cambiarla.",
     "passwordTooShort": "La nueva contraseña debe tener al menos 4 caracteres.",
+    "invalidEmail": "Introduce una dirección de correo electrónico válida.",
     "savedSuccess": "Perfil actualizado correctamente.",
     "saving": "Guardando..."
   },
   "dashboardDatasets": {
     "newExperimentOption": "Nuevo Experimento",
     "fromTemplateOption": "Experimento a partir de Plantilla",
-    "viewDatasets": "Ver Datasets",
+    "viewDatasets": "Gestionar Datasets",
     "modalTitle": "Datasets Almacenados",
     "modalDesc": "Listado de los datasets de tareas y archivos de Ground Truth disponibles en tu cuenta.",
     "taskDatasetsTitle": "Datasets Disponibles (Tareas)",
@@ -879,8 +880,24 @@
     "colRows": "Filas",
     "colCols": "Columnas",
     "colSize": "Tamaño",
-    "colOrigin": "Origen",
-    "originSample": "Muestra",
-    "originUploaded": "Subido"
+    "previewTitle": "Vista previa del dataset",
+    "previewRowsInfo": "Mostrando {shown} de {total} filas",
+    "deleteTitle": "Eliminar dataset",
+    "deleteWarning": "Vas a eliminar el dataset \"{name}\". Eliminar este dataset implicará eliminar también los experimentos asociados al mismo. Esta acción no se puede deshacer.",
+    "deleteConfirm": "Eliminar dataset y experimentos",
+    "deleting": "Eliminando...",
+    "shareTitle": "Compartir dataset",
+    "shareDesc": "Selecciona un usuario registrado para compartir \"{name}\".",
+    "shareNoUsers": "No hay otros usuarios registrados disponibles.",
+    "shareBtn": "Compartir",
+    "sharing": "Compartiendo...",
+    "shareSuccess": "Dataset compartido con @{username}.",
+    "sharedBadge": "Compartido",
+    "sharedBy": "Compartido por @{username}",
+    "acceptShare": "Aceptar",
+    "rejectShare": "Rechazar",
+    "viewTooltip": "Ver dataset",
+    "deleteTooltip": "Eliminar dataset",
+    "shareTooltip": "Compartir dataset"
   }
 }

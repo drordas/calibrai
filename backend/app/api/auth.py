@@ -82,6 +82,21 @@ def get_current_user(
         )
     return user
 
+
+def get_optional_current_user(
+    credentials: HTTPAuthorizationCredentials = Depends(security_scheme),
+    db: Session = Depends(get_db)
+) -> Optional[User]:
+    if not credentials:
+        return None
+    payload = decode_access_token(credentials.credentials)
+    if not payload or "sub" not in payload:
+        return None
+    user = db.query(User).filter(User.username == payload["sub"]).first()
+    if not user or not user.is_active:
+        return None
+    return user
+
 @router.post("/login", response_model=TokenResponse)
 def login(req: LoginRequest, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.username == req.username).first()

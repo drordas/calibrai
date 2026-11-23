@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { User, UserConfig } from "../types";
 import { updateUserProfile } from "../services/api";
 import { useTranslation, AVAILABLE_LANGUAGES, Language } from "../i18n";
@@ -20,7 +20,17 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { AlertCircle, CheckCircle2, Loader2, Lock, Mail, Globe, User as UserIcon } from "lucide-react";
+import {
+  AlertCircle,
+  CheckCircle2,
+  Eye,
+  EyeOff,
+  Globe,
+  Loader2,
+  Lock,
+  Mail,
+  User as UserIcon,
+} from "lucide-react";
 
 interface UserProfileModalProps {
   isOpen: boolean;
@@ -29,6 +39,8 @@ interface UserProfileModalProps {
   onProfileUpdated: (user: User, config: UserConfig) => void;
 }
 
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
 export const UserProfileModal: React.FC<UserProfileModalProps> = ({
   isOpen,
   onClose,
@@ -36,6 +48,7 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
   onProfileUpdated,
 }) => {
   const { t, language } = useTranslation();
+  const prevOpenRef = useRef(false);
 
   const [fullName, setFullName] = useState(user.full_name || "");
   const [email, setEmail] = useState(user.email || "");
@@ -44,27 +57,41 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
 
+  const [showCurrentPassword, setShowCurrentPassword] = useState(false);
+  const [showNewPassword, setShowNewPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
   useEffect(() => {
-    if (isOpen) {
+    if (isOpen && !prevOpenRef.current) {
       setFullName(user.full_name || "");
       setEmail(user.email || "");
       setDefaultLanguage(language);
       setCurrentPassword("");
       setNewPassword("");
       setConfirmPassword("");
+      setShowCurrentPassword(false);
+      setShowNewPassword(false);
+      setShowConfirmPassword(false);
       setError(null);
       setSuccess(null);
     }
+    prevOpenRef.current = isOpen;
   }, [isOpen, user, language]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
     setSuccess(null);
+
+    const trimmedEmail = email.trim();
+    if (trimmedEmail && !EMAIL_REGEX.test(trimmedEmail)) {
+      setError(t("profile.invalidEmail"));
+      return;
+    }
 
     if (newPassword || confirmPassword || currentPassword) {
       if (!currentPassword) {
@@ -85,7 +112,7 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
     try {
       const result = await updateUserProfile({
         full_name: fullName.trim(),
-        email: email.trim(),
+        email: trimmedEmail,
         language: defaultLanguage,
         ...(newPassword ? { current_password: currentPassword, new_password: newPassword } : {}),
       });
@@ -119,25 +146,15 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
           </DialogDescription>
         </DialogHeader>
 
-        <form onSubmit={handleSubmit} className="space-y-4 pt-1">
-          {error && (
-            <div className="p-2.5 rounded-sm bg-destructive/10 border border-destructive/30 flex items-center gap-2 text-xs text-destructive">
-              <AlertCircle className="w-4 h-4 shrink-0" />
-              <span>{error}</span>
-            </div>
-          )}
-
-          {success && (
-            <div className="p-2.5 rounded-sm bg-emerald-500/10 border border-emerald-500/30 flex items-center gap-2 text-xs text-emerald-700 dark:text-emerald-400">
-              <CheckCircle2 className="w-4 h-4 shrink-0" />
-              <span>{success}</span>
-            </div>
-          )}
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <form onSubmit={handleSubmit} noValidate className="space-y-4 pt-1">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 items-start">
             <div className="space-y-1.5">
-              <Label htmlFor="profile-fullname" className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground">
-                {t("profile.fullNameLabel")}
+              <Label
+                htmlFor="profile-fullname"
+                className="h-4 flex items-center gap-1.5 text-[11px] font-mono uppercase tracking-wider text-muted-foreground"
+              >
+                <UserIcon className="w-3 h-3 text-primary shrink-0" />
+                <span>{t("profile.fullNameLabel")}</span>
               </Label>
               <Input
                 id="profile-fullname"
@@ -150,9 +167,12 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
             </div>
 
             <div className="space-y-1.5">
-              <Label htmlFor="profile-email" className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
-                <Mail className="w-3 h-3 text-primary" />
-                {t("profile.emailLabel")}
+              <Label
+                htmlFor="profile-email"
+                className="h-4 flex items-center gap-1.5 text-[11px] font-mono uppercase tracking-wider text-muted-foreground"
+              >
+                <Mail className="w-3 h-3 text-primary shrink-0" />
+                <span>{t("profile.emailLabel")}</span>
               </Label>
               <Input
                 id="profile-email"
@@ -166,9 +186,9 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
           </div>
 
           <div className="space-y-1.5">
-            <Label className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
-              <Globe className="w-3 h-3 text-primary" />
-              {t("profile.defaultLanguageLabel")}
+            <Label className="h-4 flex items-center gap-1.5 text-[11px] font-mono uppercase tracking-wider text-muted-foreground">
+              <Globe className="w-3 h-3 text-primary shrink-0" />
+              <span>{t("profile.defaultLanguageLabel")}</span>
             </Label>
             <Select value={defaultLanguage} onValueChange={(val) => setDefaultLanguage(val as Language)}>
               <SelectTrigger className="h-9 text-xs bg-background border-border rounded-sm">
@@ -197,52 +217,105 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
             </div>
 
             <div className="space-y-1.5">
-              <Label htmlFor="profile-current-pass" className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground">
+              <Label
+                htmlFor="profile-current-pass"
+                className="h-4 flex items-center text-[11px] font-mono uppercase tracking-wider text-muted-foreground"
+              >
                 {t("profile.currentPasswordLabel")}
               </Label>
-              <Input
-                id="profile-current-pass"
-                type="password"
-                value={currentPassword}
-                onChange={(e) => setCurrentPassword(e.target.value)}
-                placeholder={t("profile.currentPasswordPlaceholder")}
-                autoComplete="current-password"
-                className="h-9 text-xs bg-background border-border rounded-sm"
-              />
+              <div className="relative">
+                <Input
+                  id="profile-current-pass"
+                  type={showCurrentPassword ? "text" : "password"}
+                  value={currentPassword}
+                  onChange={(e) => setCurrentPassword(e.target.value)}
+                  placeholder={t("profile.currentPasswordPlaceholder")}
+                  autoComplete="current-password"
+                  className="h-9 pr-9 text-xs bg-background border-border rounded-sm"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowCurrentPassword((prev) => !prev)}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+                  tabIndex={-1}
+                >
+                  {showCurrentPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                </button>
+              </div>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="space-y-1.5">
-                <Label htmlFor="profile-new-pass" className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground">
+                <Label
+                  htmlFor="profile-new-pass"
+                  className="h-4 flex items-center text-[11px] font-mono uppercase tracking-wider text-muted-foreground"
+                >
                   {t("profile.newPasswordLabel")}
                 </Label>
-                <Input
-                  id="profile-new-pass"
-                  type="password"
-                  value={newPassword}
-                  onChange={(e) => setNewPassword(e.target.value)}
-                  placeholder={t("profile.newPasswordPlaceholder")}
-                  autoComplete="new-password"
-                  className="h-9 text-xs bg-background border-border rounded-sm"
-                />
+                <div className="relative">
+                  <Input
+                    id="profile-new-pass"
+                    type={showNewPassword ? "text" : "password"}
+                    value={newPassword}
+                    onChange={(e) => setNewPassword(e.target.value)}
+                    placeholder={t("profile.newPasswordPlaceholder")}
+                    autoComplete="new-password"
+                    className="h-9 pr-9 text-xs bg-background border-border rounded-sm"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowNewPassword((prev) => !prev)}
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+                    tabIndex={-1}
+                  >
+                    {showNewPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                  </button>
+                </div>
               </div>
 
               <div className="space-y-1.5">
-                <Label htmlFor="profile-confirm-pass" className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground">
+                <Label
+                  htmlFor="profile-confirm-pass"
+                  className="h-4 flex items-center text-[11px] font-mono uppercase tracking-wider text-muted-foreground"
+                >
                   {t("profile.confirmPasswordLabel")}
                 </Label>
-                <Input
-                  id="profile-confirm-pass"
-                  type="password"
-                  value={confirmPassword}
-                  onChange={(e) => setConfirmPassword(e.target.value)}
-                  placeholder={t("profile.confirmPasswordPlaceholder")}
-                  autoComplete="new-password"
-                  className="h-9 text-xs bg-background border-border rounded-sm"
-                />
+                <div className="relative">
+                  <Input
+                    id="profile-confirm-pass"
+                    type={showConfirmPassword ? "text" : "password"}
+                    value={confirmPassword}
+                    onChange={(e) => setConfirmPassword(e.target.value)}
+                    placeholder={t("profile.confirmPasswordPlaceholder")}
+                    autoComplete="new-password"
+                    className="h-9 pr-9 text-xs bg-background border-border rounded-sm"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowConfirmPassword((prev) => !prev)}
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+                    tabIndex={-1}
+                  >
+                    {showConfirmPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                  </button>
+                </div>
               </div>
             </div>
           </div>
+
+          {error && (
+            <div className="p-2.5 rounded-sm bg-destructive/10 border border-destructive/30 flex items-center gap-2 text-xs text-destructive">
+              <AlertCircle className="w-4 h-4 shrink-0" />
+              <span>{error}</span>
+            </div>
+          )}
+
+          {success && (
+            <div className="p-2.5 rounded-sm bg-emerald-500/10 border border-emerald-500/30 flex items-center gap-2 text-xs text-emerald-700 dark:text-emerald-400">
+              <CheckCircle2 className="w-4 h-4 shrink-0" />
+              <span>{success}</span>
+            </div>
+          )}
 
           <div className="flex items-center justify-end gap-2 pt-2 border-t border-border">
             <Button

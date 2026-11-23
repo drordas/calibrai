@@ -1,6 +1,13 @@
-import React, { useEffect, useState } from "react";
-import { DatasetSummary } from "../types";
-import { fetchDatasets } from "../services/api";
+import React, { useCallback, useEffect, useState } from "react";
+import { DatasetSummary, PaginatedRowsResponse, ShareUser } from "../types";
+import {
+  deleteDataset,
+  fetchDatasets,
+  fetchPaginatedRows,
+  fetchShareableUsers,
+  respondToDatasetShare,
+  shareDatasetWithUser,
+} from "../services/api";
 import { useTranslation } from "../i18n";
 import {
   Dialog,
@@ -19,7 +26,18 @@ import {
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { AlertCircle, Database, Loader2, ShieldCheck } from "lucide-react";
+import {
+  AlertCircle,
+  Check,
+  CheckCircle2,
+  Database,
+  Eye,
+  Loader2,
+  Share2,
+  ShieldCheck,
+  Trash2,
+  X,
+} from "lucide-react";
 
 interface DashboardDatasetsModalProps {
   isOpen: boolean;
@@ -41,33 +59,133 @@ export const DashboardDatasetsModal: React.FC<DashboardDatasetsModalProps> = ({
   const [datasets, setDatasets] = useState<DatasetSummary[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [feedback, setFeedback] = useState<string | null>(null);
+
+  // Preview state
+  const [previewDataset, setPreviewDataset] = useState<DatasetSummary | null>(null);
+  const [previewRows, setPreviewRows] = useState<PaginatedRowsResponse | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+
+  // Delete state
+  const [deleteTarget, setDeleteTarget] = useState<DatasetSummary | null>(null);
+  const [deleting, setDeleting] = useState(false);
+
+  // Share state
+  const [shareTarget, setShareTarget] = useState<DatasetSummary | null>(null);
+  const [shareUsers, setShareUsers] = useState<ShareUser[]>([]);
+  const [shareUsersLoading, setShareUsersLoading] = useState(false);
+  const [sharingUserId, setSharingUserId] = useState<number | null>(null);
+
+  // Respond to incoming share
+  const [respondingShareId, setRespondingShareId] = useState<number | null>(null);
+
+  const loadDatasets = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const data = await fetchDatasets();
+      setDatasets(data);
+    } catch (err: any) {
+      setError(err?.message || t("common.error"));
+    } finally {
+      setLoading(false);
+    }
+  }, [t]);
 
   useEffect(() => {
     if (!isOpen) return;
-    let cancelled = false;
-    setLoading(true);
+    setFeedback(null);
+    loadDatasets();
+  }, [isOpen, loadDatasets]);
+
+  const handleOpenPreview = async (ds: DatasetSummary) => {
+    setPreviewDataset(ds);
+    setPreviewRows(null);
+    setPreviewLoading(true);
+    try {
+      const rows = await fetchPaginatedRows(ds.id, 0, 25);
+      setPreviewRows(rows);
+    } catch (err: any) {
+      setError(err?.message || t("common.error"));
+      setPreviewDataset(null);
+    } finally {
+      setPreviewLoading(false);
+    }
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!deleteTarget) return;
+    setDeleting(true);
     setError(null);
-    fetchDatasets()
-      .then((data) => {
-        if (!cancelled) setDatasets(data);
-      })
-      .catch((err: any) => {
-        if (!cancelled) setError(err?.message || t("common.error"));
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [isOpen, t]);
+    try {
+      await deleteDataset(deleteTarget.id);
+      setDeleteTarget(null);
+      await loadDatasets();
+    } catch (err: any) {
+      setError(err?.message || t("common.error"));
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  const handleOpenShare = async (ds: DatasetSummary) => {
+    setShareTarget(ds);
+    setShareUsers([]);
+    setShareUsersLoading(true);
+    setError(null);
+    try {
+      const users = await fetchShareableUsers();
+      setShareUsers(users);
+    } catch (err: any) {
+      setError(err?.message || t("common.error"));
+      setShareTarget(null);
+    } finally {
+      setShareUsersLoading(false);
+    }
+  };
+
+  const handleShareWithUser = async (targetUser: ShareUser) => {
+    if (!shareTarget) return;
+    setSharingUserId(targetUser.id);
+    setError(null);
+    try {
+      await shareDatasetWithUser(shareTarget.id, targetUser.id);
+      setShareTarget(null);
+      setFeedback(t("dashboardDatasets.shareSuccess", { username: targetUser.username }));
+    } catch (err: any) {
+      setError(err?.message || t("common.error"));
+    } finally {
+      setSharingUserId(null);
+    }
+  };
+
+  const handleRespondShare = async (shareId: number, accept: boolean) => {
+    setRespondingShareId(shareId);
+    setError(null);
+    try {
+      await respondToDatasetShare(shareId, accept);
+      await loadDatasets();
+    } catch (err: any) {
+      setError(err?.message || t("common.error"));
+    } finally {
+      setRespondingShareId(null);
+    }
+  };
 
   const corpusDatasets = datasets.filter((ds) => !ds.is_ground_truth);
   const groundTruthDatasets = datasets.filter((ds) => Boolean(ds.is_ground_truth));
 
   const renderDatasetTable = (items: DatasetSummary[]) => (
     <div className="border-t-2 border-b-2 border-foreground bg-card">
-      <Table>
+      <Table className="table-fixed w-full">
+        <colgroup>
+          <col className="w-[38%]" />
+          <col className="w-[10%]" />
+          <col className="w-[10%]" />
+          <col className="w-[12%]" />
+          <col className="w-[12%]" />
+          <col className="w-[18%]" />
+        </colgroup>
         <TableHeader>
           <TableRow className="border-b border-border hover:bg-transparent">
             <TableHead className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground h-9">
@@ -85,9 +203,7 @@ export const DashboardDatasetsModal: React.FC<DashboardDatasetsModalProps> = ({
             <TableHead className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground h-9 text-right">
               {t("dashboardDatasets.colSize")}
             </TableHead>
-            <TableHead className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground h-9">
-              {t("dashboardDatasets.colOrigin")}
-            </TableHead>
+            <TableHead className="h-9 text-right" />
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -101,44 +217,108 @@ export const DashboardDatasetsModal: React.FC<DashboardDatasetsModalProps> = ({
               </TableCell>
             </TableRow>
           ) : (
-            items.map((ds) => (
-              <TableRow key={ds.id} className="border-b border-border/60">
-                <TableCell className="py-2.5">
-                  <div className="font-medium text-xs text-foreground">{ds.name}</div>
-                  <div className="text-[11px] font-mono text-muted-foreground truncate max-w-[240px]">
-                    {ds.filename}
-                  </div>
-                </TableCell>
-                <TableCell className="py-2.5">
-                  <Badge variant="outline" className="text-[10px] font-mono uppercase rounded-sm border-border">
-                    {ds.format}
-                  </Badge>
-                </TableCell>
-                <TableCell className="py-2.5 text-right font-mono text-xs tabular-nums">
-                  {ds.total_rows.toLocaleString()}
-                </TableCell>
-                <TableCell className="py-2.5 text-right font-mono text-xs tabular-nums">
-                  {ds.columns?.length || 0}
-                </TableCell>
-                <TableCell className="py-2.5 text-right font-mono text-xs tabular-nums text-muted-foreground">
-                  {formatBytes(ds.size_bytes)}
-                </TableCell>
-                <TableCell className="py-2.5">
-                  <Badge
-                    variant="outline"
-                    className={`text-[10px] font-mono rounded-sm ${
-                      ds.is_sample
-                        ? "border-border text-muted-foreground"
-                        : "border-primary/40 text-primary bg-primary/5"
-                    }`}
-                  >
-                    {ds.is_sample
-                      ? t("dashboardDatasets.originSample")
-                      : t("dashboardDatasets.originUploaded")}
-                  </Badge>
-                </TableCell>
-              </TableRow>
-            ))
+            items.map((ds) => {
+              const isPendingShare = ds.is_shared && ds.share_status === "pending";
+              return (
+                <TableRow key={ds.id} className="border-b border-border/60">
+                  <TableCell className="py-2.5">
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span className="font-medium text-xs text-foreground truncate">{ds.name}</span>
+                      {ds.is_shared && (
+                        <Badge
+                          variant="outline"
+                          className="text-[10px] font-mono rounded-sm border-primary/40 text-primary bg-primary/5"
+                          title={ds.shared_by ? t("dashboardDatasets.sharedBy", { username: ds.shared_by }) : undefined}
+                        >
+                          {t("dashboardDatasets.sharedBadge")}
+                        </Badge>
+                      )}
+                    </div>
+                    <div className="text-[11px] font-mono text-muted-foreground truncate">
+                      {ds.filename}
+                    </div>
+                  </TableCell>
+                  <TableCell className="py-2.5">
+                    <Badge variant="outline" className="text-[10px] font-mono uppercase rounded-sm border-border">
+                      {ds.format}
+                    </Badge>
+                  </TableCell>
+                  <TableCell className="py-2.5 text-right font-mono text-xs tabular-nums">
+                    {ds.total_rows.toLocaleString()}
+                  </TableCell>
+                  <TableCell className="py-2.5 text-right font-mono text-xs tabular-nums">
+                    {ds.columns?.length || 0}
+                  </TableCell>
+                  <TableCell className="py-2.5 text-right font-mono text-xs tabular-nums text-muted-foreground">
+                    {formatBytes(ds.size_bytes)}
+                  </TableCell>
+                  <TableCell className="py-2.5 text-right">
+                    <div className="inline-flex items-center justify-end gap-1">
+                      {isPendingShare && ds.share_id ? (
+                        <>
+                          <Button
+                            type="button"
+                            size="sm"
+                            disabled={respondingShareId === ds.share_id}
+                            onClick={() => handleRespondShare(ds.share_id!, true)}
+                            className="h-7 px-2 text-[11px] rounded-sm bg-primary text-primary-foreground hover:bg-primary/90 gap-1"
+                            title={t("dashboardDatasets.acceptShare")}
+                          >
+                            <Check className="w-3 h-3" />
+                            <span>{t("dashboardDatasets.acceptShare")}</span>
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            disabled={respondingShareId === ds.share_id}
+                            onClick={() => handleRespondShare(ds.share_id!, false)}
+                            className="h-7 px-2 text-[11px] rounded-sm border-border text-muted-foreground hover:text-destructive gap-1"
+                            title={t("dashboardDatasets.rejectShare")}
+                          >
+                            <X className="w-3 h-3" />
+                            <span>{t("dashboardDatasets.rejectShare")}</span>
+                          </Button>
+                        </>
+                      ) : (
+                        <>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => handleOpenPreview(ds)}
+                            className="h-7 w-7 rounded-sm text-muted-foreground hover:text-foreground hover:bg-muted"
+                            title={t("dashboardDatasets.viewTooltip")}
+                          >
+                            <Eye className="w-3.5 h-3.5" />
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => handleOpenShare(ds)}
+                            className="h-7 w-7 rounded-sm text-muted-foreground hover:text-primary hover:bg-primary/10"
+                            title={t("dashboardDatasets.shareTooltip")}
+                          >
+                            <Share2 className="w-3.5 h-3.5" />
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => setDeleteTarget(ds)}
+                            className="h-7 w-7 rounded-sm text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                            title={t("dashboardDatasets.deleteTooltip")}
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </Button>
+                        </>
+                      )}
+                    </div>
+                  </TableCell>
+                </TableRow>
+              );
+            })
           )}
         </TableBody>
       </Table>
@@ -146,72 +326,278 @@ export const DashboardDatasetsModal: React.FC<DashboardDatasetsModalProps> = ({
   );
 
   return (
-    <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="sm:max-w-4xl bg-card border-border rounded-sm shadow-none">
-        <DialogHeader className="border-b border-border pb-3">
-          <DialogTitle className="font-serif text-lg font-bold text-foreground flex items-center gap-2">
-            <Database className="w-4 h-4 text-primary" />
-            {t("dashboardDatasets.modalTitle")}
-          </DialogTitle>
-          <DialogDescription className="text-xs text-muted-foreground">
-            {t("dashboardDatasets.modalDesc")}
-          </DialogDescription>
-        </DialogHeader>
+    <>
+      <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
+        <DialogContent className="sm:max-w-4xl bg-card border-border rounded-sm shadow-none">
+          <DialogHeader className="border-b border-border pb-3">
+            <DialogTitle className="font-serif text-lg font-bold text-foreground flex items-center gap-2">
+              <Database className="w-4 h-4 text-primary" />
+              {t("dashboardDatasets.modalTitle")}
+            </DialogTitle>
+            <DialogDescription className="text-xs text-muted-foreground">
+              {t("dashboardDatasets.modalDesc")}
+            </DialogDescription>
+          </DialogHeader>
 
-        <div className="max-h-[65vh] overflow-y-auto pr-1">
-          {loading ? (
-            <div className="py-10 flex items-center justify-center gap-2 text-xs text-muted-foreground">
-              <Loader2 className="w-4 h-4 animate-spin text-primary" />
-              <span>{t("common.loading")}</span>
-            </div>
-          ) : error ? (
-            <div className="p-3 rounded-sm bg-destructive/10 border border-destructive/30 flex items-center gap-2 text-xs text-destructive">
+          {error && (
+            <div className="p-2.5 rounded-sm bg-destructive/10 border border-destructive/30 flex items-center gap-2 text-xs text-destructive">
               <AlertCircle className="w-4 h-4 shrink-0" />
               <span>{error}</span>
             </div>
-          ) : (
-            <div className="space-y-6 py-2">
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <h4 className="text-xs font-serif font-bold text-foreground flex items-center gap-1.5">
-                    <Database className="w-3.5 h-3.5 text-primary" />
-                    {t("dashboardDatasets.taskDatasetsTitle")}
-                  </h4>
-                  <Badge variant="outline" className="font-mono text-[10px] rounded-sm tabular-nums">
-                    {corpusDatasets.length}
-                  </Badge>
-                </div>
-                {renderDatasetTable(corpusDatasets)}
-              </div>
+          )}
 
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <h4 className="text-xs font-serif font-bold text-foreground flex items-center gap-1.5">
-                    <ShieldCheck className="w-3.5 h-3.5 text-primary" />
-                    {t("dashboardDatasets.groundTruthDatasetsTitle")}
-                  </h4>
-                  <Badge variant="outline" className="font-mono text-[10px] rounded-sm tabular-nums">
-                    {groundTruthDatasets.length}
-                  </Badge>
-                </div>
-                {renderDatasetTable(groundTruthDatasets)}
-              </div>
+          {feedback && (
+            <div className="p-2.5 rounded-sm bg-emerald-500/10 border border-emerald-500/30 flex items-center gap-2 text-xs text-emerald-700 dark:text-emerald-400">
+              <CheckCircle2 className="w-4 h-4 shrink-0" />
+              <span>{feedback}</span>
             </div>
           )}
-        </div>
 
-        <div className="flex justify-end pt-2 border-t border-border">
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={onClose}
-            className="h-8 text-xs rounded-sm border-border"
-          >
-            {t("common.close")}
-          </Button>
-        </div>
-      </DialogContent>
-    </Dialog>
+          <div className="max-h-[65vh] overflow-y-auto pr-1">
+            {loading ? (
+              <div className="py-10 flex items-center justify-center gap-2 text-xs text-muted-foreground">
+                <Loader2 className="w-4 h-4 animate-spin text-primary" />
+                <span>{t("common.loading")}</span>
+              </div>
+            ) : (
+              <div className="space-y-6 py-2">
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <h4 className="text-xs font-serif font-bold text-foreground flex items-center gap-1.5">
+                      <Database className="w-3.5 h-3.5 text-primary" />
+                      {t("dashboardDatasets.taskDatasetsTitle")}
+                    </h4>
+                    <Badge variant="outline" className="font-mono text-[10px] rounded-sm tabular-nums">
+                      {corpusDatasets.length}
+                    </Badge>
+                  </div>
+                  {renderDatasetTable(corpusDatasets)}
+                </div>
+
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <h4 className="text-xs font-serif font-bold text-foreground flex items-center gap-1.5">
+                      <ShieldCheck className="w-3.5 h-3.5 text-primary" />
+                      {t("dashboardDatasets.groundTruthDatasetsTitle")}
+                    </h4>
+                    <Badge variant="outline" className="font-mono text-[10px] rounded-sm tabular-nums">
+                      {groundTruthDatasets.length}
+                    </Badge>
+                  </div>
+                  {renderDatasetTable(groundTruthDatasets)}
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div className="flex justify-end pt-2 border-t border-border">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={onClose}
+              className="h-8 text-xs rounded-sm border-border"
+            >
+              {t("common.close")}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dataset Preview Dialog */}
+      <Dialog open={Boolean(previewDataset)} onOpenChange={(open) => !open && setPreviewDataset(null)}>
+        <DialogContent className="sm:max-w-5xl bg-card border-border rounded-sm shadow-none">
+          <DialogHeader className="border-b border-border pb-3">
+            <DialogTitle className="font-serif text-base font-bold text-foreground flex items-center gap-2">
+              <Eye className="w-4 h-4 text-primary" />
+              {t("dashboardDatasets.previewTitle")}: {previewDataset?.name}
+            </DialogTitle>
+            <DialogDescription className="text-xs font-mono text-muted-foreground">
+              {previewRows
+                ? t("dashboardDatasets.previewRowsInfo", {
+                    shown: previewRows.rows.length,
+                    total: previewRows.total_rows,
+                  })
+                : previewDataset?.filename}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="max-h-[60vh] overflow-auto border-t-2 border-b-2 border-foreground">
+            {previewLoading ? (
+              <div className="py-10 flex items-center justify-center gap-2 text-xs text-muted-foreground">
+                <Loader2 className="w-4 h-4 animate-spin text-primary" />
+                <span>{t("common.loading")}</span>
+              </div>
+            ) : previewRows ? (
+              <Table>
+                <TableHeader>
+                  <TableRow className="border-b border-border hover:bg-transparent">
+                    {previewRows.columns.map((col) => (
+                      <TableHead
+                        key={col}
+                        className="text-[11px] font-mono text-muted-foreground whitespace-nowrap h-8"
+                      >
+                        {col}
+                      </TableHead>
+                    ))}
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {previewRows.rows.map((row, idx) => (
+                    <TableRow key={idx} className="border-b border-border/50">
+                      {previewRows.columns.map((col) => {
+                        const val = row[col];
+                        const display =
+                          val === null || val === undefined
+                            ? ""
+                            : typeof val === "object"
+                              ? JSON.stringify(val)
+                              : String(val);
+                        return (
+                          <TableCell
+                            key={col}
+                            className="py-2 text-xs max-w-[260px] truncate align-top"
+                            title={display}
+                          >
+                            {display}
+                          </TableCell>
+                        );
+                      })}
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            ) : null}
+          </div>
+
+          <div className="flex justify-end pt-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setPreviewDataset(null)}
+              className="h-8 text-xs rounded-sm border-border"
+            >
+              {t("common.close")}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Confirmation Dialog */}
+      <Dialog open={Boolean(deleteTarget)} onOpenChange={(open) => !open && setDeleteTarget(null)}>
+        <DialogContent className="sm:max-w-md bg-card border-border rounded-sm shadow-none">
+          <DialogHeader className="border-b border-border pb-3">
+            <DialogTitle className="font-serif text-base font-bold text-destructive flex items-center gap-2">
+              <Trash2 className="w-4 h-4" />
+              {t("dashboardDatasets.deleteTitle")}
+            </DialogTitle>
+          </DialogHeader>
+          <p className="text-xs text-foreground leading-relaxed py-2">
+            {t("dashboardDatasets.deleteWarning", { name: deleteTarget?.name || "" })}
+          </p>
+          <div className="flex justify-end gap-2 pt-2 border-t border-border">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setDeleteTarget(null)}
+              disabled={deleting}
+              className="h-8 text-xs rounded-sm border-border"
+            >
+              {t("common.cancel")}
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              size="sm"
+              onClick={handleConfirmDelete}
+              disabled={deleting}
+              className="h-8 text-xs rounded-sm gap-1.5"
+            >
+              {deleting ? (
+                <>
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  <span>{t("dashboardDatasets.deleting")}</span>
+                </>
+              ) : (
+                t("dashboardDatasets.deleteConfirm")
+              )}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Share Dataset Dialog */}
+      <Dialog open={Boolean(shareTarget)} onOpenChange={(open) => !open && setShareTarget(null)}>
+        <DialogContent className="sm:max-w-md bg-card border-border rounded-sm shadow-none">
+          <DialogHeader className="border-b border-border pb-3">
+            <DialogTitle className="font-serif text-base font-bold text-foreground flex items-center gap-2">
+              <Share2 className="w-4 h-4 text-primary" />
+              {t("dashboardDatasets.shareTitle")}
+            </DialogTitle>
+            <DialogDescription className="text-xs text-muted-foreground">
+              {t("dashboardDatasets.shareDesc", { name: shareTarget?.name || "" })}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="max-h-[45vh] overflow-y-auto space-y-2 py-2">
+            {shareUsersLoading ? (
+              <div className="py-6 flex items-center justify-center gap-2 text-xs text-muted-foreground">
+                <Loader2 className="w-4 h-4 animate-spin text-primary" />
+                <span>{t("common.loading")}</span>
+              </div>
+            ) : shareUsers.length === 0 ? (
+              <div className="py-6 text-center text-xs text-muted-foreground">
+                {t("dashboardDatasets.shareNoUsers")}
+              </div>
+            ) : (
+              shareUsers.map((u) => (
+                <div
+                  key={u.id}
+                  className="flex items-center justify-between gap-3 p-2.5 border border-border rounded-sm bg-background"
+                >
+                  <div className="min-w-0">
+                    <div className="text-xs font-mono font-medium text-foreground truncate">
+                      @{u.username}
+                    </div>
+                    {u.full_name && (
+                      <div className="text-[11px] text-muted-foreground truncate">
+                        {u.full_name}
+                      </div>
+                    )}
+                  </div>
+                  <Button
+                    type="button"
+                    size="sm"
+                    disabled={sharingUserId === u.id}
+                    onClick={() => handleShareWithUser(u)}
+                    className="h-7 px-3 text-xs rounded-sm bg-primary text-primary-foreground hover:bg-primary/90 shrink-0"
+                  >
+                    {sharingUserId === u.id ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      t("dashboardDatasets.shareBtn")
+                    )}
+                  </Button>
+                </div>
+              ))
+            )}
+          </div>
+
+          <div className="flex justify-end pt-2 border-t border-border">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setShareTarget(null)}
+              className="h-8 text-xs rounded-sm border-border"
+            >
+              {t("common.close")}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 };
