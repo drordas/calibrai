@@ -712,50 +712,82 @@ export const ExperimentDashboard: React.FC<ExperimentDashboardProps> = ({
                         exp.eval_spec?._current_row ||
                         Math.min((exp.current_sample_index || 0) + 1, exp.total_samples || exp.sample_size);
 
+                      const totalRows = exp.total_samples || exp.sample_size || 1;
+                      const hasMultipleModels = Boolean(exp.model_ids && exp.model_ids.length > 1);
+                      const modelProgressPct = Math.min(
+                        100,
+                        Math.max(0, ((exp.current_sample_index || 0) / totalRows) * 100)
+                      );
+
                       return (
-                        <div className="pt-1.5 space-y-1 max-w-xl">
-                          <div className="flex items-center justify-between text-[11px] font-mono text-muted-foreground">
-                            <span className="flex items-center gap-1.5 flex-wrap">
-                              {isLoadingVram ? (
-                                <span className="flex items-center gap-1.5 text-blue-700 dark:text-blue-400 font-semibold">
-                                  <Loader2 className="w-3 h-3 animate-spin" />
+                        <div className="pt-1.5 space-y-2 max-w-xl">
+                          {/* Overall Experiment Progress */}
+                          <div className="space-y-1">
+                            <div className="flex items-center justify-between text-[11px] font-mono text-muted-foreground">
+                              <span className="flex items-center gap-1.5 flex-wrap">
+                                {hasMultipleModels ? (
                                   <span>
-                                    [Modelo {(exp.current_model_index ?? 0) + 1}/{exp.model_ids?.length || 1}: {currentModelName}] · Cargando modelo en VRAM...
+                                    Progreso general ({Math.min((exp.current_model_index ?? 0) + 1, exp.model_ids.length)}/{exp.model_ids.length} modelos)
                                   </span>
-                                </span>
-                              ) : isProcessing ? (
-                                exp.model_ids && exp.model_ids.length > 1 ? (
-                                  t("dashboard.processingModelRow", {
-                                    modelIndex: (exp.current_model_index ?? 0) + 1,
-                                    totalModels: exp.model_ids.length,
-                                    model: currentModelName,
-                                    current: activeRow,
-                                    total: exp.total_samples || exp.sample_size,
-                                  })
-                                ) : (
+                                ) : isLoadingVram ? (
+                                  <span className="flex items-center gap-1.5 text-blue-700 dark:text-blue-400 font-semibold">
+                                    <Loader2 className="w-3 h-3 animate-spin" />
+                                    <span>
+                                      [{currentModelName}] · Cargando modelo en VRAM...
+                                    </span>
+                                  </span>
+                                ) : isProcessing ? (
                                   t("dashboard.processingRow", {
                                     current: activeRow,
-                                    total: exp.total_samples || exp.sample_size,
+                                    total: totalRows,
                                   })
-                                )
-                              ) : isPaused ? (
-                                exp.model_ids && exp.model_ids.length > 1 ? (
-                                  t("dashboard.pausedAtModelRow", {
-                                    modelIndex: (exp.current_model_index ?? 0) + 1,
-                                    totalModels: exp.model_ids.length,
-                                    model: currentModelName,
-                                    current: exp.current_sample_index,
-                                  })
-                                ) : (
+                                ) : isPaused ? (
                                   t("dashboard.pausedAtRow", { current: exp.current_sample_index })
-                                )
-                              ) : (
-                                t("dashboard.queuedStatus")
-                              )}
-                            </span>
-                            <span className="font-semibold text-foreground">{exp.progress_pct.toFixed(1)}%</span>
+                                ) : (
+                                  t("dashboard.queuedStatus")
+                                )}
+                              </span>
+                              <span className="font-semibold text-foreground">{exp.progress_pct.toFixed(1)}%</span>
+                            </div>
+                            <Progress value={exp.progress_pct} className="h-1.5 bg-muted" />
                           </div>
-                          <Progress value={exp.progress_pct} className="h-1.5 bg-muted" />
+
+                          {/* Current Model Progress (shown when experiment has > 1 model) */}
+                          {hasMultipleModels && (
+                            <div className="space-y-1">
+                              <div className="flex items-center justify-between text-[11px] font-mono text-muted-foreground">
+                                <span className="flex items-center gap-1.5 flex-wrap">
+                                  {isLoadingVram ? (
+                                    <span className="flex items-center gap-1.5 text-blue-700 dark:text-blue-400 font-semibold">
+                                      <Loader2 className="w-3 h-3 animate-spin" />
+                                      <span>
+                                        [Modelo {(exp.current_model_index ?? 0) + 1}/{exp.model_ids.length}: {currentModelName}] · Cargando modelo en VRAM...
+                                      </span>
+                                    </span>
+                                  ) : isProcessing ? (
+                                    t("dashboard.processingModelRow", {
+                                      modelIndex: (exp.current_model_index ?? 0) + 1,
+                                      totalModels: exp.model_ids.length,
+                                      model: currentModelName,
+                                      current: activeRow,
+                                      total: totalRows,
+                                    })
+                                  ) : isPaused ? (
+                                    t("dashboard.pausedAtModelRow", {
+                                      modelIndex: (exp.current_model_index ?? 0) + 1,
+                                      totalModels: exp.model_ids.length,
+                                      model: currentModelName,
+                                      current: exp.current_sample_index,
+                                    })
+                                  ) : (
+                                    <span>{currentModelName} · {t("dashboard.queuedStatus")}</span>
+                                  )}
+                                </span>
+                                <span className="font-semibold text-foreground">{modelProgressPct.toFixed(1)}%</span>
+                              </div>
+                              <Progress value={modelProgressPct} className="h-1.5 bg-muted" />
+                            </div>
+                          )}
                         </div>
                       );
                     })()}
@@ -763,19 +795,18 @@ export const ExperimentDashboard: React.FC<ExperimentDashboardProps> = ({
 
                   {/* Right Column: Actions */}
                   <div className="flex items-center gap-1.5 self-end lg:self-center shrink-0">
-                    {/* Pause Button */}
+                    {/* Pause Button (icon-only, matching Eye and Trash2) */}
                     {isProcessing && (
                       <Button
                         type="button"
-                        variant="outline"
-                        size="sm"
+                        variant="ghost"
+                        size="icon"
                         disabled={isActionLoading}
                         onClick={(e) => handlePause(exp.id, e)}
-                        className="h-7 px-2.5 text-xs font-medium border-border hover:bg-muted text-muted-foreground hover:text-foreground gap-1.5 rounded-md transition-all duration-150"
+                        className="h-7 w-7 text-muted-foreground hover:text-foreground hover:bg-muted rounded-md transition-all duration-150"
                         title={t("dashboard.pause")}
                       >
-                        <Pause className="w-3 h-3" />
-                        <span>{t("dashboard.pause")}</span>
+                        <Pause className="w-3.5 h-3.5" />
                       </Button>
                     )}
 
@@ -854,7 +885,7 @@ export const ExperimentDashboard: React.FC<ExperimentDashboardProps> = ({
                         </Button>
                       </>
                     ) : (
-                      exp.status === "completed" && !exp.is_shared && (
+                      (exp.status === "completed" || exp.status === "running" || exp.status === "queued" || exp.status === "paused") && !exp.is_shared && (
                         <Button
                           type="button"
                           variant="ghost"

@@ -310,8 +310,8 @@ def share_experiment(
     ).first()
     if not exp:
         raise HTTPException(status_code=404, detail="Experimento no encontrado")
-    if exp.status != "completed":
-        raise HTTPException(status_code=400, detail="Solo se pueden compartir experimentos finalizados")
+    if exp.status not in ("completed", "running", "queued", "paused"):
+        raise HTTPException(status_code=400, detail="Solo se pueden compartir experimentos en ejecución, pausados o finalizados")
     if req.target_user_id == current_user.id:
         raise HTTPException(status_code=400, detail="No puedes compartir un experimento contigo mismo")
 
