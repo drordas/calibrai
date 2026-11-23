@@ -64,10 +64,9 @@ export const Leaderboard: React.FC<LeaderboardProps> = ({
     Boolean(m.is_human_baseline || m.model_id === "human_expert" || m.model_id.startsWith("human_expert"));
 
   // Order LLM models first, followed by Ground Truth human baselines
-  const modelList = [
-    ...rawModelList.filter((m) => !isHumanSummary(m)),
-    ...rawModelList.filter((m) => isHumanSummary(m)),
-  ];
+  const llmModels = rawModelList.filter((m) => !isHumanSummary(m));
+  const humanBaselines = rawModelList.filter((m) => isHumanSummary(m));
+  const modelList = [...llmModels, ...humanBaselines];
 
   if (modelList.length === 0) {
     return (
@@ -233,18 +232,24 @@ export const Leaderboard: React.FC<LeaderboardProps> = ({
             </div>
           </div>
 
-          <div className="flex items-center gap-4 text-xs border-t md:border-t-0 pt-3 md:pt-0 border-border w-full md:w-auto">
+          <div className="flex items-start gap-4 text-xs border-t md:border-t-0 pt-3 md:pt-0 border-border w-full md:w-auto shrink-0">
             <div className="border-t-2 border-foreground pt-1.5 pr-4">
               <span className="text-muted-foreground block text-[11px] font-serif">{t("common.models")}</span>
-              <span className="font-bold text-foreground text-base font-serif tabular-nums">{modelList.length}</span>
+              <span className="font-bold text-foreground text-base leading-6 font-serif tabular-nums block">{llmModels.length}</span>
             </div>
+            {humanBaselines.length > 0 && (
+              <div className="border-t-2 border-emerald-600 pt-1.5 pr-4">
+                <span className="text-emerald-700 dark:text-emerald-300 block text-[11px] font-serif">Ground Truth</span>
+                <span className="font-bold text-emerald-700 dark:text-emerald-300 text-base leading-6 font-serif tabular-nums block">{humanBaselines.length}</span>
+              </div>
+            )}
             <div className="border-t-2 border-foreground pt-1.5 pr-4">
               <span className="text-muted-foreground block text-[11px] font-serif">{t("common.samples")}</span>
-              <span className="font-bold text-foreground text-base font-serif tabular-nums">N = {winner?.total_samples}</span>
+              <span className="font-bold text-foreground text-base leading-6 font-serif tabular-nums block">N = {winner?.total_samples}</span>
             </div>
             <div className="border-t-2 border-primary pt-1.5">
               <span className="text-primary block text-[11px] font-serif">{t("common.task")}</span>
-              <span className="font-bold text-primary text-xs font-mono uppercase">{activeTaskType}</span>
+              <span className="font-bold text-primary text-xs leading-6 font-mono uppercase block">{activeTaskType}</span>
             </div>
           </div>
         </div>
