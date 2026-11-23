@@ -62,7 +62,7 @@
     "newBenchmark": "Nuevo Benchmark",
     "resultsMatrix": "Resultados & Matriz",
     "noDatasetLoaded": "Ningún dataset cargado",
-    "appSubtitle": "Evaluación reproducible y auditoría psicométrica de LLMs",
+    "appSubtitle": "Plataforma de evaluación de IA",
     "streamingSse": "Streaming SSE",
     "savedBenchmarks": "Guardados",
     "tooltipNewBenchmark": "Primero sube o selecciona un dataset desde 'Crear Experimento'",

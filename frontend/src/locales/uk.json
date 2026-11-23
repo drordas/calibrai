@@ -62,7 +62,7 @@
     "newBenchmark": "New Benchmark",
     "resultsMatrix": "Results & Matrix",
     "noDatasetLoaded": "No dataset loaded",
-    "appSubtitle": "Reproducible LLM evaluation & psychometric auditing",
+    "appSubtitle": "AI Evaluation Platform",
     "streamingSse": "SSE Streaming",
     "savedBenchmarks": "Saved",
     "tooltipNewBenchmark": "Upload or select a dataset first from 'Create Experiment'",
