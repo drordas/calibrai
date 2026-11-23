@@ -204,14 +204,15 @@ def share_dataset(
         src_path = meta.get("file_path") if meta else None
         if not src_path or not Path(src_path).exists():
             raise HTTPException(status_code=500, detail="No se encontró el archivo origen del dataset para copiar")
-        copy_filename = f"copy_{uuid.uuid4().hex[:8]}_{Path(src_path).name}"
+        copy_stem = f"copy_{uuid.uuid4().hex[:8]}_{Path(src_path).stem}"
+        copy_filename = f"{copy_stem}{Path(src_path).suffix}"
         copy_path = settings.upload_dir / copy_filename
         shutil.copy2(src_path, copy_path)
         copied_summary = dataset_engine.register_dataset(
             file_path=copy_path,
             name=f"{ds.name} (Copia)",
             is_sample=False,
-            dataset_id=f"copy_{uuid.uuid4().hex[:10]}",
+            dataset_id=f"upload_{copy_stem}",
         )
         target_dataset_id = copied_summary.id
 
