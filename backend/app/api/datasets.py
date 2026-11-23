@@ -39,11 +39,11 @@ def list_datasets(
         .all()
     )
     outgoing_shared_ids = {
-        s.dataset_id
+        (s.source_dataset_id or s.dataset_id)
         for s in db.query(DatasetShare)
         .filter(
             DatasetShare.owner_user_id == current_user.id,
-            DatasetShare.share_mode.in_(["view", "edit"]),
+            DatasetShare.share_mode.in_(["view", "edit", "copy"]),
         )
         .all()
     }
@@ -225,12 +225,14 @@ def share_dataset(
     )
     if existing:
         existing.owner_user_id = current_user.id
+        existing.source_dataset_id = dataset_id
         existing.share_mode = mode
         existing.status = "pending"
     else:
         db.add(
             DatasetShare(
                 dataset_id=target_dataset_id,
+                source_dataset_id=dataset_id,
                 owner_user_id=current_user.id,
                 target_user_id=target_user.id,
                 share_mode=mode,

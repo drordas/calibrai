@@ -43,6 +43,7 @@ def init_db():
             conn.execute(text("ALTER TABLE experiments ADD COLUMN IF NOT EXISTS notification_read BOOLEAN DEFAULT FALSE"))
             conn.execute(text("ALTER TABLE experiments ADD COLUMN IF NOT EXISTS notification_dismissed BOOLEAN DEFAULT FALSE"))
             conn.execute(text("ALTER TABLE dataset_shares ADD COLUMN IF NOT EXISTS share_mode VARCHAR(20) DEFAULT 'view'"))
+            conn.execute(text("ALTER TABLE dataset_shares ADD COLUMN IF NOT EXISTS source_dataset_id VARCHAR(100)"))
             conn.execute(text("ALTER TABLE dataset_shares ADD COLUMN IF NOT EXISTS notification_read BOOLEAN DEFAULT FALSE"))
             conn.execute(text("ALTER TABLE dataset_shares ADD COLUMN IF NOT EXISTS notification_dismissed BOOLEAN DEFAULT FALSE"))
             conn.execute(text("ALTER TABLE experiment_shares ADD COLUMN IF NOT EXISTS notification_read BOOLEAN DEFAULT FALSE"))

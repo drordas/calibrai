@@ -29,6 +29,7 @@ class DatasetShare(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     dataset_id = Column(String(100), nullable=False, index=True)
+    source_dataset_id = Column(String(100), nullable=True, index=True)
     owner_user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     target_user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     share_mode = Column(String(20), default="view", nullable=False)  # "view" | "edit" | "copy"
