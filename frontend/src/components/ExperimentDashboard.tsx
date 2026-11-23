@@ -421,14 +421,26 @@ export const ExperimentDashboard: React.FC<ExperimentDashboardProps> = ({
               {t("dashboard.emptySubtitle")}
             </p>
           </div>
-          <Button
-            type="button"
-            onClick={onNewExperiment}
-            className="h-8 px-3 text-xs font-medium bg-primary text-primary-foreground gap-2 rounded-md cursor-pointer transition-all duration-150"
-          >
-            <Plus className="w-3.5 h-3.5" />
-            <span>{t("dashboard.createExperiment")}</span>
-          </Button>
+          {statusFilter === "draft" && onNewTemplate ? (
+            <Button
+              type="button"
+              variant="outline"
+              onClick={onNewTemplate}
+              className="h-9 px-3.5 text-xs font-semibold border-primary/40 bg-primary/5 hover:bg-primary/10 text-primary gap-1.5 rounded-sm cursor-pointer transition-colors"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span>{t("templates.createTemplate")}</span>
+            </Button>
+          ) : (
+            <Button
+              type="button"
+              onClick={onNewExperiment}
+              className="h-8 px-3 text-xs font-medium bg-primary text-primary-foreground gap-2 rounded-md cursor-pointer transition-all duration-150"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span>{t("dashboard.createExperiment")}</span>
+            </Button>
+          )}
         </Card>
       ) : (
         <div className="space-y-4">
