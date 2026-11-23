@@ -1060,6 +1060,12 @@ export const PromptEditor: React.FC<PromptEditorProps> = ({
   ];
 
   const schemaTextareaRef = useRef<HTMLTextAreaElement>(null);
+  const outputTextareaRef = useRef<HTMLTextAreaElement>(null);
+  const [selectedJsonBlockPreview, setSelectedJsonBlockPreview] = useState<{
+    key: string;
+    text: string;
+    colorIdx: number;
+  } | null>(null);
   const [jsonKeyAutocomplete, setJsonKeyAutocomplete] = useState<{
     query: string;
     replaceStart: number;
@@ -1372,6 +1378,7 @@ export const PromptEditor: React.FC<PromptEditorProps> = ({
 
   const handleToggleJsonOutput = (checked: boolean) => {
     setUseJsonOutput(checked);
+    setSelectedJsonBlockPreview(null);
     const nextInstr = checked ? stripNoJsonLines(instructionsText) : instructionsText;
     if (checked && nextInstr !== instructionsText) {
       setInstructionsText(nextInstr);
@@ -1379,6 +1386,48 @@ export const PromptEditor: React.FC<PromptEditorProps> = ({
     const composed = composePromptSections(nextInstr, examplesText, outputPromptText, checked);
     setPromptRealText(composed);
     syncAndValidate(composed, outputSchemaText, computedSpecs);
+  };
+
+  const handleSelectJsonObjectBlock = (objKey: string, colorIdx: number) => {
+    setOpenOutputSection(true);
+    const text = outputPromptText || "";
+    const topKeys = parsedOutputSchema ? Object.keys(parsedOutputSchema) : [objKey];
+    const escapedAll = topKeys
+      .slice()
+      .sort((a, b) => b.length - a.length)
+      .map((k) => k.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+    const headerRegex = new RegExp(`^[ \\t]*(${escapedAll.join("|")})\\b`, "gim");
+    const matches: Array<{ keyLower: string; index: number }> = [];
+    let m: RegExpExecArray | null;
+    while ((m = headerRegex.exec(text)) !== null) {
+      matches.push({ keyLower: m[1].toLowerCase(), index: m.index });
+    }
+    const targetMatches = matches.filter((x) => x.keyLower === objKey.toLowerCase());
+    if (targetMatches.length === 0) {
+      setSelectedJsonBlockPreview(null);
+      return;
+    }
+    const lastMatch = targetMatches[targetMatches.length - 1];
+    const matchIdxInAll = matches.indexOf(lastMatch);
+    const start = lastMatch.index;
+    const end = matchIdxInAll + 1 < matches.length ? matches[matchIdxInAll + 1].index : text.length;
+    const blockText = text.slice(start, end).trimEnd();
+
+    setSelectedJsonBlockPreview({
+      key: objKey,
+      text: blockText,
+      colorIdx,
+    });
+
+    requestAnimationFrame(() => {
+      const ta = outputTextareaRef.current;
+      if (!ta) return;
+      ta.focus();
+      ta.setSelectionRange(start, start + blockText.length);
+      const linesBefore = text.slice(0, start).split("\n").length - 1;
+      const lineHeight = 19.5;
+      ta.scrollTop = Math.max(0, linesBefore * lineHeight - 24);
+    });
   };
 
   const handleGenerateOutputPromptFromSchema = () => {
@@ -2158,7 +2207,7 @@ export const PromptEditor: React.FC<PromptEditorProps> = ({
               {/* PARTE 1: PROMPT (System Prompt + Model Prompt) */}
               {/* ----------------------------------------------------------------- */}
               <Card className="border border-border/80 bg-card/60 shadow-none overflow-hidden">
-                <CardHeader className="py-2.5 px-3.5 border-b border-border/60 bg-muted/20 flex flex-row items-center justify-between gap-3 flex-wrap">
+                <CardHeader className="py-2.5 px-3.5 border-b border-border/60 bg-muted/20">
                   <div className="space-y-0.5">
                     <div className="flex items-center gap-2">
                       <FileCode className="w-4 h-4 text-primary" />
@@ -2169,20 +2218,6 @@ export const PromptEditor: React.FC<PromptEditorProps> = ({
                     <p className="text-[11px] text-muted-foreground">
                       {t("prompt.part1Desc")}
                     </p>
-                  </div>
-
-                  <div className="flex items-center gap-2 bg-background/80 border border-border rounded-sm px-2.5 py-1.5">
-                    <Label
-                      htmlFor="switch-json-output"
-                      className="text-[11px] font-medium text-foreground cursor-pointer select-none"
-                    >
-                      Generar salida en JSON
-                    </Label>
-                    <Switch
-                      id="switch-json-output"
-                      checked={useJsonOutput}
-                      onCheckedChange={handleToggleJsonOutput}
-                    />
                   </div>
                 </CardHeader>
                 <CardContent className="p-3 space-y-3 relative">
@@ -2378,6 +2413,28 @@ export const PromptEditor: React.FC<PromptEditorProps> = ({
                     )}
                   </div>
 
+                  {/* Switch: Direct JSON Output Mode (placed right before (iv) Prompt de Salida) */}
+                  <div className="px-3 py-2 rounded-sm border border-border/80 bg-muted/20 flex items-center justify-between gap-3 flex-wrap">
+                    <div className="space-y-0.5">
+                      <Label
+                        htmlFor="switch-json-output"
+                        className="text-xs font-semibold text-foreground cursor-pointer select-none"
+                      >
+                        Generar salida en JSON directamente
+                      </Label>
+                      <p className="text-[11px] text-muted-foreground">
+                        {useJsonOutput
+                          ? "El modelo responderá directamente usando el esquema de 2. Estructura de Salida."
+                          : "El modelo responderá siguiendo la plantilla de bloques de (iv) Prompt de Salida."}
+                      </p>
+                    </div>
+                    <Switch
+                      id="switch-json-output"
+                      checked={useJsonOutput}
+                      onCheckedChange={handleToggleJsonOutput}
+                    />
+                  </div>
+
                   {/* (iv) Prompt de Salida (hidden when direct JSON output Switch is ON) */}
                   {!useJsonOutput && (
                   <div
@@ -2404,20 +2461,25 @@ export const PromptEditor: React.FC<PromptEditorProps> = ({
                           <div className="flex flex-wrap items-center gap-1">
                             {jsonPromptCoherence.objectStatuses.map((obj) => {
                               const palette = JSON_OBJECT_PALETTE[obj.colorIdx];
+                              const isSelected = selectedJsonBlockPreview?.key === obj.key;
                               return (
-                                <span
+                                <button
                                   key={obj.key}
-                                  className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-sm border text-[10px] font-mono ${palette.badge}`}
+                                  type="button"
+                                  onClick={() => handleSelectJsonObjectBlock(obj.key, obj.colorIdx)}
+                                  className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-sm border text-[10px] font-mono cursor-pointer transition-all ${
+                                    palette.badge
+                                  } ${isSelected ? "ring-2 ring-offset-1 ring-current font-bold" : "hover:opacity-85"}`}
                                   title={
                                     obj.covered
-                                      ? `${obj.key}: representado en Prompt de Salida`
+                                      ? `Clic para resaltar el bloque ${obj.key} en el Prompt de Salida`
                                       : `${obj.key}: faltan claves en Prompt de Salida`
                                   }
                                 >
                                   <span className={`w-1.5 h-1.5 rounded-full ${palette.dot}`} />
                                   <span>{obj.key}</span>
                                   <span>{obj.covered ? "✓" : "✗"}</span>
-                                </span>
+                                </button>
                               );
                             })}
                           </div>
@@ -2435,11 +2497,15 @@ export const PromptEditor: React.FC<PromptEditorProps> = ({
                             <span>Generar desde JSON</span>
                           </Button>
                         )}
+                        <Badge variant="outline" className="text-[10px] font-mono py-0 px-1.5 bg-background/80 text-muted-foreground border-border">
+                          {outputPromptText.length} chars
+                        </Badge>
                       </div>
                     </div>
                     {openOutputSection && (
-                      <div className="p-2.5 border-t border-border/60">
+                      <div className="p-2.5 border-t border-border/60 space-y-2">
                         <Textarea
+                          ref={outputTextareaRef}
                           id="template-output-prompt"
                           value={outputPromptText}
                           onChange={handleOutputPromptChange}
@@ -2452,6 +2518,36 @@ export const PromptEditor: React.FC<PromptEditorProps> = ({
                           }`}
                           placeholder="Plantilla de bloques/campos de salida que debe rellenar el modelo..."
                         />
+
+                        {selectedJsonBlockPreview && (
+                          <div
+                            className={`rounded-sm border p-2.5 space-y-1.5 ${
+                              JSON_OBJECT_PALETTE[selectedJsonBlockPreview.colorIdx].badge
+                            }`}
+                          >
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="text-[11px] font-mono font-bold flex items-center gap-1.5">
+                                <span
+                                  className={`w-2 h-2 rounded-full ${
+                                    JSON_OBJECT_PALETTE[selectedJsonBlockPreview.colorIdx].dot
+                                  }`}
+                                />
+                                <span>Bloque asociado a "{selectedJsonBlockPreview.key}"</span>
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => setSelectedJsonBlockPreview(null)}
+                                className="opacity-70 hover:opacity-100 cursor-pointer"
+                                title="Cerrar vista del bloque"
+                              >
+                                <X className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                            <pre className="text-[11px] font-mono whitespace-pre-wrap break-words bg-background/80 text-foreground p-2 rounded-sm border border-border/60 max-h-40 overflow-y-auto leading-relaxed">
+                              {selectedJsonBlockPreview.text}
+                            </pre>
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>
@@ -3415,7 +3511,7 @@ export const PromptEditor: React.FC<PromptEditorProps> = ({
                 <Badge variant="outline" className="text-[11px] font-bold text-destructive bg-destructive/10 border-destructive/30 gap-1">
                   <AlertCircle className="w-3 h-3" /> {t("prompt.linterIncoherent")}
                 </Badge>
-              ) : unusedPromptVars.length > 0 || unusedSpecVars.length > 0 || validation?.issues?.some((i) => i.severity === "warning") ? (
+              ) : unusedPromptVars.length > 0 || validation?.issues?.some((i) => i.severity === "warning") ? (
                 <Badge variant="outline" className="text-[11px] font-bold text-amber-600 dark:text-amber-400 bg-amber-500/10 border-amber-500/30 gap-1">
                   <AlertTriangle className="w-3 h-3" /> {t("linterExtra.warningsBadge")}
                 </Badge>
@@ -3540,21 +3636,10 @@ export const PromptEditor: React.FC<PromptEditorProps> = ({
                       {t("linterExtra.noSpecsDeclared")}
                     </AlertTitle>
                   </Alert>
-                ) : unusedSpecVars.length > 0 ? (
-                  <Alert className="py-2 text-xs bg-amber-500/10 border-amber-500/30 text-amber-600 dark:text-amber-400">
-                    <AlertTriangle className="w-4 h-4 text-amber-500" />
-                    <AlertTitle className="text-xs font-semibold ml-2">
-                      {t("linterExtra.unusedSpecTitle")}
-                    </AlertTitle>
-                    <AlertDescription className="text-[11px] opacity-90 mt-1 ml-2">
-                      {t("linterExtra.unusedSpecDesc")}{" "}
-                      <span className="font-mono font-semibold">{unusedSpecVars.join(", ")}</span>
-                    </AlertDescription>
-                  </Alert>
                 ) : (
                   <Alert className="bg-emerald-500/10 border-emerald-500/25 text-emerald-600 dark:text-emerald-400 text-xs py-2.5">
                     <CheckCircle2 className="w-4 h-4 text-emerald-500" />
-                    <AlertTitle className="text-xs font-bold">{t("linterExtra.allSpecsUsed")}</AlertTitle>
+                    <AlertTitle className="text-xs font-bold">Variables SPEC declaradas ({specColumns.length})</AlertTitle>
                     <AlertDescription className="text-[11px] opacity-80 mt-0.5 font-mono">
                       {specColumns.join(", ")}
                     </AlertDescription>
