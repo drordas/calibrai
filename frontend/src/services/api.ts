@@ -395,6 +395,7 @@ export async function updateSavedPrompt(
   promptId: number,
   payload: {
     name: string;
+    dataset_id?: string | null;
     system_prompt: string;
     model_prompt: string;
   }

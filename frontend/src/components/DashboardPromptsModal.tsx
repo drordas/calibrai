@@ -64,6 +64,7 @@ export const DashboardPromptsModal: React.FC<DashboardPromptsModalProps> = ({
   const [previewTarget, setPreviewTarget] = useState<SavedPromptItem | null>(null);
   const [editTarget, setEditTarget] = useState<SavedPromptItem | null>(null);
   const [editName, setEditName] = useState("");
+  const [editDatasetId, setEditDatasetId] = useState<string>("");
   const [editSystemPrompt, setEditSystemPrompt] = useState("");
   const [editModelPrompt, setEditModelPrompt] = useState("");
   const [savingEdit, setSavingEdit] = useState(false);
@@ -126,6 +127,7 @@ export const DashboardPromptsModal: React.FC<DashboardPromptsModalProps> = ({
     setPreviewTarget(null);
     setEditTarget(item);
     setEditName(item.name);
+    setEditDatasetId(item.dataset_id || "");
     setEditSystemPrompt(item.system_prompt || "");
     setEditModelPrompt(item.model_prompt || "");
   };
@@ -147,6 +149,7 @@ export const DashboardPromptsModal: React.FC<DashboardPromptsModalProps> = ({
     try {
       const updated = await updateSavedPrompt(editTarget.id, {
         name: cleanName,
+        dataset_id: editDatasetId || null,
         system_prompt: editSystemPrompt,
         model_prompt: editModelPrompt,
       });
@@ -271,6 +274,25 @@ export const DashboardPromptsModal: React.FC<DashboardPromptsModalProps> = ({
                     onChange={(e) => setEditName(e.target.value)}
                     className="h-9 text-xs bg-background border-border rounded-sm"
                   />
+                </div>
+
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-semibold text-foreground">
+                    Dataset de Tareas asociado
+                  </Label>
+                  <Select value={editDatasetId || "none"} onValueChange={(v) => setEditDatasetId(v === "none" ? "" : v)}>
+                    <SelectTrigger className="h-9 text-xs bg-background border-border rounded-sm">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent className="bg-card border-border rounded-sm text-xs">
+                      <SelectItem value="none">Sin dataset</SelectItem>
+                      {taskDatasets.map((ds) => (
+                        <SelectItem key={ds.id} value={ds.id}>
+                          {ds.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
 
                 <div className="space-y-1.5">

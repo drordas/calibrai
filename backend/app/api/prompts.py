@@ -25,6 +25,7 @@ class SavePromptRequest(BaseModel):
 
 class UpdatePromptRequest(BaseModel):
     name: str
+    dataset_id: Optional[str] = None
     system_prompt: str = ""
     model_prompt: str
 
@@ -134,6 +135,8 @@ def update_saved_prompt(
         raise HTTPException(status_code=400, detail="El prompt del modelo no puede estar vacío.")
 
     row.name = clean_name
+    if req.dataset_id is not None:
+        row.dataset_id = req.dataset_id.strip() or None
     row.system_prompt = req.system_prompt or ""
     row.model_prompt = req.model_prompt
     db.commit()
