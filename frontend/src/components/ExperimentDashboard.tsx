@@ -811,19 +811,19 @@ export const ExperimentDashboard: React.FC<ExperimentDashboardProps> = ({
                       </Button>
                     )}
 
-                    {/* Inspect Details Button */}
+                    {/* Inspect Details Button (icon-only) */}
                     <Button
                       type="button"
-                      variant="outline"
-                      size="sm"
+                      variant="ghost"
+                      size="icon"
                       onClick={(e) => {
                         e.stopPropagation();
                         handleViewDetail(exp);
                       }}
-                      className="h-7 px-2.5 text-xs font-medium gap-1.5 rounded-md border-border hover:bg-muted text-foreground transition-all duration-150"
+                      className="h-7 w-7 text-muted-foreground hover:text-foreground hover:bg-muted rounded-md transition-all duration-150"
+                      title={exp.status === "completed" ? t("dashboard.viewMetrics") : t("dashboard.liveMonitor")}
                     >
-                      <Eye className="w-3 h-3" />
-                      <span>{exp.status === "completed" ? t("dashboard.viewMetrics") : t("dashboard.liveMonitor")}</span>
+                      <Eye className="w-3.5 h-3.5" />
                     </Button>
 
                     {/* Pending Share Accept/Reject OR Share Experiment Button (after Ver Métricas, before Trash) */}
