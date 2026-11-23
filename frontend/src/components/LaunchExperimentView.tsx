@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { DatasetSummary, ModelCatalogItem, CustomBatteryConfig } from "../types";
-import { createExperiment } from "../services/api";
+import { createExperiment, fetchCompatibleGroundTruths } from "../services/api";
 import { useTranslation } from "../i18n";
 import {
   Rocket,
@@ -124,6 +124,35 @@ export const LaunchExperimentView: React.FC<LaunchExperimentViewProps> = ({
   const [groundTruthName, setGroundTruthName] = useState<string>(initialGroundTruthName || t("results.humanExpert"));
   const [isLaunching, setIsLaunching] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
+  const [compatibleGtIds, setCompatibleGtIds] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    if (!dataset?.id) {
+      setCompatibleGtIds(new Set());
+      return;
+    }
+    let cancelled = false;
+    fetchCompatibleGroundTruths(dataset.id)
+      .then((res) => {
+        if (!cancelled) {
+          setCompatibleGtIds(new Set(res.map((r) => r.dataset_id)));
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setCompatibleGtIds(new Set());
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [dataset?.id, availableDatasets]);
+
+  const compatibleGroundTruthDatasets = useMemo(
+    () =>
+      availableDatasets.filter(
+        (d) => d.is_ground_truth && (!dataset || compatibleGtIds.has(d.id))
+      ),
+    [availableDatasets, dataset, compatibleGtIds]
+  );
 
   // -------------------------------------------------------------
   // Validation Batteries Configuration State
@@ -627,8 +656,7 @@ export const LaunchExperimentView: React.FC<LaunchExperimentViewProps> = ({
                 {t("launch.selectedGtEvaluators", { count: selectedGroundTruthDatasetIds.length })}
               </Label>
               <div className="flex flex-wrap gap-2">
-                {availableDatasets
-                  .filter((d) => d.is_ground_truth)
+                {compatibleGroundTruthDatasets
                   .map((gt) => {
                     const isSelected = selectedGroundTruthDatasetIds.includes(gt.id);
                     return (

@@ -189,6 +189,7 @@ export function App() {
   const activeResultsTab = (!isQualitativeValidation && resultsTab === "methodology") ? "leaderboard" : resultsTab;
 
   const startNewExperiment = () => {
+    void refreshDatasets();
     setIsTemplateMode(false);
     setEditingTemplateId(null);
     setTemplateSavedFeedback(false);
@@ -397,6 +398,15 @@ export function App() {
     removeToken();
     setCurrentUser(null);
     setUserConfig(null);
+  };
+
+  const refreshDatasets = async () => {
+    try {
+      const dsList = await fetchDatasets();
+      setDatasets(dsList);
+    } catch (err) {
+      console.error("Error refreshing datasets:", err);
+    }
   };
 
   const loadInitialData = async () => {
@@ -1211,6 +1221,7 @@ export function App() {
             onInspectExperimentResults={handleInspectExperimentResults}
             availableModels={availableModels}
             openDatasetsSignal={openDatasetsSignal}
+            onDatasetsChanged={refreshDatasets}
           />
         )}
 

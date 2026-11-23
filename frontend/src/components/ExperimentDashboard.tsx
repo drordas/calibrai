@@ -89,6 +89,7 @@ interface ExperimentDashboardProps {
   onInspectExperimentResults: (exp: ExperimentDetail) => void;
   availableModels: ModelCatalogItem[];
   openDatasetsSignal?: number;
+  onDatasetsChanged?: () => void;
 }
 
 export const ExperimentDashboard: React.FC<ExperimentDashboardProps> = ({
@@ -99,6 +100,7 @@ export const ExperimentDashboard: React.FC<ExperimentDashboardProps> = ({
   onInspectExperimentResults,
   availableModels,
   openDatasetsSignal = 0,
+  onDatasetsChanged,
 }) => {
   const { t } = useTranslation();
   const [experiments, setExperiments] = useState<ExperimentSummary[]>([]);
@@ -1073,7 +1075,10 @@ export const ExperimentDashboard: React.FC<ExperimentDashboardProps> = ({
 
       <DashboardDatasetsModal
         isOpen={showDatasetsModal}
-        onClose={() => setShowDatasetsModal(false)}
+        onClose={() => {
+          setShowDatasetsModal(false);
+          onDatasetsChanged?.();
+        }}
       />
 
       {/* Share Experiment Dialog */}

@@ -211,7 +211,7 @@ export const DatasetViewer: React.FC<DatasetViewerProps> = ({
         console.error("Error loading compatible ground truths:", err);
       })
       .finally(() => setLoadingCompat(false));
-  }, [selectedDataset]);
+  }, [selectedDataset, datasets]);
 
   const handleGroundTruthUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!e.target.files || e.target.files.length === 0) return;
