@@ -49,6 +49,8 @@ import {
   Loader2,
   Download,
   ArrowLeft,
+  ChevronDown,
+  ChevronRight,
 } from "lucide-react";
 import {
   Dialog,
@@ -110,6 +112,105 @@ function flattenMetricBindings(val: MetricBindingsValue | undefined): string[] {
   if (!val) return [];
   if (Array.isArray(val)) return val;
   return Object.values(val).flat();
+}
+
+function splitPromptIntoSections(raw: string): {
+  instructions: string;
+  examples: string;
+  outputPrompt: string;
+} {
+  const text = (raw || "").trim();
+  if (!text) {
+    return { instructions: "", examples: "", outputPrompt: "" };
+  }
+
+  const bannerRegex = /(?:^|\n)[ \t]*(?:={6,}|═{6,})[ \t]*\n[ \t]*([^\n]+?)[ \t]*\n[ \t]*(?:={6,}|═{6,})[ \t]*(?:\n|$)/g;
+  const matches: Array<{ title: string; start: number; bodyStart: number }> = [];
+  let m: RegExpExecArray | null;
+  while ((m = bannerRegex.exec(text)) !== null) {
+    matches.push({
+      title: m[1].trim(),
+      start: m.index,
+      bodyStart: m.index + m[0].length,
+    });
+  }
+
+  if (matches.length === 0) {
+    return { instructions: text, examples: "", outputPrompt: "" };
+  }
+
+  let instructions = "";
+  let examples = "";
+  let outputPrompt = "";
+
+  const prefix = text.slice(0, matches[0].start).trim();
+  const instrParts: string[] = prefix ? [prefix] : [];
+
+  for (let i = 0; i < matches.length; i++) {
+    const cur = matches[i];
+    const end = i + 1 < matches.length ? matches[i + 1].start : text.length;
+    const body = text.slice(cur.bodyStart, end).trim();
+    const titleUpper = cur.title.toUpperCase();
+
+    if (titleUpper.includes("EXAMPLE") || titleUpper.includes("EJEMPLO")) {
+      examples = examples ? `${examples}\n\n${body}` : body;
+    } else if (
+      titleUpper.includes("OUTPUT") ||
+      titleUpper.includes("SALIDA") ||
+      titleUpper.startsWith("DIMENSIONS")
+    ) {
+      outputPrompt = outputPrompt ? `${outputPrompt}\n\n${body}` : body;
+    } else if (titleUpper.includes("INSTRUCTION") || titleUpper.includes("INSTRUCCION")) {
+      if (body) instrParts.push(body);
+    } else {
+      const fullSlice = text.slice(cur.start, end).trim();
+      if (fullSlice) instrParts.push(fullSlice);
+    }
+  }
+
+  instructions = instrParts.join("\n\n").trim();
+  return { instructions, examples, outputPrompt };
+}
+
+function composePromptSections(
+  instructions: string,
+  examples: string,
+  outputPrompt: string
+): string {
+  const instr = (instructions || "").trim();
+  const ex = (examples || "").trim();
+  const out = (outputPrompt || "").trim();
+
+  if (!ex && !out) {
+    return instr;
+  }
+
+  const hasBanner = (s: string) => /^(?:={6,}|═{6,})/m.test(s.split("\n")[0] || "");
+  const parts: string[] = [];
+
+  if (instr) {
+    parts.push(
+      hasBanner(instr)
+        ? instr
+        : `========================================================\nINSTRUCTIONS\n========================================================\n\n${instr}`
+    );
+  }
+  if (ex) {
+    parts.push(
+      hasBanner(ex)
+        ? ex
+        : `========================================================\nEXAMPLES\n========================================================\n\n${ex}`
+    );
+  }
+  if (out) {
+    parts.push(
+      hasBanner(out)
+        ? out
+        : `========================================================\nOUTPUT FORMAT\n========================================================\n\n${out}`
+    );
+  }
+
+  return parts.join("\n\n");
 }
 
 function buildYamlSpec(
@@ -391,7 +492,22 @@ export const PromptEditor: React.FC<PromptEditorProps> = ({
   // 3-PART STATE
   // -------------------------------------------------------
   const initialDecomposed = useMemo(() => decomposeFullTemplate(template), []);
+  const initialSections = useMemo(
+    () => splitPromptIntoSections(initialDecomposed.promptText),
+    [initialDecomposed.promptText]
+  );
+  const [instructionsText, setInstructionsText] = useState<string>(initialSections.instructions);
+  const [examplesText, setExamplesText] = useState<string>(initialSections.examples);
+  const [outputPromptText, setOutputPromptText] = useState<string>(initialSections.outputPrompt);
   const [promptRealText, setPromptRealText] = useState<string>(initialDecomposed.promptText);
+
+  const [openSystemSection, setOpenSystemSection] = useState<boolean>(true);
+  const [openInstructionsSection, setOpenInstructionsSection] = useState<boolean>(true);
+  const [openExamplesSection, setOpenExamplesSection] = useState<boolean>(
+    Boolean(initialSections.examples.trim())
+  );
+  const [openOutputSection, setOpenOutputSection] = useState<boolean>(true);
+
   const [outputSchemaText, setOutputSchemaText] = useState<string>(initialDecomposed.outputSchemaStr);
   const [computedSpecs, setComputedSpecs] = useState<ComputedSpec[]>([]);
   const [metricBindings, setMetricBindings] = useState<MetricBindingsMap>(initialDecomposed.metricBindings || {});
@@ -802,6 +918,18 @@ export const PromptEditor: React.FC<PromptEditorProps> = ({
     }
   }, [dataset.id, inputColumns, contextColumns, idColumn, specColumns, taskType]);
 
+  const applyFullPromptText = (fullText: string) => {
+    const secs = splitPromptIntoSections(fullText);
+    setInstructionsText(secs.instructions);
+    setExamplesText(secs.examples);
+    setOutputPromptText(secs.outputPrompt);
+    if (secs.examples.trim()) setOpenExamplesSection(true);
+    if (secs.outputPrompt.trim()) setOpenOutputSection(true);
+    const composed = composePromptSections(secs.instructions, secs.examples, secs.outputPrompt);
+    setPromptRealText(composed);
+    return composed;
+  };
+
   const handleAutoGenerate = async () => {
     try {
       const gt = selectedGroundTruth !== "none" ? selectedGroundTruth : undefined;
@@ -816,12 +944,12 @@ export const PromptEditor: React.FC<PromptEditorProps> = ({
       setTemplate(res.template);
       setSystemPrompt(res.system_prompt);
 
-      // Populate 3-part states
+      // Populate 4-section prompt states
       if (res.prompt_text) {
-        setPromptRealText(res.prompt_text);
+        applyFullPromptText(res.prompt_text);
       } else {
         const dec = decomposeFullTemplate(res.template);
-        setPromptRealText(dec.promptText);
+        applyFullPromptText(dec.promptText);
       }
 
       if (res.output_schema) {
@@ -981,7 +1109,13 @@ export const PromptEditor: React.FC<PromptEditorProps> = ({
     }
 
     // Slice prompt into sections per top-level key so subfields are verified inside their own parent block
-    const cleanPromptForSections = (promptRealText || "").replace(/\{[a-zA-Z0-9_.-]+\}/g, " ");
+    // Validate against (iv) Prompt de Salida if present; fall back to Instructions only when neither Examples nor Output Prompt are used
+    const targetPromptForJson = outputPromptText.trim()
+      ? outputPromptText
+      : examplesText.trim()
+      ? ""
+      : instructionsText;
+    const cleanPromptForSections = targetPromptForJson.replace(/\{[a-zA-Z0-9_.-]+\}/g, " ");
     const escapedTopKeys = topKeys
       .slice()
       .sort((a, b) => b.length - a.length)
@@ -1034,7 +1168,7 @@ export const PromptEditor: React.FC<PromptEditorProps> = ({
       objectStatuses,
       missingKeys,
     };
-  }, [outputSchemaText, parsedOutputSchema, promptRealText]);
+  }, [outputSchemaText, parsedOutputSchema, outputPromptText, examplesText, instructionsText]);
 
   useEffect(() => {
     onValidationStateChange?.(
@@ -1104,8 +1238,8 @@ export const PromptEditor: React.FC<PromptEditorProps> = ({
 
   const handleApplySavedPrompt = (item: SavedPromptItem) => {
     setSystemPrompt(item.system_prompt || "");
-    setPromptRealText(item.model_prompt);
-    syncAndValidate(item.model_prompt, outputSchemaText, computedSpecs);
+    const composed = applyFullPromptText(item.model_prompt);
+    syncAndValidate(composed, outputSchemaText, computedSpecs);
     setShowLoadPromptModal(false);
   };
 
@@ -1122,8 +1256,8 @@ export const PromptEditor: React.FC<PromptEditorProps> = ({
   // Handlers for 3 Parts
   // -------------------------------------------------------
 
-  // Part 1: Real Prompt change (with inline `{` variable autocomplete trigger)
-  const handlePromptRealChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+  // Part 1(ii): Instructions change (with inline `{` variable autocomplete trigger)
+  const handleInstructionsChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const val = e.target.value;
     const caretPos = e.target.selectionStart ?? val.length;
     lastCursorRef.current = { start: caretPos, end: e.target.selectionEnd ?? caretPos };
@@ -1144,8 +1278,51 @@ export const PromptEditor: React.FC<PromptEditorProps> = ({
       setBraceAutocomplete(null);
     }
 
-    setPromptRealText(val);
-    syncAndValidate(val, outputSchemaText, computedSpecs);
+    setInstructionsText(val);
+    const composed = composePromptSections(val, examplesText, outputPromptText);
+    setPromptRealText(composed);
+    syncAndValidate(composed, outputSchemaText, computedSpecs);
+  };
+
+  const handleExamplesChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const val = e.target.value;
+    setExamplesText(val);
+    const composed = composePromptSections(instructionsText, val, outputPromptText);
+    setPromptRealText(composed);
+    syncAndValidate(composed, outputSchemaText, computedSpecs);
+  };
+
+  const handleOutputPromptChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const val = e.target.value;
+    setOutputPromptText(val);
+    const composed = composePromptSections(instructionsText, examplesText, val);
+    setPromptRealText(composed);
+    syncAndValidate(composed, outputSchemaText, computedSpecs);
+  };
+
+  const handleGenerateOutputPromptFromSchema = () => {
+    if (!parsedOutputSchema) return;
+    const blocks: string[] = [];
+    for (const [topKey, val] of Object.entries(parsedOutputSchema)) {
+      const lines: string[] = [topKey.toUpperCase()];
+      if (val && typeof val === "object" && !Array.isArray(val)) {
+        for (const [subKey, subVal] of Object.entries(val)) {
+          const hint = Array.isArray(subVal)
+            ? "<verbatim fragments separated by || — or blank>"
+            : `<${String(subVal || "value")}>`;
+          lines.push(`${subKey.toUpperCase()}: ${hint}`);
+        }
+      } else {
+        lines.push(`${topKey.toUpperCase()}: <${String(val || "value")}>`);
+      }
+      blocks.push(lines.join("\n"));
+    }
+    const generated = blocks.join("\n\n");
+    setOutputPromptText(generated);
+    setOpenOutputSection(true);
+    const composed = composePromptSections(instructionsText, examplesText, generated);
+    setPromptRealText(composed);
+    syncAndValidate(composed, outputSchemaText, computedSpecs);
   };
 
   const handlePromptKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -1414,11 +1591,11 @@ export const PromptEditor: React.FC<PromptEditorProps> = ({
     }
   };
 
-  // Insert variable {col} into Part 1 (Prompt Real) at exact cursor position without jumping to end
+  // Insert variable {col} into Part 1(ii) Instructions at exact cursor position without jumping to end
   const insertVariable = (varName: string, replaceRange?: { start: number; end: number }) => {
     const textToInsert = `{${varName}}`;
     const textarea = promptTextareaRef.current;
-    const current = promptRealText;
+    const current = instructionsText;
     const start = replaceRange
       ? replaceRange.start
       : lastCursorRef.current
@@ -1440,8 +1617,11 @@ export const PromptEditor: React.FC<PromptEditorProps> = ({
     pendingCaretPosRef.current = nextCaretPos;
     lastCursorRef.current = { start: nextCaretPos, end: nextCaretPos };
     setBraceAutocomplete(null);
-    setPromptRealText(updated);
-    syncAndValidate(updated, outputSchemaText, computedSpecs);
+    setOpenInstructionsSection(true);
+    setInstructionsText(updated);
+    const composed = composePromptSections(updated, examplesText, outputPromptText);
+    setPromptRealText(composed);
+    syncAndValidate(composed, outputSchemaText, computedSpecs);
   };
 
   // Raw YAML manual editor handler (for advanced users)
@@ -1449,7 +1629,7 @@ export const PromptEditor: React.FC<PromptEditorProps> = ({
     const newTpl = e.target.value;
     setTemplate(newTpl);
     const dec = decomposeFullTemplate(newTpl);
-    setPromptRealText(dec.promptText);
+    applyFullPromptText(dec.promptText);
     setOutputSchemaText(dec.outputSchemaStr);
     triggerValidation(newTpl, systemPrompt);
   };
@@ -1467,7 +1647,7 @@ export const PromptEditor: React.FC<PromptEditorProps> = ({
         );
         setTemplate(res.template);
         setSystemPrompt(res.system_prompt);
-        if (res.prompt_text) setPromptRealText(res.prompt_text);
+        if (res.prompt_text) applyFullPromptText(res.prompt_text);
         if (res.output_schema) setOutputSchemaText(JSON.stringify(res.output_schema, null, 2));
         if (res.computed_specs) setComputedSpecs(res.computed_specs);
         triggerValidation(res.template, res.system_prompt);
@@ -1910,138 +2090,250 @@ export const PromptEditor: React.FC<PromptEditorProps> = ({
                     </p>
                   </div>
                 </CardHeader>
-                <CardContent className="p-3 space-y-4 relative">
-                  {/* System Prompt */}
-                  <div className="space-y-1.5">
-                    <div className="flex items-center justify-between gap-2 flex-wrap">
-                      <Label htmlFor="system-prompt" className="text-xs font-semibold text-foreground">
-                        {t("prompt.systemPromptLabel")}
-                      </Label>
+                <CardContent className="p-3 space-y-3 relative">
+                  {/* (i) Prompt del Sistema */}
+                  <div className="rounded-sm border border-border/80 bg-background/50 overflow-hidden">
+                    <button
+                      type="button"
+                      onClick={() => setOpenSystemSection((prev) => !prev)}
+                      className="w-full px-3 py-2 flex items-center justify-between gap-2 bg-muted/20 hover:bg-muted/40 transition-colors text-left cursor-pointer"
+                    >
+                      <span className="flex items-center gap-1.5 text-xs font-semibold text-foreground">
+                        {openSystemSection ? (
+                          <ChevronDown className="w-3.5 h-3.5 text-muted-foreground" />
+                        ) : (
+                          <ChevronRight className="w-3.5 h-3.5 text-muted-foreground" />
+                        )}
+                        <span>(i) {t("prompt.systemPromptLabel")}</span>
+                      </span>
                       <div className="flex items-center gap-2">
-                        <span className="text-[11px] text-muted-foreground">
+                        <span className="text-[11px] text-muted-foreground hidden sm:inline">
                           {t("prompt.systemPromptHelp")}
                         </span>
                         <Badge variant="outline" className="text-[10px] font-mono py-0 px-1.5 bg-background/80 text-muted-foreground border-border">
-                          {(systemPrompt || "").length} chars &middot; ~{Math.ceil((systemPrompt || "").length / 4)} tokens
+                          {(systemPrompt || "").length} chars
                         </Badge>
                       </div>
-                    </div>
-                    <Textarea
-                      id="system-prompt"
-                      rows={3}
-                      value={systemPrompt}
-                      onChange={(e) => setSystemPrompt(e.target.value)}
-                      className="font-mono text-xs bg-background/60 border-border/80 resize-y leading-relaxed"
-                    />
+                    </button>
+                    {openSystemSection && (
+                      <div className="p-2.5 border-t border-border/60">
+                        <Textarea
+                          id="system-prompt"
+                          rows={3}
+                          value={systemPrompt}
+                          onChange={(e) => setSystemPrompt(e.target.value)}
+                          className="font-mono text-xs bg-background/80 border-border/80 resize-y leading-relaxed"
+                        />
+                      </div>
+                    )}
                   </div>
 
-                  {/* Model Prompt */}
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between gap-2 flex-wrap">
-                      <Label htmlFor="template-real-prompt" className="text-xs font-semibold text-foreground block">
-                        {t("prompt.modelPromptLabel")}
-                      </Label>
-                      {jsonPromptCoherence.hasSchema && jsonPromptCoherence.objectStatuses.length > 0 && (
-                        <div className="flex flex-wrap items-center gap-1.5">
-                          {jsonPromptCoherence.objectStatuses.map((obj) => {
-                            const palette = JSON_OBJECT_PALETTE[obj.colorIdx];
-                            return (
-                              <span
-                                key={obj.key}
-                                className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-sm border text-[10px] font-mono ${palette.badge}`}
-                                title={
-                                  obj.covered
-                                    ? `${obj.key}: representado en el prompt`
-                                    : `${obj.key}: faltan claves en el prompt`
-                                }
-                              >
-                                <span className={`w-1.5 h-1.5 rounded-full ${palette.dot}`} />
-                                <span>{obj.key}</span>
-                                <span>{obj.covered ? "✓" : "✗"}</span>
+                  {/* (ii) Prompt de Instrucciones */}
+                  <div className="rounded-sm border border-border/80 bg-background/50 overflow-hidden">
+                    <button
+                      type="button"
+                      onClick={() => setOpenInstructionsSection((prev) => !prev)}
+                      className="w-full px-3 py-2 flex items-center justify-between gap-2 bg-muted/20 hover:bg-muted/40 transition-colors text-left cursor-pointer"
+                    >
+                      <span className="flex items-center gap-1.5 text-xs font-semibold text-foreground">
+                        {openInstructionsSection ? (
+                          <ChevronDown className="w-3.5 h-3.5 text-muted-foreground" />
+                        ) : (
+                          <ChevronRight className="w-3.5 h-3.5 text-muted-foreground" />
+                        )}
+                        <span>(ii) Prompt de Instrucciones</span>
+                      </span>
+                      <Badge variant="outline" className="text-[10px] font-mono py-0 px-1.5 bg-background/80 text-muted-foreground border-border">
+                        {instructionsText.length} chars
+                      </Badge>
+                    </button>
+                    {openInstructionsSection && (
+                      <div className="p-2.5 border-t border-border/60 space-y-2">
+                        {braceAutocomplete && filteredAutocompleteVars.length > 0 && (
+                          <div className="p-2 rounded-sm bg-card border-2 border-primary/50 shadow-md space-y-1.5 z-20">
+                            <div className="flex items-center justify-between text-[10px] font-mono text-muted-foreground">
+                              <span className="font-semibold text-foreground flex items-center gap-1">
+                                <Tag className="w-3 h-3 text-primary" />
+                                <span>
+                                  Inyectar variable del dataset{" "}
+                                  {braceAutocomplete.query ? `(filtro: "{${braceAutocomplete.query}")` : ""}:
+                                </span>
                               </span>
-                            );
-                          })}
-                        </div>
-                      )}
-                    </div>
-                    {braceAutocomplete && filteredAutocompleteVars.length > 0 && (
-                    <div className="p-2 rounded-sm bg-card border-2 border-primary/50 shadow-md space-y-1.5 z-20">
-                      <div className="flex items-center justify-between text-[10px] font-mono text-muted-foreground">
-                        <span className="font-semibold text-foreground flex items-center gap-1">
-                          <Tag className="w-3 h-3 text-primary" />
-                          <span>
-                            Inyectar variable del dataset{" "}
-                            {braceAutocomplete.query ? `(filtro: "{${braceAutocomplete.query}")` : ""}:
-                          </span>
-                        </span>
-                        <span>↑↓ elegir &middot; Enter/Tab o clic insertar &middot; Esc cerrar</span>
+                              <span>↑↓ elegir &middot; Enter/Tab o clic insertar &middot; Esc cerrar</span>
+                            </div>
+                            <div className="flex flex-wrap gap-1.5">
+                              {filteredAutocompleteVars.map((v, idx) => {
+                                const isSelected = idx === braceAutocomplete.activeIndex;
+                                return (
+                                  <button
+                                    key={v.name}
+                                    type="button"
+                                    onMouseDown={(e) => e.preventDefault()}
+                                    onClick={() =>
+                                      insertVariable(v.name, {
+                                        start: braceAutocomplete.replaceStart,
+                                        end: braceAutocomplete.replaceEnd,
+                                      })
+                                    }
+                                    className={`px-2 py-1 rounded-sm text-xs font-mono flex items-center gap-1.5 border transition-colors cursor-pointer ${
+                                      isSelected
+                                        ? "bg-primary text-primary-foreground border-primary font-bold"
+                                        : "bg-background text-foreground border-border hover:border-primary/40 hover:bg-muted"
+                                    }`}
+                                  >
+                                    <span>{`{${v.name}}`}</span>
+                                    <span
+                                      className={`text-[9px] px-1 py-0 rounded-sm font-sans font-bold ${
+                                        isSelected
+                                          ? "bg-background/20 text-primary-foreground"
+                                          : "bg-muted text-muted-foreground"
+                                      }`}
+                                    >
+                                      {v.role}
+                                    </span>
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        )}
+                        <Textarea
+                          ref={promptTextareaRef}
+                          id="template-real-prompt"
+                          value={instructionsText}
+                          onChange={handleInstructionsChange}
+                          onKeyDown={handlePromptKeyDown}
+                          onSelect={(e) => {
+                            lastCursorRef.current = {
+                              start: e.currentTarget.selectionStart,
+                              end: e.currentTarget.selectionEnd,
+                            };
+                          }}
+                          onClick={(e) => {
+                            lastCursorRef.current = {
+                              start: e.currentTarget.selectionStart,
+                              end: e.currentTarget.selectionEnd,
+                            };
+                          }}
+                          onKeyUp={(e) => {
+                            lastCursorRef.current = {
+                              start: e.currentTarget.selectionStart,
+                              end: e.currentTarget.selectionEnd,
+                            };
+                          }}
+                          rows={6}
+                          aria-label="Prompt de Instrucciones"
+                          className="w-full p-3 text-xs font-mono bg-background/80 border-border/80 focus:ring-primary/20 resize-y leading-relaxed"
+                          placeholder={t("prompt.promptRealPlaceholder")}
+                        />
                       </div>
-                      <div className="flex flex-wrap gap-1.5">
-                        {filteredAutocompleteVars.map((v, idx) => {
-                          const isSelected = idx === braceAutocomplete.activeIndex;
-                          return (
-                            <button
-                              key={v.name}
-                              type="button"
-                              onMouseDown={(e) => e.preventDefault()}
-                              onClick={() =>
-                                insertVariable(v.name, {
-                                  start: braceAutocomplete.replaceStart,
-                                  end: braceAutocomplete.replaceEnd,
-                                })
-                              }
-                              className={`px-2 py-1 rounded-sm text-xs font-mono flex items-center gap-1.5 border transition-colors cursor-pointer ${
-                                isSelected
-                                  ? "bg-primary text-primary-foreground border-primary font-bold"
-                                  : "bg-background text-foreground border-border hover:border-primary/40 hover:bg-muted"
-                              }`}
-                            >
-                              <span>{`{${v.name}}`}</span>
-                              <span
-                                className={`text-[9px] px-1 py-0 rounded-sm font-sans font-bold ${
-                                  isSelected
-                                    ? "bg-background/20 text-primary-foreground"
-                                    : "bg-muted text-muted-foreground"
-                                }`}
-                              >
-                                {v.role}
-                              </span>
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  )}
+                    )}
+                  </div>
 
-                  <Textarea
-                    ref={promptTextareaRef}
-                    id="template-real-prompt"
-                    value={promptRealText}
-                    onChange={handlePromptRealChange}
-                    onKeyDown={handlePromptKeyDown}
-                    onSelect={(e) => {
-                      lastCursorRef.current = {
-                        start: e.currentTarget.selectionStart,
-                        end: e.currentTarget.selectionEnd,
-                      };
-                    }}
-                    onClick={(e) => {
-                      lastCursorRef.current = {
-                        start: e.currentTarget.selectionStart,
-                        end: e.currentTarget.selectionEnd,
-                      };
-                    }}
-                    onKeyUp={(e) => {
-                      lastCursorRef.current = {
-                        start: e.currentTarget.selectionStart,
-                        end: e.currentTarget.selectionEnd,
-                      };
-                    }}
-                    rows={7}
-                    aria-label={t("prompt.modelPromptLabel")}
-                    className="w-full p-3 text-xs font-mono bg-background/80 border-border/80 focus:ring-primary/20 resize-y leading-relaxed"
-                    placeholder={t("prompt.promptRealPlaceholder")}
-                  />
+                  {/* (iii) Prompt de Ejemplos (Opcional) */}
+                  <div className="rounded-sm border border-border/80 bg-background/50 overflow-hidden">
+                    <button
+                      type="button"
+                      onClick={() => setOpenExamplesSection((prev) => !prev)}
+                      className="w-full px-3 py-2 flex items-center justify-between gap-2 bg-muted/20 hover:bg-muted/40 transition-colors text-left cursor-pointer"
+                    >
+                      <span className="flex items-center gap-1.5 text-xs font-semibold text-foreground">
+                        {openExamplesSection ? (
+                          <ChevronDown className="w-3.5 h-3.5 text-muted-foreground" />
+                        ) : (
+                          <ChevronRight className="w-3.5 h-3.5 text-muted-foreground" />
+                        )}
+                        <span>(iii) Prompt de Ejemplos</span>
+                        <Badge variant="outline" className="text-[10px] font-normal py-0 px-1.5 text-muted-foreground border-border">
+                          Opcional
+                        </Badge>
+                      </span>
+                      <Badge variant="outline" className="text-[10px] font-mono py-0 px-1.5 bg-background/80 text-muted-foreground border-border">
+                        {examplesText.length} chars
+                      </Badge>
+                    </button>
+                    {openExamplesSection && (
+                      <div className="p-2.5 border-t border-border/60">
+                        <Textarea
+                          id="template-examples-prompt"
+                          value={examplesText}
+                          onChange={handleExamplesChange}
+                          rows={5}
+                          aria-label="Prompt de Ejemplos"
+                          className="w-full p-3 text-xs font-mono bg-background/80 border-border/80 focus:ring-primary/20 resize-y leading-relaxed"
+                          placeholder="Ejemplos few-shot opcionales (no afectan al linter JSON ↔ Prompt)..."
+                        />
+                      </div>
+                    )}
+                  </div>
+
+                  {/* (iv) Prompt de Salida */}
+                  <div className="rounded-sm border border-border/80 bg-background/50 overflow-hidden">
+                    <div className="px-3 py-2 flex items-center justify-between gap-2 flex-wrap bg-muted/20">
+                      <button
+                        type="button"
+                        onClick={() => setOpenOutputSection((prev) => !prev)}
+                        className="flex items-center gap-1.5 text-xs font-semibold text-foreground text-left cursor-pointer"
+                      >
+                        {openOutputSection ? (
+                          <ChevronDown className="w-3.5 h-3.5 text-muted-foreground" />
+                        ) : (
+                          <ChevronRight className="w-3.5 h-3.5 text-muted-foreground" />
+                        )}
+                        <span>(iv) Prompt de Salida</span>
+                      </button>
+
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        {jsonPromptCoherence.hasSchema && jsonPromptCoherence.objectStatuses.length > 0 && (
+                          <div className="flex flex-wrap items-center gap-1">
+                            {jsonPromptCoherence.objectStatuses.map((obj) => {
+                              const palette = JSON_OBJECT_PALETTE[obj.colorIdx];
+                              return (
+                                <span
+                                  key={obj.key}
+                                  className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-sm border text-[10px] font-mono ${palette.badge}`}
+                                  title={
+                                    obj.covered
+                                      ? `${obj.key}: representado en Prompt de Salida`
+                                      : `${obj.key}: faltan claves en Prompt de Salida`
+                                  }
+                                >
+                                  <span className={`w-1.5 h-1.5 rounded-full ${palette.dot}`} />
+                                  <span>{obj.key}</span>
+                                  <span>{obj.covered ? "✓" : "✗"}</span>
+                                </span>
+                              );
+                            })}
+                          </div>
+                        )}
+                        {parsedOutputSchema && Object.keys(parsedOutputSchema).length > 0 && (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={handleGenerateOutputPromptFromSchema}
+                            className="h-6 px-2 text-[10px] font-semibold rounded-sm border-primary/40 text-primary hover:bg-primary/10 gap-1"
+                            title="Generar el bloque de salida automáticamente desde el JSON de 2. Estructura de Salida"
+                          >
+                            <Wand2 className="w-3 h-3" />
+                            <span>Generar desde JSON</span>
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+                    {openOutputSection && (
+                      <div className="p-2.5 border-t border-border/60">
+                        <Textarea
+                          id="template-output-prompt"
+                          value={outputPromptText}
+                          onChange={handleOutputPromptChange}
+                          rows={5}
+                          aria-label="Prompt de Salida"
+                          className="w-full p-3 text-xs font-mono bg-background/80 border-border/80 focus:ring-primary/20 resize-y leading-relaxed"
+                          placeholder="Plantilla de bloques/campos de salida que debe rellenar el modelo..."
+                        />
+                      </div>
+                    )}
                   </div>
 
                   <div className="flex items-center justify-end gap-2 pt-1">

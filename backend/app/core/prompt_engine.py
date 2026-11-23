@@ -749,9 +749,15 @@ REGLAS DE EVALUACIÓN:
                         message=f"La spec '{cs.name}' usa la variable '{arg}', que no está en el esquema de output ni en specs previas."
                     ))
 
-        # Issue 4: Validate JSON Output Schema <-> Prompt coherence (section-scoped per top-level object)
+        # Issue 4: Validate JSON Output Schema <-> Prompt coherence (scoped to OUTPUT FORMAT / DIMENSIONS section if present)
         if eval_spec.output_schema and isinstance(eval_spec.output_schema, dict) and len(eval_spec.output_schema) > 0:
-            clean_for_sections = re.sub(r"\{[a-zA-Z0-9_.-]+\}", " ", clean_template)
+            output_sec_match = re.search(
+                r"(?:={6,}|═{6,})\s*\n[^\n]*(?:OUTPUT(?:\s+FORMAT)?|DIMENSIONS)[^\n]*\n\s*(?:={6,}|═{6,})\s*\n([\s\S]*)$",
+                clean_template,
+                re.IGNORECASE,
+            )
+            target_template = output_sec_match.group(1) if output_sec_match else clean_template
+            clean_for_sections = re.sub(r"\{[a-zA-Z0-9_.-]+\}", " ", target_template)
             top_keys = list(eval_spec.output_schema.keys())
             escaped_top = [re.escape(k) for k in sorted(top_keys, key=len, reverse=True)]
             header_regex = re.compile(rf"\b({'|'.join(escaped_top)})\b", re.IGNORECASE)
