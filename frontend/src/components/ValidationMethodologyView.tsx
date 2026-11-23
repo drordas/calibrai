@@ -150,6 +150,10 @@ export const ValidationMethodologyView: React.FC<ValidationMethodologyViewProps>
 
   const isHumanModel = (m: string) => m === "human_expert" || m.startsWith("human_expert");
   const formatName = (m: string) => {
+    const customName = summaries?.[m]?.model_name;
+    if (customName && customName.trim()) {
+      return customName;
+    }
     if (isHumanModel(m)) {
       if (m.startsWith("human_expert_")) {
         const idPart = m.replace("human_expert_", "").replace(/^sample_/, "");
@@ -358,7 +362,7 @@ export const ValidationMethodologyView: React.FC<ValidationMethodologyViewProps>
         <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
           <div className="space-y-2">
             <h2 className="font-serif text-2xl font-bold text-foreground tracking-tight">
-              Protocolo de Validación Psicométrica y Estadística de LLMs
+              Protocolo de Validación Estadística de LLMs
             </h2>
             <p className="text-xs text-muted-foreground max-w-3xl leading-relaxed">
               Batería de validación formal en 4 pilares independientes
@@ -624,9 +628,9 @@ export const ValidationMethodologyView: React.FC<ValidationMethodologyViewProps>
                 </TableHead>
                 <TableHead className="text-xs font-medium text-center">
                   <span className="inline-flex items-center justify-center">
-                    <span>Diagnóstico Psicométrico</span>
+                    <span>Diagnóstico</span>
                     <MetricCalcInfo
-                      title="Diagnóstico Psicométrico"
+                      title="Diagnóstico"
                       formula="Clasificación por umbrales sobre el índice global (%)"
                       description="Dictamen cualitativo automático basado en la puntuación global del modelo:"
                       thresholds={[
