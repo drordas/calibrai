@@ -24,6 +24,16 @@ class User(Base):
     experiments = relationship("Experiment", back_populates="user", cascade="all, delete-orphan")
 
 
+class DatasetRecord(Base):
+    __tablename__ = "datasets_registry"
+
+    dataset_id = Column(String(100), primary_key=True, index=True)
+    owner_user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    display_name = Column(String(255), nullable=True)
+    is_ground_truth = Column(Boolean, nullable=True)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+
+
 class DatasetShare(Base):
     __tablename__ = "dataset_shares"
 

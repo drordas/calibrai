@@ -1,14 +1,14 @@
 import shutil
 import uuid
 from pathlib import Path
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, UploadFile, File, Form, HTTPException, Query, Response
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 from backend.app.api.auth import get_current_user, get_optional_current_user
 from backend.app.core.config import settings
 from backend.app.core.dataset_engine import dataset_engine
-from backend.app.db.models import DatasetShare, Experiment, User
+from backend.app.db.models import DatasetRecord, DatasetShare, Experiment, User
 from backend.app.db.session import get_db
 from backend.app.schemas.dataset import (
     DatasetShareEntryOut,
@@ -21,6 +21,27 @@ from backend.app.schemas.dataset import (
 
 router = APIRouter(prefix="/api/datasets", tags=["datasets"])
 
+def _ensure_dataset_ownership(datasets: List[DatasetSummary], db: Session) -> Dict[str, DatasetRecord]:
+    records = {r.dataset_id: r for r in db.query(DatasetRecord).all()}
+    first_user = db.query(User).order_by(User.id.asc()).first()
+    if first_user:
+        added = False
+        for ds in datasets:
+            if ds.id not in records:
+                rec = DatasetRecord(
+                    dataset_id=ds.id,
+                    owner_user_id=first_user.id,
+                    display_name=ds.name,
+                    is_ground_truth=ds.is_ground_truth,
+                )
+                db.add(rec)
+                records[ds.id] = rec
+                added = True
+        if added:
+            db.commit()
+    return records
+
+
 @router.get("", response_model=List[DatasetSummary])
 def list_datasets(
     current_user: Optional[User] = Depends(get_optional_current_user),
@@ -29,6 +50,8 @@ def list_datasets(
     datasets = dataset_engine.list_datasets()
     if not current_user:
         return datasets
+
+    records = _ensure_dataset_ownership(datasets, db)
 
     incoming_shares = (
         db.query(DatasetShare)
@@ -59,38 +82,38 @@ def list_datasets(
     )
     share_by_dataset = {s.dataset_id: s for s in incoming_shares}
 
-    # Hide cloned copy datasets from other users who aren't the target recipient
-    all_copy_dataset_ids = {
-        s.dataset_id
-        for s in db.query(DatasetShare).filter(DatasetShare.share_mode == "copy").all()
-    }
-
     enriched: List[DatasetSummary] = []
     for ds in datasets:
+        rec = records.get(ds.id)
         share = share_by_dataset.get(ds.id)
-        if ds.id in all_copy_dataset_ids and not share:
+        is_owner = bool(rec and rec.owner_user_id == current_user.id)
+
+        # Only show datasets owned by this user or shared with this user
+        if not is_owner and not share:
             continue
+
+        overrides: Dict[str, Any] = {}
+        if rec:
+            if rec.display_name:
+                overrides["name"] = rec.display_name
+            if rec.is_ground_truth is not None:
+                overrides["is_ground_truth"] = rec.is_ground_truth
+
         if share:
-            enriched.append(
-                ds.model_copy(
-                    update={
-                        "is_shared": True,
-                        "is_shared_by_owner": ds.id in outgoing_shared_ids,
-                        "share_mode": share.share_mode,
-                        "share_status": share.status,
-                        "shared_by": owners.get(share.owner_user_id, ""),
-                        "share_id": share.id,
-                    }
-                )
+            overrides.update(
+                {
+                    "is_shared": True,
+                    "is_shared_by_owner": ds.id in outgoing_shared_ids,
+                    "share_mode": share.share_mode,
+                    "share_status": share.status,
+                    "shared_by": owners.get(share.owner_user_id, ""),
+                    "share_id": share.id,
+                }
             )
         else:
-            enriched.append(
-                ds.model_copy(
-                    update={
-                        "is_shared_by_owner": ds.id in outgoing_shared_ids,
-                    }
-                )
-            )
+            overrides["is_shared_by_owner"] = ds.id in outgoing_shared_ids
+
+        enriched.append(ds.model_copy(update=overrides))
     return enriched
 
 
@@ -213,8 +236,17 @@ def share_dataset(
             name=f"{ds.name} (Copia)",
             is_sample=False,
             dataset_id=f"upload_{copy_stem}",
+            is_ground_truth=ds.is_ground_truth,
         )
         target_dataset_id = copied_summary.id
+        db.add(
+            DatasetRecord(
+                dataset_id=target_dataset_id,
+                owner_user_id=target_user.id,
+                display_name=f"{ds.name} (Copia)",
+                is_ground_truth=ds.is_ground_truth,
+            )
+        )
 
     existing = (
         db.query(DatasetShare)
@@ -329,6 +361,7 @@ def delete_dataset(
 
     deleted_experiments = exp_query.delete(synchronize_session=False)
     db.query(DatasetShare).filter(DatasetShare.dataset_id == dataset_id).delete(synchronize_session=False)
+    db.query(DatasetRecord).filter(DatasetRecord.dataset_id == dataset_id).delete(synchronize_session=False)
     db.commit()
 
     success = dataset_engine.delete_dataset(dataset_id)
@@ -400,6 +433,8 @@ async def upload_dataset(
     name: Optional[str] = Form(None),
     expected_input_dataset_id: Optional[str] = Form(None),
     is_ground_truth: Optional[bool] = Form(None),
+    current_user: Optional[User] = Depends(get_optional_current_user),
+    db: Session = Depends(get_db),
 ):
     ext = Path(file.filename).suffix.lower()
     if ext not in [".csv", ".json", ".jsonl", ".xlsx", ".xls"]:
@@ -428,6 +463,23 @@ async def upload_dataset(
                     status_code=400,
                     detail=compat.get("error") or "El archivo de Ground Truth subido no comparte IDs coincidentes con el dataset de entrada seleccionado."
                 )
+
+        if current_user:
+            existing_rec = db.query(DatasetRecord).filter(DatasetRecord.dataset_id == summary.id).first()
+            if existing_rec:
+                existing_rec.owner_user_id = current_user.id
+                existing_rec.display_name = summary.name
+                existing_rec.is_ground_truth = summary.is_ground_truth
+            else:
+                db.add(
+                    DatasetRecord(
+                        dataset_id=summary.id,
+                        owner_user_id=current_user.id,
+                        display_name=summary.name,
+                        is_ground_truth=summary.is_ground_truth,
+                    )
+                )
+            db.commit()
 
         return summary
     except HTTPException:
