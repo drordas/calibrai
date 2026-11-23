@@ -749,22 +749,35 @@ REGLAS DE EVALUACIÓN:
                         message=f"La spec '{cs.name}' usa la variable '{arg}', que no está en el esquema de output ni en specs previas."
                     ))
 
-        # Issue 4: Validate JSON Output Schema <-> Prompt coherence
+        # Issue 4: Validate JSON Output Schema <-> Prompt coherence (section-scoped per top-level object)
         if eval_spec.output_schema and isinstance(eval_spec.output_schema, dict) and len(eval_spec.output_schema) > 0:
-            prompt_tokens_lower = {tok.lower() for tok in re.findall(r"[a-zA-Z0-9_]+", clean_template)}
+            clean_for_sections = re.sub(r"\{[a-zA-Z0-9_.-]+\}", " ", clean_template)
+            top_keys = list(eval_spec.output_schema.keys())
+            escaped_top = [re.escape(k) for k in sorted(top_keys, key=len, reverse=True)]
+            header_regex = re.compile(rf"\b({'|'.join(escaped_top)})\b", re.IGNORECASE)
+            header_matches = [(m.group(1).lower(), m.start()) for m in header_regex.finditer(clean_for_sections)]
+
+            section_tokens_by_top: Dict[str, set] = {}
+            for i, (key_lower, start_pos) in enumerate(header_matches):
+                end_pos = header_matches[i + 1][1] if i + 1 < len(header_matches) else len(clean_for_sections)
+                slice_text = clean_for_sections[start_pos:end_pos]
+                toks = {tok.lower() for tok in re.findall(r"[a-zA-Z0-9_]+", slice_text)}
+                section_tokens_by_top.setdefault(key_lower, set()).update(toks)
+
             missing_json_keys = []
             for top_key, top_val in eval_spec.output_schema.items():
-                if top_key.lower() not in prompt_tokens_lower:
+                sec_tokens = section_tokens_by_top.get(top_key.lower())
+                if not sec_tokens:
                     missing_json_keys.append(top_key)
                 elif isinstance(top_val, dict):
                     for sub_key in top_val.keys():
-                        if sub_key.lower() not in prompt_tokens_lower:
+                        if sub_key.lower() not in sec_tokens:
                             missing_json_keys.append(f"{top_key}.{sub_key}")
             if missing_json_keys:
                 issues.append(PromptValidationIssue(
                     severity="error",
-                    message=f"Incoherencia JSON ↔ Prompt: las siguientes claves del esquema de salida no aparecen en el prompt: {', '.join(missing_json_keys)}.",
-                    suggestion="Escribe el mismo nombre de variable en el prompt y en el JSON de salida (puede variar mayúsculas/minúsculas)."
+                    message=f"Incoherencia JSON ↔ Prompt: las siguientes claves del esquema de salida no aparecen en su sección correspondiente del prompt: {', '.join(missing_json_keys)}.",
+                    suggestion="Escribe el mismo nombre de variable dentro del bloque correspondiente del prompt y en el JSON de salida (puede variar mayúsculas/minúsculas)."
                 ))
 
         # Output format detection

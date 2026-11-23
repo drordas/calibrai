@@ -925,11 +925,6 @@ export const PromptEditor: React.FC<PromptEditorProps> = ({
     return tokens;
   }, [promptRealText]);
 
-  const promptTokensLower = useMemo(
-    () => new Set(promptTokenDictionary.map((tItem) => tItem.key)),
-    [promptTokenDictionary]
-  );
-
   const filteredJsonKeySuggestions = useMemo(() => {
     if (!jsonKeyAutocomplete) return [];
     const q = jsonKeyAutocomplete.query.toLowerCase();
@@ -983,15 +978,40 @@ export const PromptEditor: React.FC<PromptEditorProps> = ({
       };
     }
 
+    // Slice prompt into sections per top-level key so subfields are verified inside their own parent block
+    const cleanPromptForSections = (promptRealText || "").replace(/\{[a-zA-Z0-9_.-]+\}/g, " ");
+    const escapedTopKeys = topKeys
+      .slice()
+      .sort((a, b) => b.length - a.length)
+      .map((k) => k.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+    const headerRegex = new RegExp(`\\b(${escapedTopKeys.join("|")})\\b`, "gi");
+    const headerMatches: Array<{ keyLower: string; index: number }> = [];
+    let hm: RegExpExecArray | null;
+    while ((hm = headerRegex.exec(cleanPromptForSections)) !== null) {
+      headerMatches.push({ keyLower: hm[1].toLowerCase(), index: hm.index });
+    }
+    const sectionTokensByTopKey = new Map<string, Set<string>>();
+    for (let i = 0; i < headerMatches.length; i++) {
+      const start = headerMatches[i].index;
+      const end = i + 1 < headerMatches.length ? headerMatches[i + 1].index : cleanPromptForSections.length;
+      const slice = cleanPromptForSections.slice(start, end);
+      const tokensInSlice = (slice.match(/[a-zA-Z0-9_]+/g) || []).map((tok) => tok.toLowerCase());
+      const existingSet = sectionTokensByTopKey.get(headerMatches[i].keyLower) || new Set<string>();
+      for (const tok of tokensInSlice) existingSet.add(tok);
+      sectionTokensByTopKey.set(headerMatches[i].keyLower, existingSet);
+    }
+
     const missingKeys: string[] = [];
     const objectStatuses = topKeys.map((topKey, idx) => {
-      const topFound = promptTokensLower.has(topKey.toLowerCase());
+      const keyLower = topKey.toLowerCase();
+      const sectionTokens = sectionTokensByTopKey.get(keyLower);
+      const topFound = Boolean(sectionTokens);
       if (!topFound) missingKeys.push(topKey);
       const val = parsedOutputSchema[topKey];
       const missingSubfields: string[] = [];
-      if (val && typeof val === "object" && !Array.isArray(val)) {
+      if (topFound && sectionTokens && val && typeof val === "object" && !Array.isArray(val)) {
         for (const subKey of Object.keys(val)) {
-          if (!promptTokensLower.has(subKey.toLowerCase())) {
+          if (!sectionTokens.has(subKey.toLowerCase())) {
             missingSubfields.push(subKey);
             missingKeys.push(`${topKey}.${subKey}`);
           }
@@ -1012,7 +1032,7 @@ export const PromptEditor: React.FC<PromptEditorProps> = ({
       objectStatuses,
       missingKeys,
     };
-  }, [outputSchemaText, parsedOutputSchema, promptTokensLower]);
+  }, [outputSchemaText, parsedOutputSchema, promptRealText]);
 
   useEffect(() => {
     onValidationStateChange?.(
