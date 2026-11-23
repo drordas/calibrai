@@ -35,7 +35,7 @@ export const LanguageSelector: React.FC<LanguageSelectorProps> = ({
           type="button"
           variant={variant}
           size={size}
-          className={`h-7 px-2 gap-1.5 border-border bg-card hover:bg-muted/60 text-foreground text-xs font-medium rounded-md transition-all duration-150 cursor-pointer ${className}`}
+          className={`h-8 px-2.5 gap-1.5 border-border bg-card hover:bg-muted text-foreground text-xs font-medium rounded-sm transition-colors cursor-pointer ${className}`}
           title="Seleccionar idioma / Select language"
         >
           <Globe className="w-3.5 h-3.5 text-muted-foreground" />
