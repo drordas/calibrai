@@ -76,6 +76,7 @@ interface PromptEditorProps {
   groundTruthSchema?: any;
   idColumn?: string | null;
   specColumns?: string[];
+  onValidationStateChange?: (isValid: boolean, isValidating: boolean) => void;
 }
 
 // ---------------------------------------------------------
@@ -334,6 +335,7 @@ export const PromptEditor: React.FC<PromptEditorProps> = ({
   inputColumns,
   contextColumns,
   specColumns = [],
+  onValidationStateChange,
   template,
   setTemplate,
   systemPrompt,
@@ -836,6 +838,10 @@ export const PromptEditor: React.FC<PromptEditorProps> = ({
       setIsValidating(false);
     }
   };
+
+  useEffect(() => {
+    onValidationStateChange?.(Boolean(validation?.is_valid), isValidating);
+  }, [validation, isValidating, onValidationStateChange]);
 
   // -------------------------------------------------------
   // Handlers for 3 Parts

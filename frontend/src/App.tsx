@@ -172,12 +172,13 @@ export function App() {
   const [editingTemplateId, setEditingTemplateId] = useState<string | null>(null);
   const [savingTemplateStep, setSavingTemplateStep] = useState<boolean>(false);
   const [templateSavedFeedback, setTemplateSavedFeedback] = useState<boolean>(false);
+  const [isPromptLinterValid, setIsPromptLinterValid] = useState<boolean>(true);
 
   // Sequential Validation Rules:
   // Paso 1 válido: Dataset seleccionado Y al menos una columna de Texto Principal asignada (o template ya cargado)
   const isStep1Valid = Boolean(selectedDataset && (contextColumns.length > 0 || inputColumns.length > 0 || template.length > 0));
-  // Paso 2 válido: Paso 1 completado Y plantilla no vacía (Prompt & Métricas)
-  const isStep2Valid = isStep1Valid && template.trim().length > 0;
+  // Paso 2 válido: Paso 1 completado, plantilla no vacía y sin errores en el linter
+  const isStep2Valid = isStep1Valid && template.trim().length > 0 && isPromptLinterValid;
   // Paso 3 válido: Paso 2 completado Y al menos un modelo seleccionado (Modelos & Hardware)
   const isStep3Valid = isStep2Valid && selectedModelIds.length > 0 && sampleSize >= 1;
 
@@ -1341,6 +1342,9 @@ export function App() {
                     groundTruthDatasetIds={groundTruthDatasetIds}
                     groundTruthSchema={groundTruthSchema}
                     idColumn={idColumn}
+                    onValidationStateChange={(isValid, isValidating) =>
+                      setIsPromptLinterValid(isValid && !isValidating)
+                    }
                   />
                 )}
 
@@ -1359,7 +1363,9 @@ export function App() {
                   <div className="flex items-center gap-3 flex-wrap justify-end">
                     {!isStep2Valid && (
                       <span className="text-[11px] text-amber-600 dark:text-amber-400 font-medium">
-                        {t("wizard.step2Warning")}
+                        {template.trim().length > 0 && !isPromptLinterValid
+                          ? "Corrige los errores del linter para continuar"
+                          : t("wizard.step2Warning")}
                       </span>
                     )}
                     {isTemplateMode && selectedDataset && (
