@@ -30,6 +30,19 @@ class DatasetShare(Base):
     dataset_id = Column(String(100), nullable=False, index=True)
     owner_user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     target_user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    share_mode = Column(String(20), default="view", nullable=False)  # "view" | "edit" | "copy"
+    status = Column(String(20), default="pending", nullable=False)  # "pending" | "accepted"
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+
+
+class ExperimentShare(Base):
+    __tablename__ = "experiment_shares"
+
+    id = Column(Integer, primary_key=True, index=True)
+    experiment_id = Column(String(50), ForeignKey("experiments.id", ondelete="CASCADE"), nullable=False, index=True)
+    owner_user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    target_user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    share_mode = Column(String(20), default="view", nullable=False)  # "view" | "edit"
     status = Column(String(20), default="pending", nullable=False)  # "pending" | "accepted"
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
 
@@ -122,5 +135,6 @@ class Experiment(Base):
     paused_at = Column(DateTime, nullable=True)
     completed_at = Column(DateTime, nullable=True)
     updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+    notification_read = Column(Boolean, default=False)
 
     user = relationship("User", back_populates="experiments")

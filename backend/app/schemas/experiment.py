@@ -48,6 +48,12 @@ class ExperimentSummary(BaseModel):
     paused_at: Optional[datetime.datetime] = None
     completed_at: Optional[datetime.datetime] = None
     error_message: Optional[str] = None
+    is_shared: bool = False
+    is_shared_by_owner: bool = False
+    share_mode: Optional[str] = None
+    share_status: Optional[str] = None
+    shared_by: Optional[str] = None
+    share_id: Optional[int] = None
 
 class ExperimentResponse(BaseModel):
     id: str
@@ -86,3 +92,26 @@ class ExperimentResponse(BaseModel):
     paused_at: Optional[datetime.datetime] = None
     completed_at: Optional[datetime.datetime] = None
     updated_at: Optional[datetime.datetime] = None
+    is_shared: bool = False
+    is_shared_by_owner: bool = False
+    share_mode: Optional[str] = None
+    share_status: Optional[str] = None
+    shared_by: Optional[str] = None
+    share_id: Optional[int] = None
+
+
+class ExperimentShareRequest(BaseModel):
+    target_user_id: int
+    share_mode: str = "view"  # "view" | "edit" | "copy"
+
+
+class ExperimentShareRespondRequest(BaseModel):
+    accept: bool
+
+
+class ExperimentShareEntryOut(BaseModel):
+    id: int
+    target_user_id: int
+    target_username: str
+    share_mode: str
+    status: str

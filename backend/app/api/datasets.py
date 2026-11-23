@@ -1,4 +1,5 @@
 import shutil
+import uuid
 from pathlib import Path
 from typing import List, Optional
 from fastapi import APIRouter, Depends, UploadFile, File, Form, HTTPException, Query
@@ -10,6 +11,7 @@ from backend.app.core.dataset_engine import dataset_engine
 from backend.app.db.models import DatasetShare, Experiment, User
 from backend.app.db.session import get_db
 from backend.app.schemas.dataset import (
+    DatasetShareEntryOut,
     DatasetShareRequest,
     DatasetShareRespondRequest,
     DatasetSummary,
@@ -28,7 +30,7 @@ def list_datasets(
     if not current_user:
         return datasets
 
-    shares = (
+    incoming_shares = (
         db.query(DatasetShare)
         .filter(
             DatasetShare.target_user_id == current_user.id,
@@ -36,24 +38,45 @@ def list_datasets(
         )
         .all()
     )
-    if not shares:
-        return datasets
-
-    owner_ids = {s.owner_user_id for s in shares}
-    owners = {
-        u.id: u.username
-        for u in db.query(User).filter(User.id.in_(owner_ids)).all()
+    outgoing_shared_ids = {
+        s.dataset_id
+        for s in db.query(DatasetShare)
+        .filter(
+            DatasetShare.owner_user_id == current_user.id,
+            DatasetShare.share_mode.in_(["view", "edit"]),
+        )
+        .all()
     }
-    share_by_dataset = {s.dataset_id: s for s in shares}
+
+    owner_ids = {s.owner_user_id for s in incoming_shares}
+    owners = (
+        {
+            u.id: u.username
+            for u in db.query(User).filter(User.id.in_(owner_ids)).all()
+        }
+        if owner_ids
+        else {}
+    )
+    share_by_dataset = {s.dataset_id: s for s in incoming_shares}
+
+    # Hide cloned copy datasets from other users who aren't the target recipient
+    all_copy_dataset_ids = {
+        s.dataset_id
+        for s in db.query(DatasetShare).filter(DatasetShare.share_mode == "copy").all()
+    }
 
     enriched: List[DatasetSummary] = []
     for ds in datasets:
         share = share_by_dataset.get(ds.id)
+        if ds.id in all_copy_dataset_ids and not share:
+            continue
         if share:
             enriched.append(
                 ds.model_copy(
                     update={
                         "is_shared": True,
+                        "is_shared_by_owner": ds.id in outgoing_shared_ids,
+                        "share_mode": share.share_mode,
                         "share_status": share.status,
                         "shared_by": owners.get(share.owner_user_id, ""),
                         "share_id": share.id,
@@ -61,7 +84,13 @@ def list_datasets(
                 )
             )
         else:
-            enriched.append(ds)
+            enriched.append(
+                ds.model_copy(
+                    update={
+                        "is_shared_by_owner": ds.id in outgoing_shared_ids,
+                    }
+                )
+            )
     return enriched
 
 
@@ -82,6 +111,60 @@ def list_shareable_users(
     ]
 
 
+@router.get("/{dataset_id}/shares", response_model=List[DatasetShareEntryOut])
+def list_dataset_shares(
+    dataset_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    shares = (
+        db.query(DatasetShare)
+        .filter(
+            DatasetShare.dataset_id == dataset_id,
+            DatasetShare.owner_user_id == current_user.id,
+            DatasetShare.share_mode.in_(["view", "edit"]),
+        )
+        .all()
+    )
+    if not shares:
+        return []
+    user_ids = {s.target_user_id for s in shares}
+    users = {u.id: u.username for u in db.query(User).filter(User.id.in_(user_ids)).all()}
+    return [
+        DatasetShareEntryOut(
+            id=s.id,
+            target_user_id=s.target_user_id,
+            target_username=users.get(s.target_user_id, ""),
+            share_mode=s.share_mode,
+            status=s.status,
+        )
+        for s in shares
+    ]
+
+
+@router.delete("/{dataset_id}/shares/{share_id}")
+def revoke_dataset_share(
+    dataset_id: str,
+    share_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    share = (
+        db.query(DatasetShare)
+        .filter(
+            DatasetShare.id == share_id,
+            DatasetShare.dataset_id == dataset_id,
+            DatasetShare.owner_user_id == current_user.id,
+        )
+        .first()
+    )
+    if not share:
+        raise HTTPException(status_code=404, detail="Compartición no encontrada")
+    db.delete(share)
+    db.commit()
+    return {"status": "revoked", "share_id": share_id}
+
+
 @router.post("/{dataset_id}/share")
 def share_dataset(
     dataset_id: str,
@@ -95,32 +178,52 @@ def share_dataset(
     if req.target_user_id == current_user.id:
         raise HTTPException(status_code=400, detail="No puedes compartir un dataset contigo mismo")
 
+    mode = req.share_mode if req.share_mode in ("view", "edit", "copy") else "view"
     target_user = db.query(User).filter(User.id == req.target_user_id, User.is_active == True).first()
     if not target_user:
         raise HTTPException(status_code=404, detail="Usuario destino no encontrado")
 
+    target_dataset_id = dataset_id
+    if mode == "copy":
+        meta = dataset_engine.datasets.get(dataset_id)
+        src_path = meta.get("file_path") if meta else None
+        if not src_path or not Path(src_path).exists():
+            raise HTTPException(status_code=500, detail="No se encontró el archivo origen del dataset para copiar")
+        copy_filename = f"copy_{uuid.uuid4().hex[:8]}_{Path(src_path).name}"
+        copy_path = settings.upload_dir / copy_filename
+        shutil.copy2(src_path, copy_path)
+        copied_summary = dataset_engine.register_dataset(
+            file_path=copy_path,
+            name=f"{ds.name} (Copia)",
+            is_sample=False,
+            dataset_id=f"copy_{uuid.uuid4().hex[:10]}",
+        )
+        target_dataset_id = copied_summary.id
+
     existing = (
         db.query(DatasetShare)
         .filter(
-            DatasetShare.dataset_id == dataset_id,
+            DatasetShare.dataset_id == target_dataset_id,
             DatasetShare.target_user_id == target_user.id,
         )
         .first()
     )
     if existing:
         existing.owner_user_id = current_user.id
+        existing.share_mode = mode
         existing.status = "pending"
     else:
         db.add(
             DatasetShare(
-                dataset_id=dataset_id,
+                dataset_id=target_dataset_id,
                 owner_user_id=current_user.id,
                 target_user_id=target_user.id,
+                share_mode=mode,
                 status="pending",
             )
         )
     db.commit()
-    return {"status": "shared", "dataset_id": dataset_id, "target_username": target_user.username}
+    return {"status": "shared", "dataset_id": target_dataset_id, "share_mode": mode, "target_username": target_user.username}
 
 
 @router.post("/shares/{share_id}/respond")
@@ -146,8 +249,12 @@ def respond_to_dataset_share(
         db.commit()
         return {"status": "accepted", "share_id": share_id}
 
+    is_copy = share.share_mode == "copy"
+    copy_ds_id = share.dataset_id
     db.delete(share)
     db.commit()
+    if is_copy:
+        dataset_engine.delete_dataset(copy_ds_id)
     return {"status": "rejected", "share_id": share_id}
 
 
@@ -164,7 +271,6 @@ def delete_dataset(
     current_user: Optional[User] = Depends(get_optional_current_user),
     db: Session = Depends(get_db),
 ):
-    # Delete experiments associated with this dataset
     exp_query = db.query(Experiment).filter(
         or_(
             Experiment.dataset_id == dataset_id,
@@ -182,9 +288,26 @@ def delete_dataset(
         )
         if shared_for_user:
             exp_query.filter(Experiment.user_id == current_user.id).delete(synchronize_session=False)
+            is_copy = shared_for_user.share_mode == "copy"
             db.delete(shared_for_user)
             db.commit()
+            if is_copy:
+                dataset_engine.delete_dataset(dataset_id)
             return {"status": "unshared", "dataset_id": dataset_id}
+
+    active_shares = (
+        db.query(DatasetShare)
+        .filter(
+            DatasetShare.dataset_id == dataset_id,
+            DatasetShare.share_mode.in_(["view", "edit"]),
+        )
+        .count()
+    )
+    if active_shares > 0:
+        raise HTTPException(
+            status_code=400,
+            detail="No puedes eliminar este dataset mientras esté compartido con otros usuarios. Deja de compartirlo primero.",
+        )
 
     deleted_experiments = exp_query.delete(synchronize_session=False)
     db.query(DatasetShare).filter(DatasetShare.dataset_id == dataset_id).delete(synchronize_session=False)

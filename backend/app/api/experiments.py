@@ -7,16 +7,47 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from backend.app.db.session import get_db
-from backend.app.db.models import User, Experiment
+from backend.app.db.models import User, Experiment, ExperimentShare
 from backend.app.api.auth import get_current_user
 from backend.app.schemas.experiment import (
     ExperimentCreate,
     ExperimentSummary,
-    ExperimentResponse
+    ExperimentResponse,
+    ExperimentShareRequest,
+    ExperimentShareRespondRequest,
+    ExperimentShareEntryOut,
 )
 from backend.app.core.experiment_queue import experiment_queue
 
 router = APIRouter(prefix="/api/experiments", tags=["experiments"])
+
+
+def _get_accessible_experiment(
+    experiment_id: str,
+    user: User,
+    db: Session,
+    require_edit: bool = False,
+) -> tuple[Experiment, Optional[ExperimentShare]]:
+    exp = db.query(Experiment).filter(Experiment.id == experiment_id).first()
+    if not exp:
+        raise HTTPException(status_code=404, detail="Experimento no encontrado")
+
+    share = (
+        db.query(ExperimentShare)
+        .filter(
+            ExperimentShare.experiment_id == experiment_id,
+            ExperimentShare.target_user_id == user.id,
+        )
+        .first()
+    )
+    if exp.user_id == user.id:
+        return exp, share
+    if not share:
+        raise HTTPException(status_code=404, detail="Experimento no encontrado")
+    if require_edit and share.share_mode == "view":
+        raise HTTPException(status_code=403, detail="Este experimento está compartido contigo en modo solo lectura")
+    return exp, share
+
 
 @router.get("", response_model=List[ExperimentSummary])
 def list_experiments(
@@ -24,11 +55,73 @@ def list_experiments(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    query = db.query(Experiment).filter(Experiment.user_id == current_user.id)
+    own_query = db.query(Experiment).filter(Experiment.user_id == current_user.id)
     if status:
-        query = query.filter(Experiment.status == status)
-    experiments = query.order_by(Experiment.created_at.desc()).all()
-    return experiments
+        own_query = own_query.filter(Experiment.status == status)
+    own_exps = own_query.order_by(Experiment.created_at.desc()).all()
+
+    incoming_shares = (
+        db.query(ExperimentShare)
+        .filter(
+            ExperimentShare.target_user_id == current_user.id,
+            ExperimentShare.status.in_(["pending", "accepted"]),
+        )
+        .all()
+    )
+    outgoing_shared_ids = {
+        s.experiment_id
+        for s in db.query(ExperimentShare)
+        .filter(
+            ExperimentShare.owner_user_id == current_user.id,
+            ExperimentShare.share_mode.in_(["view", "edit"]),
+        )
+        .all()
+    }
+
+    share_by_exp_id = {s.experiment_id: s for s in incoming_shares}
+    shared_exp_ids = [s.experiment_id for s in incoming_shares]
+
+    extra_shared_exps = []
+    if shared_exp_ids:
+        shared_query = db.query(Experiment).filter(
+            Experiment.id.in_(shared_exp_ids),
+            Experiment.user_id != current_user.id,
+        )
+        if status:
+            shared_query = shared_query.filter(Experiment.status == status)
+        extra_shared_exps = shared_query.order_by(Experiment.created_at.desc()).all()
+
+    owner_ids = {s.owner_user_id for s in incoming_shares}
+    owners = (
+        {u.id: u.username for u in db.query(User).filter(User.id.in_(owner_ids)).all()}
+        if owner_ids
+        else {}
+    )
+
+    combined = list(own_exps) + list(extra_shared_exps)
+    combined.sort(key=lambda e: e.created_at or 0, reverse=True)
+
+    result: List[ExperimentSummary] = []
+    for exp in combined:
+        summary = ExperimentSummary.model_validate(exp, from_attributes=True)
+        share = share_by_exp_id.get(exp.id)
+        if share:
+            summary = summary.model_copy(
+                update={
+                    "is_shared": True,
+                    "is_shared_by_owner": exp.id in outgoing_shared_ids,
+                    "share_mode": share.share_mode,
+                    "share_status": share.status,
+                    "shared_by": owners.get(share.owner_user_id, ""),
+                    "share_id": share.id,
+                }
+            )
+        else:
+            summary = summary.model_copy(
+                update={"is_shared_by_owner": exp.id in outgoing_shared_ids}
+            )
+        result.append(summary)
+    return result
 
 @router.post("", response_model=ExperimentResponse)
 async def create_experiment(
@@ -134,13 +227,197 @@ def get_experiment(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
+    exp, share = _get_accessible_experiment(experiment_id, current_user, db, require_edit=False)
+    resp = ExperimentResponse.model_validate(exp, from_attributes=True)
+    if share:
+        owner = db.query(User).filter(User.id == share.owner_user_id).first()
+        resp = resp.model_copy(
+            update={
+                "is_shared": True,
+                "share_mode": share.share_mode,
+                "share_status": share.status,
+                "shared_by": owner.username if owner else "",
+                "share_id": share.id,
+            }
+        )
+    return resp
+
+
+@router.get("/{experiment_id}/shares", response_model=List[ExperimentShareEntryOut])
+def list_experiment_shares(
+    experiment_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    shares = (
+        db.query(ExperimentShare)
+        .filter(
+            ExperimentShare.experiment_id == experiment_id,
+            ExperimentShare.owner_user_id == current_user.id,
+            ExperimentShare.share_mode.in_(["view", "edit"]),
+        )
+        .all()
+    )
+    if not shares:
+        return []
+    user_ids = {s.target_user_id for s in shares}
+    users = {u.id: u.username for u in db.query(User).filter(User.id.in_(user_ids)).all()}
+    return [
+        ExperimentShareEntryOut(
+            id=s.id,
+            target_user_id=s.target_user_id,
+            target_username=users.get(s.target_user_id, ""),
+            share_mode=s.share_mode,
+            status=s.status,
+        )
+        for s in shares
+    ]
+
+
+@router.delete("/{experiment_id}/shares/{share_id}")
+def revoke_experiment_share(
+    experiment_id: str,
+    share_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    share = (
+        db.query(ExperimentShare)
+        .filter(
+            ExperimentShare.id == share_id,
+            ExperimentShare.experiment_id == experiment_id,
+            ExperimentShare.owner_user_id == current_user.id,
+        )
+        .first()
+    )
+    if not share:
+        raise HTTPException(status_code=404, detail="Compartición no encontrada")
+    db.delete(share)
+    db.commit()
+    return {"status": "revoked", "share_id": share_id}
+
+
+@router.post("/{experiment_id}/share")
+def share_experiment(
+    experiment_id: str,
+    req: ExperimentShareRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
     exp = db.query(Experiment).filter(
         Experiment.id == experiment_id,
-        Experiment.user_id == current_user.id
+        Experiment.user_id == current_user.id,
     ).first()
     if not exp:
         raise HTTPException(status_code=404, detail="Experimento no encontrado")
-    return exp
+    if exp.status != "completed":
+        raise HTTPException(status_code=400, detail="Solo se pueden compartir experimentos finalizados")
+    if req.target_user_id == current_user.id:
+        raise HTTPException(status_code=400, detail="No puedes compartir un experimento contigo mismo")
+
+    mode = req.share_mode if req.share_mode in ("view", "edit", "copy") else "view"
+    target_user = db.query(User).filter(User.id == req.target_user_id, User.is_active == True).first()
+    if not target_user:
+        raise HTTPException(status_code=404, detail="Usuario destino no encontrado")
+
+    target_exp_id = exp.id
+    if mode == "copy":
+        new_exp_id = f"exp_{uuid.uuid4().hex[:8]}"
+        cloned = Experiment(
+            id=new_exp_id,
+            user_id=target_user.id,
+            name=f"{exp.name} (Copia)",
+            description=exp.description or "",
+            dataset_id=exp.dataset_id,
+            dataset_name=exp.dataset_name or "",
+            input_columns=list(exp.input_columns or []),
+            context_columns=list(exp.context_columns or []),
+            id_column=exp.id_column,
+            model_ids=list(exp.model_ids or []),
+            ground_truth_dataset_id=exp.ground_truth_dataset_id,
+            ground_truth_dataset_ids=list(exp.ground_truth_dataset_ids or []),
+            ground_truth_name=exp.ground_truth_name,
+            template=exp.template,
+            system_prompt=exp.system_prompt or "",
+            task_type=exp.task_type or "generic",
+            eval_spec=dict(exp.eval_spec or {}),
+            sample_size=exp.sample_size,
+            execution_mode=exp.execution_mode,
+            model_temperatures=dict(exp.model_temperatures or {}),
+            status=exp.status,
+            current_model_index=exp.current_model_index,
+            current_sample_index=exp.current_sample_index,
+            total_samples=exp.total_samples,
+            progress_pct=exp.progress_pct,
+            raw_results=dict(exp.raw_results or {}),
+            summaries=dict(exp.summaries or {}),
+            pairwise_matrix=list(exp.pairwise_matrix or []),
+            best_performers=dict(exp.best_performers or {}),
+            completed_at=exp.completed_at,
+            notification_read=True,
+        )
+        db.add(cloned)
+        db.flush()
+        target_exp_id = new_exp_id
+
+    existing = (
+        db.query(ExperimentShare)
+        .filter(
+            ExperimentShare.experiment_id == target_exp_id,
+            ExperimentShare.target_user_id == target_user.id,
+        )
+        .first()
+    )
+    if existing:
+        existing.owner_user_id = current_user.id
+        existing.share_mode = mode
+        existing.status = "pending"
+    else:
+        db.add(
+            ExperimentShare(
+                experiment_id=target_exp_id,
+                owner_user_id=current_user.id,
+                target_user_id=target_user.id,
+                share_mode=mode,
+                status="pending",
+            )
+        )
+    db.commit()
+    return {"status": "shared", "experiment_id": target_exp_id, "share_mode": mode, "target_username": target_user.username}
+
+
+@router.post("/shares/{share_id}/respond")
+def respond_to_experiment_share(
+    share_id: int,
+    req: ExperimentShareRespondRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    share = (
+        db.query(ExperimentShare)
+        .filter(
+            ExperimentShare.id == share_id,
+            ExperimentShare.target_user_id == current_user.id,
+        )
+        .first()
+    )
+    if not share:
+        raise HTTPException(status_code=404, detail="Invitación de experimento no encontrada")
+
+    if req.accept:
+        share.status = "accepted"
+        db.commit()
+        return {"status": "accepted", "share_id": share_id}
+
+    is_copy = share.share_mode == "copy"
+    copy_exp_id = share.experiment_id
+    db.delete(share)
+    if is_copy:
+        copy_exp = db.query(Experiment).filter(Experiment.id == copy_exp_id, Experiment.user_id == current_user.id).first()
+        if copy_exp:
+            db.delete(copy_exp)
+    db.commit()
+    return {"status": "rejected", "share_id": share_id}
 
 @router.post("/{experiment_id}/start", response_model=ExperimentResponse)
 async def start_experiment(
@@ -148,12 +425,7 @@ async def start_experiment(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    exp = db.query(Experiment).filter(
-        Experiment.id == experiment_id,
-        Experiment.user_id == current_user.id
-    ).first()
-    if not exp:
-        raise HTTPException(status_code=404, detail="Experimento no encontrado")
+    exp, _ = _get_accessible_experiment(experiment_id, current_user, db, require_edit=True)
 
     await experiment_queue.enqueue_or_start(experiment_id)
     db.refresh(exp)
@@ -165,12 +437,7 @@ async def pause_experiment(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    exp = db.query(Experiment).filter(
-        Experiment.id == experiment_id,
-        Experiment.user_id == current_user.id
-    ).first()
-    if not exp:
-        raise HTTPException(status_code=404, detail="Experimento no encontrado")
+    exp, _ = _get_accessible_experiment(experiment_id, current_user, db, require_edit=True)
 
     await experiment_queue.pause_experiment(experiment_id)
     db.refresh(exp)
@@ -182,12 +449,7 @@ async def resume_experiment(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    exp = db.query(Experiment).filter(
-        Experiment.id == experiment_id,
-        Experiment.user_id == current_user.id
-    ).first()
-    if not exp:
-        raise HTTPException(status_code=404, detail="Experimento no encontrado")
+    exp, _ = _get_accessible_experiment(experiment_id, current_user, db, require_edit=True)
 
     await experiment_queue.resume_experiment(experiment_id)
     db.refresh(exp)
@@ -199,12 +461,7 @@ async def cancel_experiment(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    exp = db.query(Experiment).filter(
-        Experiment.id == experiment_id,
-        Experiment.user_id == current_user.id
-    ).first()
-    if not exp:
-        raise HTTPException(status_code=404, detail="Experimento no encontrado")
+    exp, _ = _get_accessible_experiment(experiment_id, current_user, db, require_edit=True)
 
     await experiment_queue.cancel_experiment(experiment_id)
     db.refresh(exp)
@@ -216,16 +473,47 @@ async def delete_experiment(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    exp = db.query(Experiment).filter(
-        Experiment.id == experiment_id,
-        Experiment.user_id == current_user.id
-    ).first()
-    if not exp:
-        raise HTTPException(status_code=404, detail="Experimento no encontrado")
+    shared_for_user = (
+        db.query(ExperimentShare)
+        .filter(
+            ExperimentShare.experiment_id == experiment_id,
+            ExperimentShare.target_user_id == current_user.id,
+        )
+        .first()
+    )
+    if shared_for_user:
+        is_copy = shared_for_user.share_mode == "copy"
+        db.delete(shared_for_user)
+        if is_copy:
+            copy_exp = db.query(Experiment).filter(
+                Experiment.id == experiment_id,
+                Experiment.user_id == current_user.id,
+            ).first()
+            if copy_exp:
+                db.delete(copy_exp)
+        db.commit()
+        return {"message": "Experimento compartido eliminado de tu perfil", "id": experiment_id}
+
+    exp, _ = _get_accessible_experiment(experiment_id, current_user, db, require_edit=True)
+
+    active_shares = (
+        db.query(ExperimentShare)
+        .filter(
+            ExperimentShare.experiment_id == experiment_id,
+            ExperimentShare.share_mode.in_(["view", "edit"]),
+        )
+        .count()
+    )
+    if active_shares > 0:
+        raise HTTPException(
+            status_code=400,
+            detail="No puedes eliminar este experimento mientras esté compartido con otros usuarios. Deja de compartirlo primero.",
+        )
 
     if exp.status == "running":
         await experiment_queue.cancel_experiment(experiment_id)
 
+    db.query(ExperimentShare).filter(ExperimentShare.experiment_id == experiment_id).delete(synchronize_session=False)
     db.delete(exp)
     db.commit()
     return {"message": "Experimento eliminado correctamente", "id": experiment_id}
@@ -240,12 +528,7 @@ async def recalculate_experiment_metrics(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    exp = db.query(Experiment).filter(
-        Experiment.id == experiment_id,
-        Experiment.user_id == current_user.id
-    ).first()
-    if not exp:
-        raise HTTPException(status_code=404, detail="Experimento no encontrado")
+    exp, _ = _get_accessible_experiment(experiment_id, current_user, db, require_edit=True)
 
     from backend.app.metrics.engine import metrics_engine
     from backend.app.schemas.prompt import EvaluationSpec
@@ -324,12 +607,7 @@ async def stream_experiment_progress(
     db: Session = Depends(get_db)
 ):
     """Server-Sent Events (SSE) stream for live progress updates."""
-    exp = db.query(Experiment).filter(
-        Experiment.id == experiment_id,
-        Experiment.user_id == current_user.id
-    ).first()
-    if not exp:
-        raise HTTPException(status_code=404, detail="Experimento no encontrado")
+    exp, _ = _get_accessible_experiment(experiment_id, current_user, db, require_edit=True)
 
     queue = experiment_queue.subscribe(experiment_id)
 
@@ -394,12 +672,7 @@ def audit_model_failures(
     - Self-contradictory overlapping quotes (Disjointness failures)
     - Rule violations
     """
-    exp = db.query(Experiment).filter(
-        Experiment.id == experiment_id,
-        Experiment.user_id == current_user.id
-    ).first()
-    if not exp:
-        raise HTTPException(status_code=404, detail="Experimento no encontrado")
+    exp, _ = _get_accessible_experiment(experiment_id, current_user, db, require_edit=True)
 
     raw_results = exp.raw_results or {}
     results = raw_results.get(model_id, [])
@@ -550,12 +823,7 @@ def audit_pairwise_discrepancies(
     - Agreement and disagreement counts
     - Detailed list of rows where raters disagreed with quotes and source text
     """
-    exp = db.query(Experiment).filter(
-        Experiment.id == experiment_id,
-        Experiment.user_id == current_user.id
-    ).first()
-    if not exp:
-        raise HTTPException(status_code=404, detail="Experimento no encontrado")
+    exp, _ = _get_accessible_experiment(experiment_id, current_user, db, require_edit=True)
 
     raw_results = exp.raw_results or {}
     results_a = raw_results.get(model_a, [])

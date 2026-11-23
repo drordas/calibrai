@@ -21,6 +21,8 @@ export interface DatasetSummary {
   is_ground_truth?: boolean;
   benchmark_id?: string;
   is_shared?: boolean;
+  is_shared_by_owner?: boolean;
+  share_mode?: "view" | "edit" | "copy" | string | null;
   share_status?: "pending" | "accepted" | string | null;
   shared_by?: string | null;
   share_id?: number | null;
@@ -30,6 +32,25 @@ export interface ShareUser {
   id: number;
   username: string;
   full_name?: string | null;
+}
+
+export interface ShareEntry {
+  id: number;
+  target_user_id: number;
+  target_username: string;
+  share_mode: "view" | "edit" | "copy" | string;
+  status: "pending" | "accepted" | string;
+}
+
+export interface AppNotification {
+  id: string;
+  type: "experiment_completed" | "dataset_shared" | "experiment_shared";
+  title: string;
+  resource_id: string;
+  share_id?: number;
+  share_mode?: string;
+  from_username?: string;
+  created_at?: string | null;
 }
 
 export interface PaginatedRowsResponse {
@@ -446,6 +467,12 @@ export interface ExperimentSummary {
   paused_at?: string;
   completed_at?: string;
   error_message?: string;
+  is_shared?: boolean;
+  is_shared_by_owner?: boolean;
+  share_mode?: "view" | "edit" | "copy" | string | null;
+  share_status?: "pending" | "accepted" | string | null;
+  shared_by?: string | null;
+  share_id?: number | null;
 }
 
 export interface ExperimentDetail extends ExperimentSummary {

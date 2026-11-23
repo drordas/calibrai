@@ -4,7 +4,8 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 from backend.app.db.session import get_db
-from backend.app.db.models import User, UserConfiguration
+from backend.app.db.models import DatasetShare, Experiment, ExperimentShare, User, UserConfiguration
+from backend.app.core.dataset_engine import dataset_engine
 from backend.app.core.security import verify_password, get_password_hash, create_access_token, decode_access_token
 from backend.app.schemas.auth import (
     LoginRequest,
@@ -245,6 +246,111 @@ def update_user_profile(
         user=_build_user_out(user),
         config=_build_config_out(config),
     )
+
+
+@router.get("/notifications")
+def get_notifications(
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    items = []
+
+    completed_exps = (
+        db.query(Experiment)
+        .filter(
+            Experiment.user_id == user.id,
+            Experiment.status == "completed",
+            Experiment.notification_read == False,
+        )
+        .order_by(Experiment.completed_at.desc())
+        .limit(15)
+        .all()
+    )
+    for exp in completed_exps:
+        items.append({
+            "id": f"exp_done_{exp.id}",
+            "type": "experiment_completed",
+            "title": exp.name,
+            "resource_id": exp.id,
+            "created_at": (exp.completed_at or exp.created_at).isoformat() if (exp.completed_at or exp.created_at) else None,
+        })
+
+    ds_shares = (
+        db.query(DatasetShare)
+        .filter(
+            DatasetShare.target_user_id == user.id,
+            DatasetShare.status == "pending",
+        )
+        .order_by(DatasetShare.created_at.desc())
+        .all()
+    )
+    exp_shares = (
+        db.query(ExperimentShare)
+        .filter(
+            ExperimentShare.target_user_id == user.id,
+            ExperimentShare.status == "pending",
+        )
+        .order_by(ExperimentShare.created_at.desc())
+        .all()
+    )
+
+    owner_ids = {s.owner_user_id for s in ds_shares} | {s.owner_user_id for s in exp_shares}
+    owners = (
+        {u.id: u.username for u in db.query(User).filter(User.id.in_(owner_ids)).all()}
+        if owner_ids
+        else {}
+    )
+
+    for s in ds_shares:
+        ds = dataset_engine.get_dataset(s.dataset_id)
+        items.append({
+            "id": f"ds_share_{s.id}",
+            "type": "dataset_shared",
+            "title": ds.name if ds else s.dataset_id,
+            "resource_id": s.dataset_id,
+            "share_id": s.id,
+            "share_mode": s.share_mode,
+            "from_username": owners.get(s.owner_user_id, ""),
+            "created_at": s.created_at.isoformat() if s.created_at else None,
+        })
+
+    exp_ids = {s.experiment_id for s in exp_shares}
+    shared_exps = (
+        {e.id: e for e in db.query(Experiment).filter(Experiment.id.in_(exp_ids)).all()}
+        if exp_ids
+        else {}
+    )
+    for s in exp_shares:
+        exp = shared_exps.get(s.experiment_id)
+        items.append({
+            "id": f"exp_share_{s.id}",
+            "type": "experiment_shared",
+            "title": exp.name if exp else s.experiment_id,
+            "resource_id": s.experiment_id,
+            "share_id": s.id,
+            "share_mode": s.share_mode,
+            "from_username": owners.get(s.owner_user_id, ""),
+            "created_at": s.created_at.isoformat() if s.created_at else None,
+        })
+
+    items.sort(key=lambda x: x.get("created_at") or "", reverse=True)
+    return {"notifications": items, "unread_count": len(items)}
+
+
+@router.post("/notifications/experiments/{experiment_id}/read")
+def mark_experiment_notification_read(
+    experiment_id: str,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    exp = db.query(Experiment).filter(
+        Experiment.id == experiment_id,
+        Experiment.user_id == user.id,
+    ).first()
+    if exp:
+        exp.notification_read = True
+        db.commit()
+    return {"status": "ok"}
 
 @router.put("/config", response_model=UserConfigOut)
 def update_user_config(

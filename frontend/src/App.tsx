@@ -8,6 +8,7 @@ import {
   UserConfig,
   SavedBenchmarkDetail,
   ExperimentSummary,
+  AppNotification,
 } from "./types";
 import {
   fetchDatasets,
@@ -22,6 +23,8 @@ import {
   deleteExperiment,
   createExperiment,
   updateExperimentTemplate,
+  fetchNotifications,
+  markExperimentNotificationRead,
 } from "./services/api";
 import { LoginPage } from "./components/LoginPage";
 import { DatasetViewer } from "./components/DatasetViewer";
@@ -66,7 +69,16 @@ import {
   RefreshCw,
   Trash2,
   Loader2,
+  Bell,
+  Eye,
 } from "lucide-react";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
@@ -135,6 +147,8 @@ export function App() {
   const [resultsTab, setResultsTab] = useState<"leaderboard" | "matrix" | "methodology">("leaderboard");
   const [showSavedModal, setShowSavedModal] = useState<boolean>(false);
   const [showProfileModal, setShowProfileModal] = useState<boolean>(false);
+  const [openDatasetsSignal, setOpenDatasetsSignal] = useState<number>(0);
+  const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [currentExperimentId, setCurrentExperimentId] = useState<string | null>(null);
   const [currentExperimentDetail, setCurrentExperimentDetail] = useState<ExperimentDetail | null>(null);
   const [isRecalculating, setIsRecalculating] = useState<boolean>(false);
@@ -519,6 +533,21 @@ export function App() {
   };
 
   // If loading or not logged in, show login page
+  useEffect(() => {
+    if (!currentUser) {
+      setNotifications([]);
+      return;
+    }
+    const loadNotifs = () => {
+      fetchNotifications()
+        .then((res) => setNotifications(res.notifications || []))
+        .catch(() => {});
+    };
+    loadNotifs();
+    const timer = setInterval(loadNotifs, 15000);
+    return () => clearInterval(timer);
+  }, [currentUser]);
+
   if (checkingAuth) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background text-foreground spatial-mesh">
@@ -713,8 +742,122 @@ export function App() {
               <span className="hidden sm:inline text-foreground">{currentUser.username}</span>
             </Button>
 
-            {/* Language Selector */}
-            <LanguageSelector variant="outline" showLabel={true} />
+            {/* Notifications Bell */}
+            <DropdownMenu onOpenChange={(open) => {
+              if (open && currentUser) {
+                fetchNotifications().then((res) => setNotifications(res.notifications || [])).catch(() => {});
+              }
+            }}>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="outline"
+                  size="icon"
+                  className="relative h-8 w-8 rounded-sm border-border bg-card text-foreground hover:bg-muted transition-colors"
+                  title={t("notifications.title")}
+                >
+                  <Bell className="w-3.5 h-3.5" />
+                  {notifications.length > 0 && (
+                    <span className="absolute -top-1 -right-1 min-w-[16px] h-4 px-1 rounded-full bg-primary text-primary-foreground text-[9px] font-mono font-bold flex items-center justify-center tabular-nums">
+                      {notifications.length}
+                    </span>
+                  )}
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-80 bg-card border border-border rounded-sm shadow-none p-1">
+                <DropdownMenuLabel className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground px-2 py-1.5 flex items-center justify-between">
+                  <span>{t("notifications.title")}</span>
+                  <span className="tabular-nums">{notifications.length}</span>
+                </DropdownMenuLabel>
+                <DropdownMenuSeparator className="bg-border my-1" />
+                {notifications.length === 0 ? (
+                  <div className="px-3 py-4 text-center text-xs text-muted-foreground">
+                    {t("notifications.empty")}
+                  </div>
+                ) : (
+                  <div className="max-h-72 overflow-y-auto space-y-1">
+                    {notifications.map((n) => (
+                      <div
+                        key={n.id}
+                        className="flex items-center justify-between gap-2 px-2.5 py-2 rounded-sm hover:bg-muted/60 transition-colors"
+                      >
+                        <div className="min-w-0 flex-1">
+                          <div className="text-[10px] font-mono uppercase tracking-wider text-primary">
+                            {n.type === "experiment_completed"
+                              ? t("notifications.expCompleted")
+                              : n.type === "dataset_shared"
+                                ? t("notifications.datasetShared", { username: n.from_username || "" })
+                                : t("notifications.expShared", { username: n.from_username || "" })}
+                          </div>
+                          <div className="text-xs font-medium text-foreground truncate">
+                            {n.title}
+                          </div>
+                        </div>
+
+                        {n.type === "experiment_completed" && (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="icon"
+                            className="h-7 w-7 rounded-sm border-border shrink-0"
+                            title={t("notifications.viewExperiment")}
+                            onClick={async () => {
+                              try {
+                                await markExperimentNotificationRead(n.resource_id);
+                                setNotifications((prev) => prev.filter((item) => item.id !== n.id));
+                                const detail = await fetchExperimentDetail(n.resource_id);
+                                handleInspectExperimentResults(detail);
+                              } catch (err) {
+                                console.error("Error opening completed experiment:", err);
+                              }
+                            }}
+                          >
+                            <Eye className="w-3.5 h-3.5 text-primary" />
+                          </Button>
+                        )}
+
+                        {n.type === "dataset_shared" && (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className="h-7 px-2 text-[11px] rounded-sm border-border shrink-0"
+                            onClick={() => {
+                              setCurrentMode("dashboard");
+                              setOpenDatasetsSignal((k) => k + 1);
+                            }}
+                          >
+                            {t("notifications.openDatasets")}
+                          </Button>
+                        )}
+
+                        {n.type === "experiment_shared" && (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="icon"
+                            className="h-7 w-7 rounded-sm border-border shrink-0"
+                            title={t("notifications.openExperiment")}
+                            onClick={async () => {
+                              try {
+                                const detail = await fetchExperimentDetail(n.resource_id);
+                                handleInspectExperimentResults(detail);
+                              } catch {
+                                setCurrentMode("dashboard");
+                              }
+                            }}
+                          >
+                            <Eye className="w-3.5 h-3.5 text-primary" />
+                          </Button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </DropdownMenuContent>
+            </DropdownMenu>
+
+            {/* Language Selector (only short code: ES, UK, US) */}
+            <LanguageSelector variant="outline" showLabel={false} />
 
             {/* Theme Toggle */}
             <Button
@@ -992,6 +1135,7 @@ export function App() {
             onUseAsTemplate={(exp) => loadExperimentAsTemplate(exp.id)}
             onInspectExperimentResults={handleInspectExperimentResults}
             availableModels={availableModels}
+            openDatasetsSignal={openDatasetsSignal}
           />
         )}
 

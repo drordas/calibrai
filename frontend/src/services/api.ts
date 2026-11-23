@@ -186,16 +186,36 @@ export async function fetchShareableUsers(): Promise<Array<{ id: number; usernam
   return res.json();
 }
 
-export async function shareDatasetWithUser(datasetId: string, targetUserId: number): Promise<void> {
+export async function shareDatasetWithUser(
+  datasetId: string,
+  targetUserId: number,
+  shareMode: "view" | "edit" | "copy" = "view"
+): Promise<void> {
   const res = await fetch(`${API_BASE}/datasets/${datasetId}/share`, {
     method: "POST",
     headers: getAuthHeaders(),
-    body: JSON.stringify({ target_user_id: targetUserId }),
+    body: JSON.stringify({ target_user_id: targetUserId, share_mode: shareMode }),
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: "Error compartiendo dataset" }));
     throw new Error(err.detail || "Error compartiendo dataset");
   }
+}
+
+export async function fetchDatasetShares(datasetId: string): Promise<Array<{ id: number; target_user_id: number; target_username: string; share_mode: string; status: string }>> {
+  const res = await fetch(`${API_BASE}/datasets/${datasetId}/shares`, {
+    headers: getAuthHeaders(),
+  });
+  if (!res.ok) throw new Error("Error cargando comparticiones");
+  return res.json();
+}
+
+export async function revokeDatasetShare(datasetId: string, shareId: number): Promise<void> {
+  const res = await fetch(`${API_BASE}/datasets/${datasetId}/shares/${shareId}`, {
+    method: "DELETE",
+    headers: getAuthHeaders(),
+  });
+  if (!res.ok) throw new Error("Error al dejar de compartir");
 }
 
 export async function respondToDatasetShare(shareId: number, accept: boolean): Promise<void> {
@@ -523,8 +543,82 @@ export async function deleteExperiment(id: string): Promise<{ message: string; i
     method: "DELETE",
     headers: getAuthHeaders(),
   });
-  if (!res.ok) throw new Error("Error deleting experiment");
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: "Error deleting experiment" }));
+    throw new Error(err.detail || "Error deleting experiment");
+  }
   return res.json();
+}
+
+export async function fetchExperimentShares(experimentId: string): Promise<Array<{ id: number; target_user_id: number; target_username: string; share_mode: string; status: string }>> {
+  const res = await fetch(`${API_BASE}/experiments/${experimentId}/shares`, {
+    headers: getAuthHeaders(),
+  });
+  if (!res.ok) throw new Error("Error cargando comparticiones");
+  return res.json();
+}
+
+export async function revokeExperimentShare(experimentId: string, shareId: number): Promise<void> {
+  const res = await fetch(`${API_BASE}/experiments/${experimentId}/shares/${shareId}`, {
+    method: "DELETE",
+    headers: getAuthHeaders(),
+  });
+  if (!res.ok) throw new Error("Error al dejar de compartir");
+}
+
+export async function shareExperimentWithUser(
+  experimentId: string,
+  targetUserId: number,
+  shareMode: "view" | "edit" | "copy" = "view"
+): Promise<void> {
+  const res = await fetch(`${API_BASE}/experiments/${experimentId}/share`, {
+    method: "POST",
+    headers: getAuthHeaders(),
+    body: JSON.stringify({ target_user_id: targetUserId, share_mode: shareMode }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: "Error compartiendo experimento" }));
+    throw new Error(err.detail || "Error compartiendo experimento");
+  }
+}
+
+export async function respondToExperimentShare(shareId: number, accept: boolean): Promise<void> {
+  const res = await fetch(`${API_BASE}/experiments/shares/${shareId}/respond`, {
+    method: "POST",
+    headers: getAuthHeaders(),
+    body: JSON.stringify({ accept }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: "Error respondiendo invitación" }));
+    throw new Error(err.detail || "Error respondiendo invitación");
+  }
+}
+
+export async function fetchNotifications(): Promise<{
+  notifications: Array<{
+    id: string;
+    type: "experiment_completed" | "dataset_shared" | "experiment_shared";
+    title: string;
+    resource_id: string;
+    share_id?: number;
+    share_mode?: string;
+    from_username?: string;
+    created_at?: string | null;
+  }>;
+  unread_count: number;
+}> {
+  const res = await fetch(`${API_BASE}/auth/notifications`, {
+    headers: getAuthHeaders(),
+  });
+  if (!res.ok) throw new Error("Error cargando notificaciones");
+  return res.json();
+}
+
+export async function markExperimentNotificationRead(experimentId: string): Promise<void> {
+  await fetch(`${API_BASE}/auth/notifications/experiments/${experimentId}/read`, {
+    method: "POST",
+    headers: getAuthHeaders(),
+  });
 }
 
 export async function recalculateExperimentMetrics(id: string, evalSpec?: Record<string, any>): Promise<ExperimentDetail> {

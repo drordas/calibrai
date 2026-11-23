@@ -898,6 +898,28 @@
     "rejectShare": "Decline",
     "viewTooltip": "View dataset",
     "deleteTooltip": "Delete dataset",
-    "shareTooltip": "Share dataset"
+    "shareTooltip": "Share dataset",
+    "shareModeLabel": "Sharing mode",
+    "modeView": "View only (read-only)",
+    "modeEdit": "Edit",
+    "modeCopy": "Independent copy",
+    "modeShortView": "Read-only",
+    "modeShortEdit": "Edit",
+    "modeShortCopy": "Copy",
+    "sharedWithTitle": "Currently shared with",
+    "revokeShareTooltip": "Stop sharing",
+    "shareExperimentTitle": "Share experiment",
+    "shareExperimentDesc": "Select a registered user and mode to share \"{name}\".",
+    "shareExpSuccess": "Experiment shared with @{username}."
+  },
+  "notifications": {
+    "title": "Notifications",
+    "empty": "You have no pending notifications.",
+    "expCompleted": "Experiment finished",
+    "viewExperiment": "View results",
+    "datasetShared": "Dataset shared by @{username}",
+    "openDatasets": "Manage Datasets",
+    "expShared": "Experiment shared by @{username}",
+    "openExperiment": "View experiment"
   }
 }
