@@ -39,7 +39,10 @@ import {
   Tag,
   Key,
   Loader2,
+  Database,
+  ChevronDown,
 } from "lucide-react";
+import { DashboardDatasetsModal } from "./DashboardDatasetsModal";
 import {
   Card,
   CardHeader,
@@ -82,6 +85,8 @@ export const ExperimentDashboard: React.FC<ExperimentDashboardProps> = ({
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [activeExpDetail, setActiveExpDetail] = useState<ExperimentDetail | null>(null);
   const [showDetailModal, setShowDetailModal] = useState<boolean>(false);
+  const [showCreateMenu, setShowCreateMenu] = useState<boolean>(false);
+  const [showDatasetsModal, setShowDatasetsModal] = useState<boolean>(false);
   const [actionLoadingId, setActionLoadingId] = useState<string | null>(null);
 
   // Load experiments on mount and on poll
@@ -231,37 +236,79 @@ export const ExperimentDashboard: React.FC<ExperimentDashboardProps> = ({
               {t("dashboard.subtitle")}
             </p>
           </div>
-          <div className="pt-2 grid grid-cols-1 sm:inline-grid sm:grid-cols-[max-content_max-content] gap-2">
-            <Button
-              type="button"
-              onClick={onNewExperiment}
-              className="h-9 w-full px-3.5 text-xs font-semibold bg-primary text-primary-foreground hover:bg-primary/90 gap-1.5 rounded-sm cursor-pointer transition-colors"
+          <div className="pt-2 grid grid-cols-1 sm:inline-grid sm:grid-cols-2 gap-2">
+            {/* + Crear Experimento (click or hover opens 2 equal-width options) */}
+            <div
+              className="relative"
+              onMouseEnter={() => setShowCreateMenu(true)}
+              onMouseLeave={() => setShowCreateMenu(false)}
             >
-              <Plus className="w-3.5 h-3.5" />
-              <span>{t("dashboard.createExperiment")}</span>
-            </Button>
-            {onNewFromTemplate && (
               <Button
                 type="button"
-                variant="outline"
-                onClick={onNewFromTemplate}
-                className="h-9 w-full px-3.5 text-xs font-semibold border-border bg-card hover:bg-muted text-foreground gap-1.5 rounded-sm cursor-pointer transition-colors"
+                onClick={() => setShowCreateMenu((prev) => !prev)}
+                aria-expanded={showCreateMenu}
+                className="h-9 w-full justify-start px-3.5 text-xs font-semibold bg-primary text-primary-foreground hover:bg-primary/90 gap-1.5 rounded-sm cursor-pointer transition-colors"
               >
-                <FileCode className="w-3.5 h-3.5 text-primary" />
-                <span>{t("templates.fromTemplate")}</span>
+                <Plus className="w-3.5 h-3.5 shrink-0" />
+                <span className="truncate">{t("dashboard.createExperiment")}</span>
+                <ChevronDown className="w-3.5 h-3.5 ml-auto opacity-80 shrink-0" />
               </Button>
-            )}
+
+              {showCreateMenu && (
+                <div className="absolute left-0 top-full pt-1 z-30 min-w-full w-max">
+                  <div className="bg-card border border-border rounded-sm p-1 flex flex-col gap-1">
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      onClick={() => {
+                        setShowCreateMenu(false);
+                        onNewExperiment();
+                      }}
+                      className="h-8 w-full justify-start px-2.5 text-xs font-medium text-foreground hover:bg-muted gap-2 rounded-sm cursor-pointer"
+                    >
+                      <Plus className="w-3.5 h-3.5 text-primary shrink-0" />
+                      <span>{t("dashboardDatasets.newExperimentOption")}</span>
+                    </Button>
+                    {onNewFromTemplate && (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        onClick={() => {
+                          setShowCreateMenu(false);
+                          onNewFromTemplate();
+                        }}
+                        className="h-8 w-full justify-start px-2.5 text-xs font-medium text-foreground hover:bg-muted gap-2 rounded-sm cursor-pointer"
+                      >
+                        <FileCode className="w-3.5 h-3.5 text-primary shrink-0" />
+                        <span>{t("dashboardDatasets.fromTemplateOption")}</span>
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+
             {onNewTemplate && (
               <Button
                 type="button"
                 variant="outline"
                 onClick={onNewTemplate}
-                className="h-9 w-full px-3.5 text-xs font-semibold border-primary/40 bg-primary/5 hover:bg-primary/10 text-primary gap-1.5 rounded-sm cursor-pointer transition-colors"
+                className="h-9 w-full justify-start px-3.5 text-xs font-semibold border-primary/40 bg-primary/5 hover:bg-primary/10 text-primary gap-1.5 rounded-sm cursor-pointer transition-colors"
               >
-                <Plus className="w-3.5 h-3.5" />
+                <Plus className="w-3.5 h-3.5 shrink-0" />
                 <span>{t("templates.createTemplate")}</span>
               </Button>
             )}
+
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setShowDatasetsModal(true)}
+              className="h-9 w-full justify-start px-3.5 text-xs font-semibold border-border bg-card hover:bg-muted text-foreground gap-1.5 rounded-sm cursor-pointer transition-colors"
+            >
+              <Database className="w-3.5 h-3.5 text-primary shrink-0" />
+              <span>{t("dashboardDatasets.viewDatasets")}</span>
+            </Button>
           </div>
         </div>
 
@@ -841,6 +888,11 @@ export const ExperimentDashboard: React.FC<ExperimentDashboardProps> = ({
           </DialogContent>
         </Dialog>
       )}
+
+      <DashboardDatasetsModal
+        isOpen={showDatasetsModal}
+        onClose={() => setShowDatasetsModal(false)}
+      />
     </div>
   );
 };

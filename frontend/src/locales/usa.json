@@ -864,5 +864,23 @@
     "passwordTooShort": "The new password must be at least 4 characters long.",
     "savedSuccess": "Profile updated successfully.",
     "saving": "Saving..."
+  },
+  "dashboardDatasets": {
+    "newExperimentOption": "New Experiment",
+    "fromTemplateOption": "Experiment from Template",
+    "viewDatasets": "View Datasets",
+    "modalTitle": "Stored Datasets",
+    "modalDesc": "Overview of task datasets and Ground Truth files available in your account.",
+    "taskDatasetsTitle": "Available Datasets (Tasks)",
+    "groundTruthDatasetsTitle": "Ground Truth Datasets",
+    "noDatasetsAvailable": "No datasets available",
+    "colName": "Name",
+    "colFormat": "Format",
+    "colRows": "Rows",
+    "colCols": "Columns",
+    "colSize": "Size",
+    "colOrigin": "Origin",
+    "originSample": "Sample",
+    "originUploaded": "Uploaded"
   }
 }

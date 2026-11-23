@@ -864,5 +864,23 @@
     "passwordTooShort": "La nueva contraseña debe tener al menos 4 caracteres.",
     "savedSuccess": "Perfil actualizado correctamente.",
     "saving": "Guardando..."
+  },
+  "dashboardDatasets": {
+    "newExperimentOption": "Nuevo Experimento",
+    "fromTemplateOption": "Experimento a partir de Plantilla",
+    "viewDatasets": "Ver Datasets",
+    "modalTitle": "Datasets Almacenados",
+    "modalDesc": "Listado de los datasets de tareas y archivos de Ground Truth disponibles en tu cuenta.",
+    "taskDatasetsTitle": "Datasets Disponibles (Tareas)",
+    "groundTruthDatasetsTitle": "Datasets Ground Truth",
+    "noDatasetsAvailable": "No hay datasets disponibles",
+    "colName": "Nombre",
+    "colFormat": "Formato",
+    "colRows": "Filas",
+    "colCols": "Columnas",
+    "colSize": "Tamaño",
+    "colOrigin": "Origen",
+    "originSample": "Muestra",
+    "originUploaded": "Subido"
   }
 }
