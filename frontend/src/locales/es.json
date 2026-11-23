@@ -921,6 +921,8 @@
     "acceptShare": "Aceptar",
     "rejectShare": "Rechazar",
     "viewTooltip": "Ver dataset",
+    "copyTooltip": "Crear copia del dataset",
+    "copySuccess": "Copia de \"{name}\" creada correctamente.",
     "deleteTooltip": "Eliminar dataset",
     "shareTooltip": "Compartir dataset",
     "shareModeLabel": "Modo de compartición",

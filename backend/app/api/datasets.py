@@ -240,6 +240,7 @@ def share_dataset(
             is_sample=False,
             dataset_id=f"upload_{copy_stem}",
             is_ground_truth=ds.is_ground_truth,
+            force_new=True,
         )
         target_dataset_id = copied_summary.id
         db.add(
@@ -277,6 +278,47 @@ def share_dataset(
     )
     db.commit()
     return {"status": "shared", "dataset_id": target_dataset_id, "share_mode": mode, "target_username": target_user.username}
+
+
+@router.post("/{dataset_id}/copy", response_model=DatasetSummary)
+def copy_dataset(
+    dataset_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    ds = dataset_engine.get_dataset(dataset_id)
+    if not ds:
+        raise HTTPException(status_code=404, detail="Dataset no encontrado")
+
+    meta = dataset_engine.datasets.get(dataset_id)
+    src_path = meta.get("file_path") if meta else None
+    if not src_path or not Path(src_path).exists():
+        raise HTTPException(status_code=500, detail="No se encontró el archivo origen del dataset para copiar")
+
+    copy_stem = f"copy_{uuid.uuid4().hex[:8]}_{Path(src_path).stem}"
+    copy_filename = f"{copy_stem}{Path(src_path).suffix}"
+    copy_path = settings.upload_dir / copy_filename
+    shutil.copy2(src_path, copy_path)
+
+    copy_name = f"{ds.name} (Copia)"
+    copied_summary = dataset_engine.register_dataset(
+        file_path=copy_path,
+        name=copy_name,
+        is_sample=False,
+        dataset_id=f"upload_{copy_stem}",
+        is_ground_truth=ds.is_ground_truth,
+        force_new=True,
+    )
+    db.add(
+        DatasetRecord(
+            dataset_id=copied_summary.id,
+            owner_user_id=current_user.id,
+            display_name=copy_name,
+            is_ground_truth=ds.is_ground_truth,
+        )
+    )
+    db.commit()
+    return copied_summary
 
 
 @router.post("/shares/{share_id}/respond")

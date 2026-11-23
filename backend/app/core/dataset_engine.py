@@ -59,7 +59,8 @@ class DatasetEngine:
         name: Optional[str] = None,
         is_sample: bool = False,
         dataset_id: Optional[str] = None,
-        is_ground_truth: Optional[bool] = None
+        is_ground_truth: Optional[bool] = None,
+        force_new: bool = False,
     ) -> DatasetSummary:
         name = name or file_path.stem.replace("_", " ").title()
         file_ext = file_path.suffix.lower()
@@ -78,20 +79,21 @@ class DatasetEngine:
 
         # De-duplication check: check if a dataset with same benchmark_id, dataset_id or filename already exists
         matched_existing_id: Optional[str] = None
-        for existing_id, existing_meta in self.datasets.items():
-            existing_summary = existing_meta.get("summary")
-            if benchmark_id and getattr(existing_summary, "benchmark_id", None) == benchmark_id:
-                matched_existing_id = existing_id
-                break
-            if benchmark_id and existing_id == benchmark_id:
-                matched_existing_id = existing_id
-                break
-            if dataset_id and existing_id == dataset_id:
-                matched_existing_id = existing_id
-                break
-            if existing_summary and existing_summary.filename == file_path.name:
-                matched_existing_id = existing_id
-                break
+        if not force_new:
+            for existing_id, existing_meta in self.datasets.items():
+                existing_summary = existing_meta.get("summary")
+                if benchmark_id and getattr(existing_summary, "benchmark_id", None) == benchmark_id:
+                    matched_existing_id = existing_id
+                    break
+                if benchmark_id and existing_id == benchmark_id:
+                    matched_existing_id = existing_id
+                    break
+                if dataset_id and existing_id == dataset_id:
+                    matched_existing_id = existing_id
+                    break
+                if existing_summary and existing_summary.filename == file_path.name:
+                    matched_existing_id = existing_id
+                    break
 
         if matched_existing_id:
             dataset_id = matched_existing_id

@@ -205,6 +205,18 @@ export async function renameDataset(datasetId: string, name: string): Promise<Da
   return res.json();
 }
 
+export async function copyDataset(datasetId: string): Promise<DatasetSummary> {
+  const res = await fetch(`${API_BASE}/datasets/${datasetId}/copy`, {
+    method: "POST",
+    headers: getAuthHeaders(),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: "Error copiando dataset" }));
+    throw new Error(err.detail || "Error copiando dataset");
+  }
+  return res.json();
+}
+
 export async function fetchShareableUsers(): Promise<Array<{ id: number; username: string; full_name?: string | null }>> {
   const res = await fetch(`${API_BASE}/datasets/share/users`, {
     headers: getAuthHeaders(),

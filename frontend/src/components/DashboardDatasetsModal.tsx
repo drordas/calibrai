@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { DatasetSummary, PaginatedRowsResponse, ShareEntry, ShareUser } from "../types";
 import {
+  copyDataset,
   deleteDataset,
   exportDataset,
   fetchDatasets,
@@ -122,6 +123,7 @@ export const DashboardDatasetsModal: React.FC<DashboardDatasetsModalProps> = ({
   const [editingDatasetId, setEditingDatasetId] = useState<string | null>(null);
   const [editingName, setEditingName] = useState("");
   const [renaming, setRenaming] = useState(false);
+  const [copyingId, setCopyingId] = useState<string | null>(null);
 
   const loadDatasets = useCallback(async () => {
     setLoading(true);
@@ -247,6 +249,20 @@ export const DashboardDatasetsModal: React.FC<DashboardDatasetsModalProps> = ({
       setError(err?.message || t("common.error"));
     } finally {
       setExportingId(null);
+    }
+  };
+
+  const handleCopyDataset = async (ds: DatasetSummary) => {
+    setCopyingId(ds.id);
+    setError(null);
+    try {
+      await copyDataset(ds.id);
+      setFeedback(t("dashboardDatasets.copySuccess", { name: ds.name }));
+      await loadDatasets();
+    } catch (err: any) {
+      setError(err?.message || t("common.error"));
+    } finally {
+      setCopyingId(null);
     }
   };
 
@@ -479,6 +495,21 @@ export const DashboardDatasetsModal: React.FC<DashboardDatasetsModalProps> = ({
                             title={t("dashboardDatasets.viewTooltip")}
                           >
                             <Eye className="w-3.5 h-3.5" />
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            disabled={copyingId === ds.id}
+                            onClick={() => handleCopyDataset(ds)}
+                            className="h-7 w-7 rounded-sm text-muted-foreground hover:text-foreground hover:bg-muted"
+                            title={t("dashboardDatasets.copyTooltip")}
+                          >
+                            {copyingId === ds.id ? (
+                              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            ) : (
+                              <CopyPlus className="w-3.5 h-3.5" />
+                            )}
                           </Button>
                           <DropdownMenu>
                             <DropdownMenuTrigger asChild>

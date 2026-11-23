@@ -913,6 +913,8 @@
     "acceptShare": "Accept",
     "rejectShare": "Decline",
     "viewTooltip": "View dataset",
+    "copyTooltip": "Create dataset copy",
+    "copySuccess": "Copy of \"{name}\" created successfully.",
     "deleteTooltip": "Delete dataset",
     "shareTooltip": "Share dataset",
     "shareModeLabel": "Sharing mode",
