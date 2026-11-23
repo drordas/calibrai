@@ -114,14 +114,29 @@ function flattenMetricBindings(val: MetricBindingsValue | undefined): string[] {
   return Object.values(val).flat();
 }
 
+const JSON_DIRECT_INSTRUCTION =
+  "IMPORTANT: Respond ONLY with a valid JSON object matching the schema below. Do not include markdown fences or extra text.";
+
+function stripNoJsonLines(text: string): string {
+  return text
+    .replace(/^[ \t]*(?:IMPORTANT:\s*)?Do NOT generate JSON\.[^\n]*\n?/gim, "")
+    .replace(/^[ \t]*Do not add any text outside the structured format\.[^\n]*\n?/gim, "")
+    .trim();
+}
+
 function splitPromptIntoSections(raw: string): {
   instructions: string;
   examples: string;
   outputPrompt: string;
+  useJsonOutput: boolean;
 } {
-  const text = (raw || "").trim();
+  let text = (raw || "").trim();
+  const useJsonOutput = text.includes(JSON_DIRECT_INSTRUCTION);
+  if (useJsonOutput) {
+    text = text.replace(JSON_DIRECT_INSTRUCTION, "").trim();
+  }
   if (!text) {
-    return { instructions: "", examples: "", outputPrompt: "" };
+    return { instructions: "", examples: "", outputPrompt: "", useJsonOutput };
   }
 
   const bannerRegex = /(?:^|\n)[ \t]*(?:={6,}|═{6,})[ \t]*\n[ \t]*([^\n]+?)[ \t]*\n[ \t]*(?:={6,}|═{6,})[ \t]*(?:\n|$)/g;
@@ -136,7 +151,7 @@ function splitPromptIntoSections(raw: string): {
   }
 
   if (matches.length === 0) {
-    return { instructions: text, examples: "", outputPrompt: "" };
+    return { instructions: text, examples: "", outputPrompt: "", useJsonOutput };
   }
 
   let instructions = "";
@@ -169,45 +184,56 @@ function splitPromptIntoSections(raw: string): {
   }
 
   instructions = instrParts.join("\n\n").trim();
-  return { instructions, examples, outputPrompt };
+  return { instructions, examples, outputPrompt, useJsonOutput };
 }
 
 function composePromptSections(
   instructions: string,
   examples: string,
-  outputPrompt: string
+  outputPrompt: string,
+  useJsonOutput: boolean = false
 ): string {
-  const instr = (instructions || "").trim();
+  let instr = (instructions || "").trim();
   const ex = (examples || "").trim();
-  const out = (outputPrompt || "").trim();
+  const out = useJsonOutput ? "" : (outputPrompt || "").trim();
 
-  if (!ex && !out) {
-    return instr;
+  if (useJsonOutput) {
+    instr = stripNoJsonLines(instr);
+  } else {
+    instr = instr.replace(JSON_DIRECT_INSTRUCTION, "").trim();
   }
 
   const hasBanner = (s: string) => /^(?:={6,}|═{6,})/m.test(s.split("\n")[0] || "");
   const parts: string[] = [];
 
-  if (instr) {
-    parts.push(
-      hasBanner(instr)
-        ? instr
-        : `========================================================\nINSTRUCTIONS\n========================================================\n\n${instr}`
-    );
+  if (!ex && !out) {
+    if (instr) parts.push(instr);
+  } else {
+    if (instr) {
+      parts.push(
+        hasBanner(instr)
+          ? instr
+          : `========================================================\nINSTRUCTIONS\n========================================================\n\n${instr}`
+      );
+    }
+    if (ex) {
+      parts.push(
+        hasBanner(ex)
+          ? ex
+          : `========================================================\nEXAMPLES\n========================================================\n\n${ex}`
+      );
+    }
+    if (out) {
+      parts.push(
+        hasBanner(out)
+          ? out
+          : `========================================================\nOUTPUT FORMAT\n========================================================\n\n${out}`
+      );
+    }
   }
-  if (ex) {
-    parts.push(
-      hasBanner(ex)
-        ? ex
-        : `========================================================\nEXAMPLES\n========================================================\n\n${ex}`
-    );
-  }
-  if (out) {
-    parts.push(
-      hasBanner(out)
-        ? out
-        : `========================================================\nOUTPUT FORMAT\n========================================================\n\n${out}`
-    );
+
+  if (useJsonOutput) {
+    parts.push(JSON_DIRECT_INSTRUCTION);
   }
 
   return parts.join("\n\n");
@@ -499,6 +525,7 @@ export const PromptEditor: React.FC<PromptEditorProps> = ({
   const [instructionsText, setInstructionsText] = useState<string>(initialSections.instructions);
   const [examplesText, setExamplesText] = useState<string>(initialSections.examples);
   const [outputPromptText, setOutputPromptText] = useState<string>(initialSections.outputPrompt);
+  const [useJsonOutput, setUseJsonOutput] = useState<boolean>(initialSections.useJsonOutput);
   const [promptRealText, setPromptRealText] = useState<string>(initialDecomposed.promptText);
 
   const [openSystemSection, setOpenSystemSection] = useState<boolean>(true);
@@ -923,9 +950,15 @@ export const PromptEditor: React.FC<PromptEditorProps> = ({
     setInstructionsText(secs.instructions);
     setExamplesText(secs.examples);
     setOutputPromptText(secs.outputPrompt);
+    setUseJsonOutput(secs.useJsonOutput);
     if (secs.examples.trim()) setOpenExamplesSection(true);
     if (secs.outputPrompt.trim()) setOpenOutputSection(true);
-    const composed = composePromptSections(secs.instructions, secs.examples, secs.outputPrompt);
+    const composed = composePromptSections(
+      secs.instructions,
+      secs.examples,
+      secs.outputPrompt,
+      secs.useJsonOutput
+    );
     setPromptRealText(composed);
     return composed;
   };
@@ -1108,6 +1141,21 @@ export const PromptEditor: React.FC<PromptEditorProps> = ({
       };
     }
 
+    if (useJsonOutput) {
+      return {
+        hasSchema: true,
+        invalidJson: false,
+        isCoherent: true,
+        objectStatuses: topKeys.map((k, idx) => ({
+          key: k,
+          covered: true,
+          missingSubfields: [],
+          colorIdx: idx % JSON_OBJECT_PALETTE.length,
+        })),
+        missingKeys: [] as string[],
+      };
+    }
+
     // Slice prompt into sections per top-level key so subfields are verified inside their own parent block
     // Validate against (iv) Prompt de Salida if present; fall back to Instructions only when neither Examples nor Output Prompt are used
     const targetPromptForJson = outputPromptText.trim()
@@ -1168,7 +1216,7 @@ export const PromptEditor: React.FC<PromptEditorProps> = ({
       objectStatuses,
       missingKeys,
     };
-  }, [outputSchemaText, parsedOutputSchema, outputPromptText, examplesText, instructionsText]);
+  }, [outputSchemaText, parsedOutputSchema, outputPromptText, examplesText, instructionsText, useJsonOutput]);
 
   useEffect(() => {
     onValidationStateChange?.(
@@ -1188,6 +1236,7 @@ export const PromptEditor: React.FC<PromptEditorProps> = ({
     outputPromptText.includes(`{${mv}}`)
   );
   const jsonCoherenceFailed =
+    !useJsonOutput &&
     jsonPromptCoherence.hasSchema &&
     !jsonPromptCoherence.invalidJson &&
     !jsonPromptCoherence.isCoherent;
@@ -1300,7 +1349,7 @@ export const PromptEditor: React.FC<PromptEditorProps> = ({
     }
 
     setInstructionsText(val);
-    const composed = composePromptSections(val, examplesText, outputPromptText);
+    const composed = composePromptSections(val, examplesText, outputPromptText, useJsonOutput);
     setPromptRealText(composed);
     syncAndValidate(composed, outputSchemaText, computedSpecs);
   };
@@ -1308,7 +1357,7 @@ export const PromptEditor: React.FC<PromptEditorProps> = ({
   const handleExamplesChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const val = e.target.value;
     setExamplesText(val);
-    const composed = composePromptSections(instructionsText, val, outputPromptText);
+    const composed = composePromptSections(instructionsText, val, outputPromptText, useJsonOutput);
     setPromptRealText(composed);
     syncAndValidate(composed, outputSchemaText, computedSpecs);
   };
@@ -1316,7 +1365,18 @@ export const PromptEditor: React.FC<PromptEditorProps> = ({
   const handleOutputPromptChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const val = e.target.value;
     setOutputPromptText(val);
-    const composed = composePromptSections(instructionsText, examplesText, val);
+    const composed = composePromptSections(instructionsText, examplesText, val, useJsonOutput);
+    setPromptRealText(composed);
+    syncAndValidate(composed, outputSchemaText, computedSpecs);
+  };
+
+  const handleToggleJsonOutput = (checked: boolean) => {
+    setUseJsonOutput(checked);
+    const nextInstr = checked ? stripNoJsonLines(instructionsText) : instructionsText;
+    if (checked && nextInstr !== instructionsText) {
+      setInstructionsText(nextInstr);
+    }
+    const composed = composePromptSections(nextInstr, examplesText, outputPromptText, checked);
     setPromptRealText(composed);
     syncAndValidate(composed, outputSchemaText, computedSpecs);
   };
@@ -1341,7 +1401,7 @@ export const PromptEditor: React.FC<PromptEditorProps> = ({
     const generated = blocks.join("\n\n");
     setOutputPromptText(generated);
     setOpenOutputSection(true);
-    const composed = composePromptSections(instructionsText, examplesText, generated);
+    const composed = composePromptSections(instructionsText, examplesText, generated, useJsonOutput);
     setPromptRealText(composed);
     syncAndValidate(composed, outputSchemaText, computedSpecs);
   };
@@ -1640,7 +1700,7 @@ export const PromptEditor: React.FC<PromptEditorProps> = ({
     setBraceAutocomplete(null);
     setOpenInstructionsSection(true);
     setInstructionsText(updated);
-    const composed = composePromptSections(updated, examplesText, outputPromptText);
+    const composed = composePromptSections(updated, examplesText, outputPromptText, useJsonOutput);
     setPromptRealText(composed);
     syncAndValidate(composed, outputSchemaText, computedSpecs);
   };
@@ -2098,7 +2158,7 @@ export const PromptEditor: React.FC<PromptEditorProps> = ({
               {/* PARTE 1: PROMPT (System Prompt + Model Prompt) */}
               {/* ----------------------------------------------------------------- */}
               <Card className="border border-border/80 bg-card/60 shadow-none overflow-hidden">
-                <CardHeader className="py-2.5 px-3.5 border-b border-border/60 bg-muted/20">
+                <CardHeader className="py-2.5 px-3.5 border-b border-border/60 bg-muted/20 flex flex-row items-center justify-between gap-3 flex-wrap">
                   <div className="space-y-0.5">
                     <div className="flex items-center gap-2">
                       <FileCode className="w-4 h-4 text-primary" />
@@ -2109,6 +2169,20 @@ export const PromptEditor: React.FC<PromptEditorProps> = ({
                     <p className="text-[11px] text-muted-foreground">
                       {t("prompt.part1Desc")}
                     </p>
+                  </div>
+
+                  <div className="flex items-center gap-2 bg-background/80 border border-border rounded-sm px-2.5 py-1.5">
+                    <Label
+                      htmlFor="switch-json-output"
+                      className="text-[11px] font-medium text-foreground cursor-pointer select-none"
+                    >
+                      Generar salida en JSON
+                    </Label>
+                    <Switch
+                      id="switch-json-output"
+                      checked={useJsonOutput}
+                      onCheckedChange={handleToggleJsonOutput}
+                    />
                   </div>
                 </CardHeader>
                 <CardContent className="p-3 space-y-3 relative">
@@ -2304,7 +2378,8 @@ export const PromptEditor: React.FC<PromptEditorProps> = ({
                     )}
                   </div>
 
-                  {/* (iv) Prompt de Salida */}
+                  {/* (iv) Prompt de Salida (hidden when direct JSON output Switch is ON) */}
+                  {!useJsonOutput && (
                   <div
                     className={`rounded-sm border bg-background/50 overflow-hidden ${
                       outputPromptHasError ? "border-destructive ring-1 ring-destructive/30" : "border-border/80"
@@ -2380,6 +2455,7 @@ export const PromptEditor: React.FC<PromptEditorProps> = ({
                       </div>
                     )}
                   </div>
+                  )}
 
                   <div className="flex items-center justify-end gap-2 pt-1">
                     <Button

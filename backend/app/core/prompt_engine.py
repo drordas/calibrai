@@ -749,8 +749,9 @@ REGLAS DE EVALUACIÓN:
                         message=f"La spec '{cs.name}' usa la variable '{arg}', que no está en el esquema de output ni en specs previas."
                     ))
 
-        # Issue 4: Validate JSON Output Schema <-> Prompt coherence (scoped to OUTPUT FORMAT / DIMENSIONS section if present)
-        if eval_spec.output_schema and isinstance(eval_spec.output_schema, dict) and len(eval_spec.output_schema) > 0:
+        # Issue 4: Validate JSON Output Schema <-> Prompt coherence (scoped to OUTPUT FORMAT / DIMENSIONS section if present; skipped in direct JSON mode)
+        is_direct_json_mode = "respond only with a valid json object" in clean_template.lower()
+        if not is_direct_json_mode and eval_spec.output_schema and isinstance(eval_spec.output_schema, dict) and len(eval_spec.output_schema) > 0:
             output_sec_match = re.search(
                 r"(?:={6,}|═{6,})\s*\n[^\n]*(?:OUTPUT(?:\s+FORMAT)?|DIMENSIONS)[^\n]*\n\s*(?:={6,}|═{6,})\s*\n([\s\S]*)$",
                 clean_template,
