@@ -1177,6 +1177,27 @@ export const PromptEditor: React.FC<PromptEditorProps> = ({
     );
   }, [validation, isValidating, jsonPromptCoherence.isCoherent, onValidationStateChange]);
 
+  const missingVarsList = validation?.missing_variables || [];
+  const instructionsHasVarError = missingVarsList.some((mv) =>
+    instructionsText.includes(`{${mv}}`)
+  );
+  const examplesHasError = missingVarsList.some((mv) =>
+    examplesText.includes(`{${mv}}`)
+  );
+  const outputPromptHasVarError = missingVarsList.some((mv) =>
+    outputPromptText.includes(`{${mv}}`)
+  );
+  const jsonCoherenceFailed =
+    jsonPromptCoherence.hasSchema &&
+    !jsonPromptCoherence.invalidJson &&
+    !jsonPromptCoherence.isCoherent;
+  const outputPromptHasError =
+    outputPromptHasVarError ||
+    (jsonCoherenceFailed && (Boolean(outputPromptText.trim()) || Boolean(examplesText.trim())));
+  const instructionsHasError =
+    instructionsHasVarError ||
+    (jsonCoherenceFailed && !outputPromptText.trim() && !examplesText.trim());
+
   const [showSavePromptModal, setShowSavePromptModal] = useState(false);
   const [savePromptName, setSavePromptName] = useState("");
   const [savingPrompt, setSavingPrompt] = useState(false);
@@ -2129,7 +2150,11 @@ export const PromptEditor: React.FC<PromptEditorProps> = ({
                   </div>
 
                   {/* (ii) Prompt de Instrucciones */}
-                  <div className="rounded-sm border border-border/80 bg-background/50 overflow-hidden">
+                  <div
+                    className={`rounded-sm border bg-background/50 overflow-hidden ${
+                      instructionsHasError ? "border-destructive ring-1 ring-destructive/30" : "border-border/80"
+                    }`}
+                  >
                     <button
                       type="button"
                       onClick={() => setOpenInstructionsSection((prev) => !prev)}
@@ -2223,7 +2248,11 @@ export const PromptEditor: React.FC<PromptEditorProps> = ({
                           }}
                           rows={6}
                           aria-label="Prompt de Instrucciones"
-                          className="w-full p-3 text-xs font-mono bg-background/80 border-border/80 focus:ring-primary/20 resize-y leading-relaxed"
+                          className={`w-full p-3 text-xs font-mono bg-background/80 resize-y leading-relaxed ${
+                            instructionsHasError
+                              ? "border-destructive focus-visible:ring-destructive/30"
+                              : "border-border/80 focus:ring-primary/20"
+                          }`}
                           placeholder={t("prompt.promptRealPlaceholder")}
                         />
                       </div>
@@ -2231,7 +2260,11 @@ export const PromptEditor: React.FC<PromptEditorProps> = ({
                   </div>
 
                   {/* (iii) Prompt de Ejemplos (Opcional) */}
-                  <div className="rounded-sm border border-border/80 bg-background/50 overflow-hidden">
+                  <div
+                    className={`rounded-sm border bg-background/50 overflow-hidden ${
+                      examplesHasError ? "border-destructive ring-1 ring-destructive/30" : "border-border/80"
+                    }`}
+                  >
                     <button
                       type="button"
                       onClick={() => setOpenExamplesSection((prev) => !prev)}
@@ -2260,7 +2293,11 @@ export const PromptEditor: React.FC<PromptEditorProps> = ({
                           onChange={handleExamplesChange}
                           rows={5}
                           aria-label="Prompt de Ejemplos"
-                          className="w-full p-3 text-xs font-mono bg-background/80 border-border/80 focus:ring-primary/20 resize-y leading-relaxed"
+                          className={`w-full p-3 text-xs font-mono bg-background/80 resize-y leading-relaxed ${
+                            examplesHasError
+                              ? "border-destructive focus-visible:ring-destructive/30"
+                              : "border-border/80 focus:ring-primary/20"
+                          }`}
                           placeholder="Ejemplos few-shot opcionales (no afectan al linter JSON ↔ Prompt)..."
                         />
                       </div>
@@ -2268,7 +2305,11 @@ export const PromptEditor: React.FC<PromptEditorProps> = ({
                   </div>
 
                   {/* (iv) Prompt de Salida */}
-                  <div className="rounded-sm border border-border/80 bg-background/50 overflow-hidden">
+                  <div
+                    className={`rounded-sm border bg-background/50 overflow-hidden ${
+                      outputPromptHasError ? "border-destructive ring-1 ring-destructive/30" : "border-border/80"
+                    }`}
+                  >
                     <div className="px-3 py-2 flex items-center justify-between gap-2 flex-wrap bg-muted/20">
                       <button
                         type="button"
@@ -2329,7 +2370,11 @@ export const PromptEditor: React.FC<PromptEditorProps> = ({
                           onChange={handleOutputPromptChange}
                           rows={5}
                           aria-label="Prompt de Salida"
-                          className="w-full p-3 text-xs font-mono bg-background/80 border-border/80 focus:ring-primary/20 resize-y leading-relaxed"
+                          className={`w-full p-3 text-xs font-mono bg-background/80 resize-y leading-relaxed ${
+                            outputPromptHasError
+                              ? "border-destructive focus-visible:ring-destructive/30"
+                              : "border-border/80 focus:ring-primary/20"
+                          }`}
                           placeholder="Plantilla de bloques/campos de salida que debe rellenar el modelo..."
                         />
                       </div>
@@ -2455,7 +2500,11 @@ export const PromptEditor: React.FC<PromptEditorProps> = ({
                     onKeyDown={handleOutputSchemaKeyDown}
                     rows={5}
                     aria-label={t("prompt.part2Title")}
-                    className="w-full p-3 text-xs font-mono bg-background/80 border-border/80 focus:ring-amber-500/20 resize-y leading-relaxed"
+                    className={`w-full p-3 text-xs font-mono bg-background/80 resize-y leading-relaxed ${
+                      !isSchemaJsonValid
+                        ? "border-destructive focus-visible:ring-destructive/30"
+                        : "border-border/80 focus:ring-amber-500/20"
+                    }`}
                     placeholder={t("prompt.part2SchemaPlaceholder")}
                   />
                 </CardContent>
