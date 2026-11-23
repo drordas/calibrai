@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { PairwiseComparison } from "../types";
+import { PairwiseComparison, ModelBenchmarkSummary } from "../types";
 import { useTranslation } from "../i18n";
 import {
   Grid,
@@ -25,12 +25,14 @@ import { AuditInspectionModal, AuditModalConfig } from "./AuditInspectionModal";
 interface PairwiseMatrixProps {
   pairwiseList: PairwiseComparison[];
   modelIds: string[];
+  summaries?: Record<string, ModelBenchmarkSummary>;
   experimentId?: string;
 }
 
 export const PairwiseMatrix: React.FC<PairwiseMatrixProps> = ({
   pairwiseList,
   modelIds,
+  summaries,
   experimentId,
 }) => {
   const { t } = useTranslation();
@@ -63,6 +65,10 @@ export const PairwiseMatrix: React.FC<PairwiseMatrixProps> = ({
 
   const isHumanModel = (m: string) => m === "human_expert" || m.startsWith("human_expert");
   const formatModelDisplayName = (m: string) => {
+    const customName = summaries?.[m]?.model_name;
+    if (customName && customName.trim()) {
+      return customName;
+    }
     if (isHumanModel(m)) {
       if (m.startsWith("human_expert_")) {
         const idPart = m.replace("human_expert_", "").replace(/^sample_/, "");

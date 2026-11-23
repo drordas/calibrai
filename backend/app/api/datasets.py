@@ -484,9 +484,41 @@ def get_dataset_rows(
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/{dataset_id}/compatible-ground-truths")
-def get_compatible_ground_truths(dataset_id: str):
+def get_compatible_ground_truths(
+    dataset_id: str,
+    current_user: Optional[User] = Depends(get_optional_current_user),
+    db: Session = Depends(get_db),
+):
     try:
-        return dataset_engine.get_compatible_ground_truths(dataset_id)
+        compatibles = dataset_engine.get_compatible_ground_truths(dataset_id)
+        if not current_user:
+            return compatibles
+
+        records = {r.dataset_id: r for r in db.query(DatasetRecord).all()}
+        shares = {
+            s.dataset_id: s
+            for s in db.query(DatasetShare)
+            .filter(
+                DatasetShare.target_user_id == current_user.id,
+                DatasetShare.status.in_(["pending", "accepted"]),
+            )
+            .all()
+        }
+        filtered = []
+        for item in compatibles:
+            gt_id = item["dataset_id"]
+            rec = records.get(gt_id)
+            share = shares.get(gt_id)
+            is_owner = bool(rec and rec.owner_user_id == current_user.id)
+            if not is_owner and not share:
+                continue
+            enriched_item = dict(item)
+            if share and share.custom_name:
+                enriched_item["dataset_name"] = share.custom_name
+            elif rec and rec.display_name:
+                enriched_item["dataset_name"] = rec.display_name
+            filtered.append(enriched_item)
+        return filtered
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

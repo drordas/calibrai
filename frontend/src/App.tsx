@@ -1598,6 +1598,7 @@ export function App() {
                 <PairwiseMatrix
                   pairwiseList={pairwiseList}
                   modelIds={selectedModelIds}
+                  summaries={summaries}
                   experimentId={currentExperimentId || undefined}
                 />
               </div>

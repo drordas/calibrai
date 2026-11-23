@@ -321,7 +321,9 @@ export interface CompatibleGroundTruth {
 }
 
 export async function fetchCompatibleGroundTruths(inputDatasetId: string): Promise<CompatibleGroundTruth[]> {
-  const res = await fetch(`${API_BASE}/datasets/${inputDatasetId}/compatible-ground-truths`);
+  const res = await fetch(`${API_BASE}/datasets/${inputDatasetId}/compatible-ground-truths`, {
+    headers: getAuthHeaders(),
+  });
   if (!res.ok) throw new Error("Error obteniendo datasets compatibles de Ground Truth");
   return res.json();
 }
