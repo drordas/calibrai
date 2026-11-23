@@ -566,7 +566,15 @@ class DatasetEngine:
             raise KeyError(f"Dataset {dataset_id} not found")
         table_name = meta["table_name"]
         summary: DatasetSummary = meta["summary"]
+        file_path = meta.get("file_path")
         stem = Path(summary.filename).stem or dataset_id
+
+        # If exporting in the dataset's original file format, return the exact original file
+        if file_path and isinstance(file_path, Path) and file_path.exists():
+            orig_ext = file_path.suffix.lower().lstrip(".")
+            if orig_ext == fmt:
+                media = "application/json" if fmt == "json" else "text/csv; charset=utf-8"
+                return file_path.read_bytes(), media, file_path.name
 
         with self._lock:
             df = self.conn.execute(f"SELECT * FROM {table_name}").fetchdf()
