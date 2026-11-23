@@ -603,9 +603,8 @@ export function App() {
                     <span className="text-muted-foreground shrink-0">(N = {selectedDataset.total_rows.toLocaleString()})</span>
                   </span>
                 ) : (
-                  <span className="text-muted-foreground flex items-center gap-1 truncate">
-                    <Database className="w-3 h-3 text-muted-foreground shrink-0" />
-                    <span className="truncate">{t("nav.noDatasetLoaded")}</span>
+                  <span className="text-muted-foreground truncate">
+                    {t("nav.appSubtitle")}
                   </span>
                 )}
               </div>
