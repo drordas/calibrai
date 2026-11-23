@@ -2849,10 +2849,6 @@ export const PromptEditor: React.FC<PromptEditorProps> = ({
               </div>
             </div>
           </div>
-
-          <div className="pt-4 border-t border-border/40 text-[11px] text-muted-foreground leading-relaxed">
-            💡 {t("prompt.extensibilityTip")}
-          </div>
         </Card>
       </div>
 
