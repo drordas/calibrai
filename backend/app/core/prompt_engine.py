@@ -749,6 +749,24 @@ REGLAS DE EVALUACIÓN:
                         message=f"La spec '{cs.name}' usa la variable '{arg}', que no está en el esquema de output ni en specs previas."
                     ))
 
+        # Issue 4: Validate JSON Output Schema <-> Prompt coherence
+        if eval_spec.output_schema and isinstance(eval_spec.output_schema, dict) and len(eval_spec.output_schema) > 0:
+            prompt_tokens_lower = {tok.lower() for tok in re.findall(r"[a-zA-Z0-9_]+", clean_template)}
+            missing_json_keys = []
+            for top_key, top_val in eval_spec.output_schema.items():
+                if top_key.lower() not in prompt_tokens_lower:
+                    missing_json_keys.append(top_key)
+                elif isinstance(top_val, dict):
+                    for sub_key in top_val.keys():
+                        if sub_key.lower() not in prompt_tokens_lower:
+                            missing_json_keys.append(f"{top_key}.{sub_key}")
+            if missing_json_keys:
+                issues.append(PromptValidationIssue(
+                    severity="error",
+                    message=f"Incoherencia JSON ↔ Prompt: las siguientes claves del esquema de salida no aparecen en el prompt: {', '.join(missing_json_keys)}.",
+                    suggestion="Escribe el mismo nombre de variable en el prompt y en el JSON de salida (puede variar mayúsculas/minúsculas)."
+                ))
+
         # Output format detection
         is_structured_block = ("MARKERS_POSITIVE" in clean_template) or ("Do NOT generate JSON" in clean_template)
         is_json = bool(re.search(r"\bjson\b", clean_template, re.IGNORECASE)) or bool(eval_spec.output_schema)

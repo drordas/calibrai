@@ -166,6 +166,83 @@ def extract_and_parse_json(text: str) -> Tuple[Optional[Dict[str, Any]], bool]:
 
     return None, False
 
+def parse_schema_structured_blocks(text: str, output_schema: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Schema-driven structured block parser.
+    Matches top-level keys from `output_schema` (case-insensitive) as section headers
+    in `text`, and extracts nested fields (or scalar/list values) dynamically.
+    """
+    dict_keys = [k for k, v in output_schema.items() if isinstance(v, dict)]
+    if not dict_keys:
+        return {}
+
+    escaped_keys = [re.escape(k) for k in sorted(dict_keys, key=len, reverse=True)]
+    header_union = "|".join(escaped_keys)
+    pattern = rf"(?i)\b({header_union})\b([\s\S]*?)(?=\b(?:{header_union})\b|\Z)"
+    matches = list(re.finditer(pattern, text))
+    if not matches:
+        return {}
+
+    key_lookup = {k.lower(): k for k in dict_keys}
+    dimensions: Dict[str, Any] = {}
+
+    for m in matches:
+        raw_header = m.group(1).lower()
+        canonical_key = key_lookup.get(raw_header)
+        if not canonical_key:
+            continue
+        content = m.group(2)
+        sub_schema = output_schema.get(canonical_key) or {}
+        section_obj: Dict[str, Any] = {}
+
+        for sub_k, sub_def in sub_schema.items():
+            sub_match = re.search(rf"(?i)\b{re.escape(sub_k)}\b\s*[:=]\s*([^\n\r]+)", content)
+            raw_val = sub_match.group(1).strip() if sub_match else ""
+
+            if isinstance(sub_def, list):
+                if not raw_val or raw_val.lower() in ("blank", "none", "n/a", "null", "[]"):
+                    section_obj[sub_k] = []
+                elif "||" in raw_val:
+                    section_obj[sub_k] = clean_marker_fragments(raw_val)
+                else:
+                    section_obj[sub_k] = [x.strip(" \"'[]") for x in raw_val.split(",") if x.strip(" \"'[]") and x.strip(" \"'[]").lower() != "blank"]
+            elif isinstance(sub_def, bool):
+                section_obj[sub_k] = any(w in raw_val.lower() for w in ("true", "si", "sí", "1", "yes")) if raw_val else bool(sub_def)
+            elif isinstance(sub_def, (int, float)):
+                num_m = re.search(r"[-+]?\d*\.?\d+", raw_val) if raw_val else None
+                section_obj[sub_k] = float(num_m.group(0)) if num_m else float(sub_def)
+            else:
+                cleaned = raw_val.strip(" \"'") if raw_val else "blank"
+                section_obj[sub_k] = cleaned
+
+        if "sentiment" in section_obj and "markers_positive" in section_obj:
+            pos_frags = section_obj.get("markers_positive", []) if isinstance(section_obj.get("markers_positive"), list) else []
+            neg_frags = section_obj.get("markers_negative", []) if isinstance(section_obj.get("markers_negative"), list) else []
+            neu_frags = section_obj.get("markers_neutral", []) if isinstance(section_obj.get("markers_neutral"), list) else []
+            raw_sent = str(section_obj.get("sentiment") or "blank")
+            pos_filled = len(pos_frags) > 0
+            neg_filled = len(neg_frags) > 0
+            neu_filled = len(neu_frags) > 0
+            filled_count = sum([pos_filled, neg_filled, neu_filled])
+            if filled_count == 0:
+                expected_sent = "blank"
+            elif filled_count > 1:
+                expected_sent = "Mixed"
+            elif pos_filled:
+                expected_sent = "Positive"
+            elif neg_filled:
+                expected_sent = "Negative"
+            else:
+                expected_sent = "Neutral"
+            section_obj["active"] = (raw_sent.lower() != "blank") or (filled_count > 0)
+            section_obj["expected_sentiment"] = expected_sent
+            section_obj["is_rule_consistent"] = (raw_sent.lower() == expected_sent.lower())
+
+        dimensions[canonical_key] = section_obj
+
+    return {"format": "structured_blocks", "dimensions": dimensions}
+
+
 def assemble_backend_json(
     text: str,
     output_schema: Optional[Dict[str, Any]] = None,
@@ -183,6 +260,12 @@ def assemble_backend_json(
     # 1. First check if model emitted valid JSON or key-values
     parsed, _ = extract_and_parse_response(text)
     parsed = parsed or {}
+
+    # 1b. Merge schema-driven structured blocks if detected
+    schema_blocks = parse_schema_structured_blocks(text, output_schema)
+    if schema_blocks.get("dimensions"):
+        existing_dims = parsed.get("dimensions") if isinstance(parsed.get("dimensions"), dict) else {}
+        parsed["dimensions"] = {**existing_dims, **schema_blocks["dimensions"]}
 
     constructed = {}
     text_clean = text.strip()

@@ -857,9 +857,217 @@ export const PromptEditor: React.FC<PromptEditorProps> = ({
     }
   };
 
+  const JSON_OBJECT_PALETTE = [
+    {
+      name: "sky",
+      mark: "bg-sky-500/18 rounded-[2px]",
+      badge: "bg-sky-500/15 text-sky-700 dark:text-sky-300 border-sky-500/40",
+      dot: "bg-sky-500",
+    },
+    {
+      name: "emerald",
+      mark: "bg-emerald-500/18 rounded-[2px]",
+      badge: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-500/40",
+      dot: "bg-emerald-500",
+    },
+    {
+      name: "amber",
+      mark: "bg-amber-500/20 rounded-[2px]",
+      badge: "bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-500/40",
+      dot: "bg-amber-500",
+    },
+    {
+      name: "violet",
+      mark: "bg-violet-500/18 rounded-[2px]",
+      badge: "bg-violet-500/15 text-violet-700 dark:text-violet-300 border-violet-500/40",
+      dot: "bg-violet-500",
+    },
+    {
+      name: "rose",
+      mark: "bg-rose-500/18 rounded-[2px]",
+      badge: "bg-rose-500/15 text-rose-700 dark:text-rose-300 border-rose-500/40",
+      dot: "bg-rose-500",
+    },
+    {
+      name: "cyan",
+      mark: "bg-cyan-500/18 rounded-[2px]",
+      badge: "bg-cyan-500/15 text-cyan-700 dark:text-cyan-300 border-cyan-500/40",
+      dot: "bg-cyan-500",
+    },
+  ];
+
+  const promptBackdropRef = useRef<HTMLDivElement>(null);
+  const schemaTextareaRef = useRef<HTMLTextAreaElement>(null);
+  const [jsonKeyAutocomplete, setJsonKeyAutocomplete] = useState<{
+    query: string;
+    replaceStart: number;
+    replaceEnd: number;
+    activeIndex: number;
+  } | null>(null);
+
+  // Tokenize Prompt del Modelo into a deduplicated dictionary for JSON key suggestions
+  const promptTokenDictionary = useMemo(() => {
+    const cleanText = (promptRealText || "").replace(/\{[a-zA-Z0-9_.-]+\}/g, " ");
+    const matches = cleanText.match(/[a-zA-Z_][a-zA-Z0-9_]{1,}/g) || [];
+    const seen = new Set<string>();
+    const tokens: Array<{ key: string; raw: string }> = [];
+    // Prioritize tokens containing underscores or ALL_CAPS identifiers first
+    const sorted = [...matches].sort((a, b) => {
+      const aScore = (a.includes("_") ? 2 : 0) + (a === a.toUpperCase() ? 1 : 0);
+      const bScore = (b.includes("_") ? 2 : 0) + (b === b.toUpperCase() ? 1 : 0);
+      return bScore - aScore;
+    });
+    for (const raw of sorted) {
+      const lower = raw.toLowerCase();
+      if (lower.length < 2 || seen.has(lower)) continue;
+      seen.add(lower);
+      tokens.push({ key: lower, raw });
+    }
+    return tokens;
+  }, [promptRealText]);
+
+  const promptTokensLower = useMemo(
+    () => new Set(promptTokenDictionary.map((tItem) => tItem.key)),
+    [promptTokenDictionary]
+  );
+
+  const filteredJsonKeySuggestions = useMemo(() => {
+    if (!jsonKeyAutocomplete) return [];
+    const q = jsonKeyAutocomplete.query.toLowerCase();
+    return promptTokenDictionary
+      .filter((item) => !q || item.key.includes(q))
+      .slice(0, 10);
+  }, [jsonKeyAutocomplete, promptTokenDictionary]);
+
+  const parsedOutputSchema = useMemo(() => {
+    const trimmed = (outputSchemaText || "").trim();
+    if (!trimmed) return null;
+    try {
+      const obj = JSON.parse(trimmed);
+      if (obj && typeof obj === "object" && !Array.isArray(obj)) {
+        return obj as Record<string, any>;
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  }, [outputSchemaText]);
+
+  const jsonPromptCoherence = useMemo(() => {
+    const trimmed = (outputSchemaText || "").trim();
+    if (!trimmed) {
+      return {
+        hasSchema: false,
+        invalidJson: false,
+        isCoherent: true,
+        objectStatuses: [] as Array<{ key: string; covered: boolean; missingSubfields: string[]; colorIdx: number }>,
+        missingKeys: [] as string[],
+      };
+    }
+    if (!parsedOutputSchema) {
+      return {
+        hasSchema: true,
+        invalidJson: true,
+        isCoherent: false,
+        objectStatuses: [] as Array<{ key: string; covered: boolean; missingSubfields: string[]; colorIdx: number }>,
+        missingKeys: ["JSON inválido"],
+      };
+    }
+    const topKeys = Object.keys(parsedOutputSchema);
+    if (topKeys.length === 0) {
+      return {
+        hasSchema: false,
+        invalidJson: false,
+        isCoherent: true,
+        objectStatuses: [] as Array<{ key: string; covered: boolean; missingSubfields: string[]; colorIdx: number }>,
+        missingKeys: [] as string[],
+      };
+    }
+
+    const missingKeys: string[] = [];
+    const objectStatuses = topKeys.map((topKey, idx) => {
+      const topFound = promptTokensLower.has(topKey.toLowerCase());
+      if (!topFound) missingKeys.push(topKey);
+      const val = parsedOutputSchema[topKey];
+      const missingSubfields: string[] = [];
+      if (val && typeof val === "object" && !Array.isArray(val)) {
+        for (const subKey of Object.keys(val)) {
+          if (!promptTokensLower.has(subKey.toLowerCase())) {
+            missingSubfields.push(subKey);
+            missingKeys.push(`${topKey}.${subKey}`);
+          }
+        }
+      }
+      return {
+        key: topKey,
+        covered: topFound && missingSubfields.length === 0,
+        missingSubfields,
+        colorIdx: idx % JSON_OBJECT_PALETTE.length,
+      };
+    });
+
+    return {
+      hasSchema: true,
+      invalidJson: false,
+      isCoherent: missingKeys.length === 0,
+      objectStatuses,
+      missingKeys,
+    };
+  }, [outputSchemaText, parsedOutputSchema, promptTokensLower]);
+
   useEffect(() => {
-    onValidationStateChange?.(Boolean(validation?.is_valid), isValidating);
-  }, [validation, isValidating, onValidationStateChange]);
+    onValidationStateChange?.(
+      Boolean(validation?.is_valid) && jsonPromptCoherence.isCoherent,
+      isValidating
+    );
+  }, [validation, isValidating, jsonPromptCoherence.isCoherent, onValidationStateChange]);
+
+  // Build highlighted segments for Prompt del Modelo backdrop based on JSON objects
+  const highlightedPromptSegments = useMemo(() => {
+    const text = promptRealText || "";
+    if (!text || !parsedOutputSchema) {
+      return [{ text, markClass: "" }];
+    }
+    const topKeys = Object.keys(parsedOutputSchema);
+    if (topKeys.length === 0) {
+      return [{ text, markClass: "" }];
+    }
+
+    const escaped = topKeys
+      .slice()
+      .sort((a, b) => b.length - a.length)
+      .map((k) => k.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+    const headerRegex = new RegExp(`\\b(${escaped.join("|")})\\b`, "gi");
+
+    const matches: Array<{ index: number; key: string; colorIdx: number }> = [];
+    let m: RegExpExecArray | null;
+    while ((m = headerRegex.exec(text)) !== null) {
+      const foundLower = m[1].toLowerCase();
+      const idx = topKeys.findIndex((k) => k.toLowerCase() === foundLower);
+      if (idx >= 0) {
+        matches.push({ index: m.index, key: topKeys[idx], colorIdx: idx % JSON_OBJECT_PALETTE.length });
+      }
+    }
+
+    if (matches.length === 0) {
+      return [{ text, markClass: "" }];
+    }
+
+    const segments: Array<{ text: string; markClass: string }> = [];
+    if (matches[0].index > 0) {
+      segments.push({ text: text.slice(0, matches[0].index), markClass: "" });
+    }
+    for (let i = 0; i < matches.length; i++) {
+      const start = matches[i].index;
+      const end = i + 1 < matches.length ? matches[i + 1].index : text.length;
+      const slice = text.slice(start, end);
+      segments.push({
+        text: slice,
+        markClass: JSON_OBJECT_PALETTE[matches[i].colorIdx].mark,
+      });
+    }
+    return segments;
+  }, [promptRealText, parsedOutputSchema]);
 
   const [showSavePromptModal, setShowSavePromptModal] = useState(false);
   const [savePromptName, setSavePromptName] = useState("");
@@ -1001,11 +1209,67 @@ export const PromptEditor: React.FC<PromptEditorProps> = ({
     }
   };
 
-  // Part 2: Output JSON Schema change
+  // Part 2: Output JSON Schema change (with tokenized prompt dictionary autocomplete inside quotes)
   const handleOutputSchemaChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const val = e.target.value;
+    const caretPos = e.target.selectionStart ?? val.length;
+    const beforeCaret = val.slice(0, caretPos);
+    const quoteMatch = beforeCaret.match(/"([a-zA-Z0-9_]*)$/);
+    if (quoteMatch && promptTokenDictionary.length > 0) {
+      setJsonKeyAutocomplete({
+        query: quoteMatch[1],
+        replaceStart: caretPos - quoteMatch[1].length,
+        replaceEnd: caretPos,
+        activeIndex: 0,
+      });
+    } else {
+      setJsonKeyAutocomplete(null);
+    }
     setOutputSchemaText(val);
     syncAndValidate(promptRealText, val, computedSpecs);
+  };
+
+  const insertJsonKeySuggestion = (suggestedKey: string) => {
+    if (!jsonKeyAutocomplete) return;
+    const before = outputSchemaText.slice(0, jsonKeyAutocomplete.replaceStart);
+    const after = outputSchemaText.slice(jsonKeyAutocomplete.replaceEnd);
+    const nextVal = `${before}${suggestedKey}${after}`;
+    const nextCaret = before.length + suggestedKey.length;
+    setJsonKeyAutocomplete(null);
+    setOutputSchemaText(nextVal);
+    syncAndValidate(promptRealText, nextVal, computedSpecs);
+    requestAnimationFrame(() => {
+      if (schemaTextareaRef.current) {
+        schemaTextareaRef.current.focus();
+        schemaTextareaRef.current.setSelectionRange(nextCaret, nextCaret);
+      }
+    });
+  };
+
+  const handleOutputSchemaKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (!jsonKeyAutocomplete || filteredJsonKeySuggestions.length === 0) return;
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setJsonKeyAutocomplete((prev) =>
+        prev ? { ...prev, activeIndex: (prev.activeIndex + 1) % filteredJsonKeySuggestions.length } : null
+      );
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setJsonKeyAutocomplete((prev) =>
+        prev
+          ? {
+              ...prev,
+              activeIndex: (prev.activeIndex - 1 + filteredJsonKeySuggestions.length) % filteredJsonKeySuggestions.length,
+            }
+          : null
+      );
+    } else if (e.key === "Enter" || e.key === "Tab") {
+      e.preventDefault();
+      const chosen = filteredJsonKeySuggestions[jsonKeyAutocomplete.activeIndex];
+      if (chosen) insertJsonKeySuggestion(chosen.key);
+    } else if (e.key === "Escape") {
+      setJsonKeyAutocomplete(null);
+    }
   };
 
   const handleFunctionChange = (fn: string) => {
@@ -1697,9 +1961,33 @@ export const PromptEditor: React.FC<PromptEditorProps> = ({
 
                   {/* Model Prompt */}
                   <div className="space-y-2">
-                    <Label htmlFor="template-real-prompt" className="text-xs font-semibold text-foreground block">
-                      {t("prompt.modelPromptLabel")}
-                    </Label>
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                      <Label htmlFor="template-real-prompt" className="text-xs font-semibold text-foreground block">
+                        {t("prompt.modelPromptLabel")}
+                      </Label>
+                      {jsonPromptCoherence.hasSchema && jsonPromptCoherence.objectStatuses.length > 0 && (
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          {jsonPromptCoherence.objectStatuses.map((obj) => {
+                            const palette = JSON_OBJECT_PALETTE[obj.colorIdx];
+                            return (
+                              <span
+                                key={obj.key}
+                                className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-sm border text-[10px] font-mono ${palette.badge}`}
+                                title={
+                                  obj.covered
+                                    ? `${obj.key}: representado en el prompt`
+                                    : `${obj.key}: faltan claves en el prompt`
+                                }
+                              >
+                                <span className={`w-1.5 h-1.5 rounded-full ${palette.dot}`} />
+                                <span>{obj.key}</span>
+                                <span>{obj.covered ? "✓" : "✗"}</span>
+                              </span>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
                     {braceAutocomplete && filteredAutocompleteVars.length > 0 && (
                     <div className="p-2 rounded-sm bg-card border-2 border-primary/50 shadow-md space-y-1.5 z-20">
                       <div className="flex items-center justify-between text-[10px] font-mono text-muted-foreground">
@@ -1749,35 +2037,58 @@ export const PromptEditor: React.FC<PromptEditorProps> = ({
                     </div>
                   )}
 
-                  <Textarea
-                    ref={promptTextareaRef}
-                    id="template-real-prompt"
-                    value={promptRealText}
-                    onChange={handlePromptRealChange}
-                    onKeyDown={handlePromptKeyDown}
-                    onSelect={(e) => {
-                      lastCursorRef.current = {
-                        start: e.currentTarget.selectionStart,
-                        end: e.currentTarget.selectionEnd,
-                      };
-                    }}
-                    onClick={(e) => {
-                      lastCursorRef.current = {
-                        start: e.currentTarget.selectionStart,
-                        end: e.currentTarget.selectionEnd,
-                      };
-                    }}
-                    onKeyUp={(e) => {
-                      lastCursorRef.current = {
-                        start: e.currentTarget.selectionStart,
-                        end: e.currentTarget.selectionEnd,
-                      };
-                    }}
-                    rows={7}
-                    aria-label={t("prompt.modelPromptLabel")}
-                    className="w-full p-3 text-xs font-mono bg-background/80 border-border/80 focus:ring-primary/20 resize-y leading-relaxed"
-                    placeholder={t("prompt.promptRealPlaceholder")}
-                  />
+                  <div className="relative rounded-md border border-border/80 bg-background/80 overflow-hidden">
+                    <div
+                      ref={promptBackdropRef}
+                      aria-hidden="true"
+                      className="pointer-events-none absolute inset-0 p-3 text-xs font-mono leading-relaxed whitespace-pre-wrap break-words overflow-hidden text-transparent select-none"
+                    >
+                      {highlightedPromptSegments.map((seg, idx) =>
+                        seg.markClass ? (
+                          <mark key={idx} className={`${seg.markClass} text-transparent`}>
+                            {seg.text}
+                          </mark>
+                        ) : (
+                          <span key={idx}>{seg.text}</span>
+                        )
+                      )}
+                    </div>
+                    <Textarea
+                      ref={promptTextareaRef}
+                      id="template-real-prompt"
+                      value={promptRealText}
+                      onChange={handlePromptRealChange}
+                      onKeyDown={handlePromptKeyDown}
+                      onScroll={(e) => {
+                        if (promptBackdropRef.current) {
+                          promptBackdropRef.current.scrollTop = e.currentTarget.scrollTop;
+                          promptBackdropRef.current.scrollLeft = e.currentTarget.scrollLeft;
+                        }
+                      }}
+                      onSelect={(e) => {
+                        lastCursorRef.current = {
+                          start: e.currentTarget.selectionStart,
+                          end: e.currentTarget.selectionEnd,
+                        };
+                      }}
+                      onClick={(e) => {
+                        lastCursorRef.current = {
+                          start: e.currentTarget.selectionStart,
+                          end: e.currentTarget.selectionEnd,
+                        };
+                      }}
+                      onKeyUp={(e) => {
+                        lastCursorRef.current = {
+                          start: e.currentTarget.selectionStart,
+                          end: e.currentTarget.selectionEnd,
+                        };
+                      }}
+                      rows={7}
+                      aria-label={t("prompt.modelPromptLabel")}
+                      className="relative z-10 w-full p-3 text-xs font-mono bg-transparent border-0 focus:ring-primary/20 resize-y leading-relaxed caret-foreground"
+                      placeholder={t("prompt.promptRealPlaceholder")}
+                    />
+                  </div>
                   </div>
 
                   <div className="flex items-center justify-end gap-2 pt-1">
@@ -1859,11 +2170,44 @@ export const PromptEditor: React.FC<PromptEditorProps> = ({
                     )}
                   </div>
                 </CardHeader>
-                <CardContent className="p-3">
+                <CardContent className="p-3 space-y-2">
+                  {jsonKeyAutocomplete && filteredJsonKeySuggestions.length > 0 && (
+                    <div className="p-2 rounded-sm bg-card border border-primary/40 shadow-sm space-y-1.5">
+                      <div className="flex items-center justify-between text-[10px] font-mono text-muted-foreground">
+                        <span className="font-semibold text-foreground">
+                          Sugerencias del diccionario del prompt:
+                        </span>
+                        <span>↑↓ elegir &middot; Enter/Tab o clic insertar &middot; Esc cerrar</span>
+                      </div>
+                      <div className="flex flex-wrap gap-1.5">
+                        {filteredJsonKeySuggestions.map((item, idx) => {
+                          const isActive = idx === jsonKeyAutocomplete.activeIndex;
+                          return (
+                            <button
+                              key={item.key}
+                              type="button"
+                              onMouseDown={(e) => e.preventDefault()}
+                              onClick={() => insertJsonKeySuggestion(item.key)}
+                              className={`px-2 py-0.5 rounded-sm text-xs font-mono border transition-colors cursor-pointer ${
+                                isActive
+                                  ? "bg-primary text-primary-foreground border-primary font-bold"
+                                  : "bg-background text-foreground border-border hover:border-primary/40 hover:bg-muted"
+                              }`}
+                            >
+                              {item.key}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
                   <Textarea
+                    ref={schemaTextareaRef}
                     id="output-json-schema"
                     value={outputSchemaText}
                     onChange={handleOutputSchemaChange}
+                    onKeyDown={handleOutputSchemaKeyDown}
                     rows={5}
                     aria-label={t("prompt.part2Title")}
                     className="w-full p-3 text-xs font-mono bg-background/80 border-border/80 focus:ring-amber-500/20 resize-y leading-relaxed"
@@ -2697,7 +3041,7 @@ export const PromptEditor: React.FC<PromptEditorProps> = ({
                 <Badge variant="outline" className="text-[10px] animate-pulse text-muted-foreground">
                   {t("prompt.linterAnalyzing")}
                 </Badge>
-              ) : !validation?.is_valid ? (
+              ) : !validation?.is_valid || !jsonPromptCoherence.isCoherent ? (
                 <Badge variant="outline" className="text-[11px] font-bold text-destructive bg-destructive/10 border-destructive/30 gap-1">
                   <AlertCircle className="w-3 h-3" /> {t("prompt.linterIncoherent")}
                 </Badge>
@@ -2843,6 +3187,50 @@ export const PromptEditor: React.FC<PromptEditorProps> = ({
                     <AlertTitle className="text-xs font-bold">{t("linterExtra.allSpecsUsed")}</AlertTitle>
                     <AlertDescription className="text-[11px] opacity-80 mt-0.5 font-mono">
                       {specColumns.join(", ")}
+                    </AlertDescription>
+                  </Alert>
+                )}
+              </div>
+
+              {/* Elemento 3: Coherencia JSON <-> Prompt */}
+              <div className="space-y-2 pt-2 border-t border-border/40">
+                <div className="text-[11px] font-semibold text-foreground/90 flex items-center gap-1.5">
+                  <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
+                  <span>3. Coherencia JSON ↔ Prompt</span>
+                </div>
+
+                {!jsonPromptCoherence.hasSchema ? (
+                  <Alert className="py-2 text-xs bg-muted/40 border-border/50 text-muted-foreground">
+                    <Info className="w-4 h-4 text-muted-foreground" />
+                    <AlertTitle className="text-xs font-medium ml-2">
+                      Sin esquema JSON estructurado (modo texto/numérico)
+                    </AlertTitle>
+                  </Alert>
+                ) : jsonPromptCoherence.invalidJson ? (
+                  <Alert variant="destructive" className="py-2 text-xs">
+                    <AlertCircle className="w-4 h-4" />
+                    <AlertTitle className="text-xs font-medium ml-2">
+                      El JSON de salida no tiene una sintaxis válida.
+                    </AlertTitle>
+                  </Alert>
+                ) : !jsonPromptCoherence.isCoherent ? (
+                  <Alert variant="destructive" className="py-2 text-xs">
+                    <AlertCircle className="w-4 h-4" />
+                    <AlertTitle className="text-xs font-semibold ml-2">
+                      Claves del JSON no representadas en el prompt
+                    </AlertTitle>
+                    <AlertDescription className="text-[11px] opacity-90 mt-1 ml-2 font-mono">
+                      Faltan: {jsonPromptCoherence.missingKeys.join(", ")}
+                    </AlertDescription>
+                  </Alert>
+                ) : (
+                  <Alert className="bg-emerald-500/10 border-emerald-500/25 text-emerald-600 dark:text-emerald-400 text-xs py-2.5">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-500" />
+                    <AlertTitle className="text-xs font-bold">
+                      JSON y Prompt coherentes ({jsonPromptCoherence.objectStatuses.length}/{jsonPromptCoherence.objectStatuses.length} objetos)
+                    </AlertTitle>
+                    <AlertDescription className="text-[11px] opacity-80 mt-0.5">
+                      Todas las claves del esquema JSON aparecen en el prompt.
                     </AlertDescription>
                   </Alert>
                 )}
