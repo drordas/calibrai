@@ -231,11 +231,11 @@ export const ExperimentDashboard: React.FC<ExperimentDashboardProps> = ({
               {t("dashboard.subtitle")}
             </p>
           </div>
-          <div className="pt-2 flex flex-wrap items-center gap-2">
+          <div className="pt-2 grid grid-cols-1 sm:inline-grid sm:grid-cols-[max-content_max-content] gap-2">
             <Button
               type="button"
               onClick={onNewExperiment}
-              className="h-9 px-3.5 text-xs font-semibold bg-primary text-primary-foreground hover:bg-primary/90 gap-1.5 rounded-sm cursor-pointer transition-colors"
+              className="h-9 w-full px-3.5 text-xs font-semibold bg-primary text-primary-foreground hover:bg-primary/90 gap-1.5 rounded-sm cursor-pointer transition-colors"
             >
               <Plus className="w-3.5 h-3.5" />
               <span>{t("dashboard.createExperiment")}</span>
@@ -245,7 +245,7 @@ export const ExperimentDashboard: React.FC<ExperimentDashboardProps> = ({
                 type="button"
                 variant="outline"
                 onClick={onNewFromTemplate}
-                className="h-9 px-3.5 text-xs font-semibold border-border bg-card hover:bg-muted text-foreground gap-1.5 rounded-sm cursor-pointer transition-colors"
+                className="h-9 w-full px-3.5 text-xs font-semibold border-border bg-card hover:bg-muted text-foreground gap-1.5 rounded-sm cursor-pointer transition-colors"
               >
                 <FileCode className="w-3.5 h-3.5 text-primary" />
                 <span>{t("templates.fromTemplate")}</span>
@@ -256,7 +256,7 @@ export const ExperimentDashboard: React.FC<ExperimentDashboardProps> = ({
                 type="button"
                 variant="outline"
                 onClick={onNewTemplate}
-                className="h-9 px-3.5 text-xs font-semibold border-primary/40 bg-primary/5 hover:bg-primary/10 text-primary gap-1.5 rounded-sm cursor-pointer transition-colors"
+                className="h-9 w-full px-3.5 text-xs font-semibold border-primary/40 bg-primary/5 hover:bg-primary/10 text-primary gap-1.5 rounded-sm cursor-pointer transition-colors"
               >
                 <Plus className="w-3.5 h-3.5" />
                 <span>{t("templates.createTemplate")}</span>
