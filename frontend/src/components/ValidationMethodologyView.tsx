@@ -878,7 +878,7 @@ export const ValidationMethodologyView: React.FC<ValidationMethodologyViewProps>
           <Table>
             <TableHeader className="bg-muted/30">
               <TableRow>
-                <TableHead className="text-xs font-medium text-foreground">Comparativa LLM vs Experto</TableHead>
+                <TableHead className="text-xs font-medium text-center text-foreground">Comparativa LLM vs Experto</TableHead>
                 <TableHead className="text-xs font-medium text-center">
                   <span className="inline-flex items-center justify-center">
                     <span>Cohen&apos;s Kappa (κ)</span>
@@ -969,8 +969,8 @@ export const ValidationMethodologyView: React.FC<ValidationMethodologyViewProps>
 
                 return (
                   <TableRow key={`${p.model_a}_${p.model_b}_${idx}`} className="hover:bg-muted/20">
-                    <TableCell className="font-medium text-xs">
-                      <div className="flex items-center gap-2">
+                    <TableCell className="font-medium text-xs text-center">
+                      <div className="flex flex-col items-center gap-1">
                         <span className="font-mono text-foreground font-semibold">{formatName(llmName)}</span>
                         <span className="text-muted-foreground text-[10px]">vs</span>
                         <Badge variant="outline" className="font-mono text-[10px] bg-emerald-500/10 text-emerald-400 border-emerald-500/30 py-0.5">
@@ -1030,7 +1030,7 @@ export const ValidationMethodologyView: React.FC<ValidationMethodologyViewProps>
               <Table>
                 <TableHeader className="bg-muted/20">
                   <TableRow>
-                    <TableHead className="text-xs font-medium text-foreground">Par Comparado</TableHead>
+                    <TableHead className="text-xs font-medium text-center text-foreground">Par Comparado</TableHead>
                     {detectedDimensions.map((dim) => (
                       <TableHead key={dim} className="text-xs font-medium text-center capitalize">
                         {dim.replace(/_/g, " ")}
@@ -1041,8 +1041,24 @@ export const ValidationMethodologyView: React.FC<ValidationMethodologyViewProps>
                 <TableBody>
                   {pairwiseList.map((p, idx) => (
                     <TableRow key={idx} className="hover:bg-muted/20">
-                      <TableCell className="text-xs font-mono font-medium">
-                        {formatName(p.model_a)} vs {formatName(p.model_b)}
+                      <TableCell className="text-xs font-medium text-center">
+                        <div className="flex flex-col items-center gap-1">
+                          {isHumanModel(p.model_a) ? (
+                            <Badge variant="outline" className="font-mono text-[10px] bg-emerald-500/10 text-emerald-400 border-emerald-500/30 py-0.5">
+                              {formatName(p.model_a)}
+                            </Badge>
+                          ) : (
+                            <span className="font-mono text-foreground font-semibold">{formatName(p.model_a)}</span>
+                          )}
+                          <span className="text-muted-foreground text-[10px]">vs</span>
+                          {isHumanModel(p.model_b) ? (
+                            <Badge variant="outline" className="font-mono text-[10px] bg-emerald-500/10 text-emerald-400 border-emerald-500/30 py-0.5">
+                              {formatName(p.model_b)}
+                            </Badge>
+                          ) : (
+                            <span className="font-mono text-foreground font-semibold">{formatName(p.model_b)}</span>
+                          )}
+                        </div>
                       </TableCell>
                       {detectedDimensions.map((dim) => {
                         const val = p.dimension_agreements?.[dim];

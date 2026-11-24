@@ -21,6 +21,7 @@ frontend/dist/
 /uploads/
 /dataset/
 /data/
+/prompts/
 *.db
 *.sqlite
 *.sqlite3
