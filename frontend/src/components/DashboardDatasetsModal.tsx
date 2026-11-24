@@ -1,4 +1,6 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { ColumnDef, tableFeatures } from "@tanstack/react-table";
+import { DataTable } from "@/components/ui/data-table";
 import { DatasetSummary, PaginatedRowsResponse, ShareEntry, ShareUser } from "../types";
 import { DashboardPromptsModal } from "./DashboardPromptsModal";
 import {
@@ -121,6 +123,29 @@ export const DashboardDatasetsModal: React.FC<DashboardDatasetsModalProps> = ({
 
   // Export state
   const [exportingId, setExportingId] = useState<string | null>(null);
+
+  const previewColumns = useMemo<ColumnDef<ReturnType<typeof tableFeatures>, Record<string, any>, any>[]>(() => {
+    if (!previewRows) return [];
+    return previewRows.columns.map((col) => ({
+      id: col,
+      accessorFn: (row: Record<string, any>) => row[col],
+      header: col,
+      cell: ({ getValue }: { getValue: () => any }) => {
+        const val = getValue();
+        const display =
+          val === null || val === undefined
+            ? ""
+            : typeof val === "object"
+              ? JSON.stringify(val)
+              : String(val);
+        return (
+          <span className="block truncate" title={display}>
+            {display}
+          </span>
+        );
+      },
+    }));
+  }, [previewRows]);
 
   // Associated prompts per dataset
   const [promptCountsByDataset, setPromptCountsByDataset] = useState<Record<string, number>>({});
@@ -728,51 +753,19 @@ export const DashboardDatasetsModal: React.FC<DashboardDatasetsModalProps> = ({
             </DialogDescription>
           </DialogHeader>
 
-          <div className="max-h-[60vh] overflow-auto border-t-2 border-b-2 border-foreground">
+          <div className="border-t-2 border-b-2 border-foreground">
             {previewLoading ? (
               <div className="py-10 flex items-center justify-center gap-2 text-xs text-muted-foreground">
                 <Loader2 className="w-4 h-4 animate-spin text-primary" />
                 <span>{t("common.loading")}</span>
               </div>
             ) : previewRows ? (
-              <Table>
-                <TableHeader>
-                  <TableRow className="border-b border-border hover:bg-transparent">
-                    {previewRows.columns.map((col) => (
-                      <TableHead
-                        key={col}
-                        className="text-[11px] font-mono text-muted-foreground whitespace-nowrap h-8"
-                      >
-                        {col}
-                      </TableHead>
-                    ))}
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {previewRows.rows.map((row, idx) => (
-                    <TableRow key={idx} className="border-b border-border/50">
-                      {previewRows.columns.map((col) => {
-                        const val = row[col];
-                        const display =
-                          val === null || val === undefined
-                            ? ""
-                            : typeof val === "object"
-                              ? JSON.stringify(val)
-                              : String(val);
-                        return (
-                          <TableCell
-                            key={col}
-                            className="py-2 text-xs max-w-[260px] truncate align-top"
-                            title={display}
-                          >
-                            {display}
-                          </TableCell>
-                        );
-                      })}
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
+              <DataTable
+                columns={previewColumns}
+                data={previewRows.rows}
+                containerClassName="max-h-[60vh] overflow-auto"
+                stickyHeader={true}
+              />
             ) : null}
           </div>
 

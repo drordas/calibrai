@@ -171,8 +171,8 @@ export const LaunchExperimentView: React.FC<LaunchExperimentViewProps> = ({
   };
 
   const pilar1TextColumns = useMemo(() => {
-    const roleMap = new Map<string, "TEXTO" | "CONTEXTO" | "SPEC">();
-    for (const c of inputColumns || []) if (c) roleMap.set(c, "TEXTO");
+    const roleMap = new Map<string, "MUESTRA" | "CONTEXTO" | "SPEC">();
+    for (const c of inputColumns || []) if (c) roleMap.set(c, "MUESTRA");
     for (const c of contextColumns || []) if (c && !roleMap.has(c)) roleMap.set(c, "CONTEXTO");
     for (const c of specColumns || []) if (c && !roleMap.has(c)) roleMap.set(c, "SPEC");
 
@@ -185,19 +185,29 @@ export const LaunchExperimentView: React.FC<LaunchExperimentViewProps> = ({
       }));
 
     if (cols.length === 0) {
-      return (inputColumns || []).map((c) => ({ name: c, role: "TEXTO" as const, dataType: "string" }));
+      return (inputColumns || []).map((c) => ({ name: c, role: "MUESTRA" as const, dataType: "string" }));
     }
     return cols;
   }, [dataset?.columns, inputColumns, contextColumns, specColumns]);
 
+  const defaultPilar1Col = useMemo(() => {
+    const muestraRole = pilar1TextColumns.find((c) => c.role === "MUESTRA");
+    if (muestraRole) return muestraRole.name;
+    const bodyMatch = pilar1TextColumns.find((c) =>
+      /^(review_comment|review_text|comment|text|review|texto|contenido|body)$/i.test(c.name)
+    );
+    if (bodyMatch) return bodyMatch.name;
+    return pilar1TextColumns[0]?.name || inputColumns[0] || "";
+  }, [pilar1TextColumns, inputColumns]);
+
   const [pilar1SourceCol, setPilar1SourceCol] = useState<string>(
-    () => initialMeth?.pilar_1?.source_text_col || pilar1TextColumns[0]?.name || inputColumns[0] || ""
+    () => initialMeth?.pilar_1?.source_text_col || defaultPilar1Col
   );
   useEffect(() => {
     if (pilar1TextColumns.length > 0 && !pilar1TextColumns.some((c) => c.name === pilar1SourceCol)) {
-      setPilar1SourceCol(pilar1TextColumns[0].name);
+      setPilar1SourceCol(defaultPilar1Col);
     }
-  }, [pilar1TextColumns, pilar1SourceCol]);
+  }, [pilar1TextColumns, pilar1SourceCol, defaultPilar1Col]);
   const [pilar1VerbatimMode, setPilar1VerbatimMode] = useState<"tolerant" | "strict">(
     initialMeth?.pilar_1?.verbatim_mode === "strict" ? "strict" : "tolerant"
   );
@@ -777,6 +787,11 @@ export const LaunchExperimentView: React.FC<LaunchExperimentViewProps> = ({
                     <Badge variant="secondary" className="text-[10px] font-mono py-0">
                       Verbatim & Disyunción
                     </Badge>
+                    {pilar1SourceCol && (
+                      <Badge variant="outline" className="text-[10px] font-mono py-0 border-emerald-500/30 text-emerald-500 bg-emerald-500/10">
+                        Corpus: {pilar1SourceCol}
+                      </Badge>
+                    )}
                   </div>
                   <p className="text-[11px] text-muted-foreground pt-0.5">
                     Fidelidad Verbatim literal vs. corpus original, disyunción estricta (Pos ∩ Neg = ∅) y consistencia lógica de reglas.

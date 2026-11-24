@@ -537,48 +537,60 @@ def calculate_pearson_correlation(vals_a: List[float], vals_b: List[float]) -> f
 def resolve_source_text(row_ctx: Dict[str, Any], eval_spec: Optional[Any] = None, input_columns: Optional[List[str]] = None) -> str:
     """
     Universally resolves the source corpus text from row_ctx:
-    1. Configured source_text_col in methodology_config.pilar_1 or eval_spec.source_text_col
-    2. First input_columns entry if provided
-    3. Common text column names
+    1. Configured source_text_col in metric_bindings.verbatim_faithfulness, methodology_config.pilar_1, or eval_spec.source_text_col
+    2. Common review/body text column names
+    3. Longest string value among experiment input_columns (avoids picking short metadata like enterprise_name)
     4. Longest string value in row_ctx (> 15 chars)
     """
     if not row_ctx or not isinstance(row_ctx, dict):
         return ""
 
     # 1. Check explicit config in eval_spec
-    candidates: List[str] = []
+    explicit_candidates: List[str] = []
     if eval_spec:
         if isinstance(eval_spec, dict):
+            mb = eval_spec.get("metric_bindings") or {}
+            vf_cols = (mb.get("verbatim_faithfulness") or {}).get("source_text_col") if isinstance(mb, dict) else None
+            if isinstance(vf_cols, list) and vf_cols:
+                explicit_candidates.append(str(vf_cols[0]))
             m_cfg = eval_spec.get("methodology_config") or {}
             p1_col = (m_cfg.get("pilar_1") or {}).get("source_text_col")
             if p1_col:
-                candidates.append(str(p1_col))
+                explicit_candidates.append(str(p1_col))
             if eval_spec.get("source_text_col"):
-                candidates.append(str(eval_spec["source_text_col"]))
+                explicit_candidates.append(str(eval_spec["source_text_col"]))
         else:
+            mb = getattr(eval_spec, "metric_bindings", None) or {}
+            vf_cols = (mb.get("verbatim_faithfulness") or {}).get("source_text_col") if isinstance(mb, dict) else None
+            if isinstance(vf_cols, list) and vf_cols:
+                explicit_candidates.append(str(vf_cols[0]))
             m_cfg = getattr(eval_spec, "methodology_config", None) or {}
             if isinstance(m_cfg, dict):
                 p1_col = (m_cfg.get("pilar_1") or {}).get("source_text_col")
                 if p1_col:
-                    candidates.append(str(p1_col))
+                    explicit_candidates.append(str(p1_col))
             if getattr(eval_spec, "source_text_col", None):
-                candidates.append(str(eval_spec.source_text_col))
+                explicit_candidates.append(str(eval_spec.source_text_col))
 
-    # 2. Check experiment input_columns
-    if input_columns:
-        for ic in input_columns:
-            if ic and ic not in candidates:
-                candidates.append(ic)
-
-    # 3. Common fallback names
-    for k in ["review_comment", "review_text", "comment", "text", "review", "REVIEW", "texto", "contenido", "input", "prompt"]:
-        if k not in candidates:
-            candidates.append(k)
-
-    for k in candidates:
+    for k in explicit_candidates:
         clean_k = k.strip("{}")
         if clean_k in row_ctx and row_ctx[clean_k]:
             return str(row_ctx[clean_k])
+
+    # 2. Check common review/body text column names (prioritized over short metadata columns)
+    for k in ["review_comment", "review_text", "comment", "text", "review", "REVIEW", "texto", "contenido", "body"]:
+        if k in row_ctx and row_ctx[k]:
+            return str(row_ctx[k])
+
+    # 3. Among experiment input_columns, pick the longest text value (avoids picking enterprise_name/title)
+    if input_columns:
+        input_vals = [
+            str(row_ctx[ic.strip("{}")])
+            for ic in input_columns
+            if ic and ic.strip("{}") in row_ctx and row_ctx[ic.strip("{}")]
+        ]
+        if input_vals:
+            return max(input_vals, key=len)
 
     # 4. Universal fallback: longest string in row_ctx
     str_vals = [str(v) for v in row_ctx.values() if isinstance(v, str) and len(v.strip()) > 15]

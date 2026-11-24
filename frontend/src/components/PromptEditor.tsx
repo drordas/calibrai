@@ -582,20 +582,20 @@ export const PromptEditor: React.FC<PromptEditorProps> = ({
     }
   }, [promptRealText]);
 
-  // Only columns explicitly selected in Step 1 for prompt injection (TEXTO, ID, CONTEXTO)
+  // Only columns explicitly selected in Step 1 for prompt injection (ID, MUESTRA, CONTEXTO)
   // SPEC columns are excluded because they belong to evaluation-spec / Ground Truth, not the prompt.
   const selectedDatasetVars = useMemo(() => {
-    const list: Array<{ name: string; role: "TEXTO" | "ID" | "CONTEXTO" }> = [];
+    const list: Array<{ name: string; role: "ID" | "MUESTRA" | "CONTEXTO" }> = [];
     const seen = new Set<string>();
-    for (const col of inputColumns || []) {
-      if (col && !seen.has(col)) {
-        seen.add(col);
-        list.push({ name: col, role: "TEXTO" });
-      }
-    }
     if (idColumn && !seen.has(idColumn)) {
       seen.add(idColumn);
       list.push({ name: idColumn, role: "ID" });
+    }
+    for (const col of inputColumns || []) {
+      if (col && !seen.has(col)) {
+        seen.add(col);
+        list.push({ name: col, role: "MUESTRA" });
+      }
     }
     for (const col of contextColumns || []) {
       if (col && !seen.has(col)) {
@@ -2377,15 +2377,15 @@ export const PromptEditor: React.FC<PromptEditorProps> = ({
           </div>
           {selectedDatasetVars.length === 0 ? (
             <p className="text-xs text-amber-700 dark:text-amber-400 font-medium">
-              No hay columnas seleccionadas en el Paso 1. Vuelve al Paso 1 y asigna al menos una columna como TEXTO, ID o CONTEXTO.
+              No hay columnas seleccionadas en el Paso 1. Vuelve al Paso 1 y asigna al menos una columna como MUESTRA, ID o CONTEXTO.
             </p>
           ) : (
             <div className="flex flex-wrap gap-1.5">
               {selectedDatasetVars.map(({ name: col, role }) => {
                 const isUsed = validation?.detected_variables.includes(col);
                 const roleBadgeClass =
-                  role === "TEXTO"
-                    ? "bg-primary/15 text-primary"
+                  role === "MUESTRA"
+                    ? "bg-cyan-500/15 text-cyan-600 dark:text-cyan-400"
                     : role === "ID"
                     ? "bg-amber-500/20 text-amber-800 dark:text-amber-300"
                     : "bg-blue-500/15 text-blue-800 dark:text-blue-300";
@@ -3955,7 +3955,7 @@ export const PromptEditor: React.FC<PromptEditorProps> = ({
                           </AlertTitle>
                           <AlertDescription className="ml-2 mt-1 space-y-1.5">
                             <p className="text-[11px] opacity-90">
-                              Solo se permiten variables de ID, CONTEXTO o SPEC del Paso 1:
+                              Solo se permiten variables de MUESTRA, ID o CONTEXTO del Paso 1:
                             </p>
                             {renderMissingVarChips()}
                           </AlertDescription>

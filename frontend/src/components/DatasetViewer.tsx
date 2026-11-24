@@ -305,6 +305,19 @@ export const DatasetViewer: React.FC<DatasetViewerProps> = ({
     }
   };
 
+  // MUESTRA is single-select (one primary column per dataset, like ID).
+  // TODO(future): Allow the user to generate a derived MUESTRA variable by combining 2 or more columns.
+  const toggleMuestraColumn = (col: string) => {
+    if (inputColumns.includes(col)) {
+      setInputColumns([]);
+    } else {
+      setInputColumns([col]);
+      setContextColumns(contextColumns.filter((c) => c !== col));
+      if (setSpecColumns) setSpecColumns(specColumns.filter((c) => c !== col));
+      if (idColumn === col) setIdColumn("");
+    }
+  };
+
   const toggleContextColumn = (col: string) => {
     if (contextColumns.includes(col)) {
       setContextColumns(contextColumns.filter((c) => c !== col));
@@ -882,7 +895,7 @@ export const DatasetViewer: React.FC<DatasetViewerProps> = ({
                 <Info className="w-3.5 h-3.5 text-primary shrink-0" />
                 <span className="font-semibold text-xs">{t("dataset.roleGuideTitle")}</span>
               </div>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-0.5">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5 pt-0.5">
                 <div className="p-2.5 rounded-lg bg-amber-500/10 border border-amber-500/20 space-y-1">
                   <div className="flex items-center gap-1.5 font-bold text-amber-400 text-[11px] uppercase tracking-wider">
                     <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
@@ -890,6 +903,16 @@ export const DatasetViewer: React.FC<DatasetViewerProps> = ({
                   </div>
                   <p className="text-[11px] text-muted-foreground leading-relaxed">
                     {t("dataset.rowIdRoleDesc")}
+                  </p>
+                </div>
+
+                <div className="p-2.5 rounded-lg bg-cyan-500/10 border border-cyan-500/20 space-y-1">
+                  <div className="flex items-center gap-1.5 font-bold text-cyan-500 text-[11px] uppercase tracking-wider">
+                    <span className="w-1.5 h-1.5 rounded-full bg-cyan-500" />
+                    <span>MUESTRA (Dato Principal)</span>
+                  </div>
+                  <p className="text-[11px] text-muted-foreground leading-relaxed">
+                    Campo principal que analiza el modelo y que audita Pilar 1 (ej. reseña, documento o texto).
                   </p>
                 </div>
 
@@ -920,6 +943,7 @@ export const DatasetViewer: React.FC<DatasetViewerProps> = ({
             </div>
             <div className="flex flex-wrap gap-2">
               {selectedDataset.columns.map((col) => {
+                const isMuestra = inputColumns.includes(col.name);
                 const isContext = contextColumns.includes(col.name);
                 const isId = idColumn === col.name;
                 const isSpec = (specColumns || []).includes(col.name);
@@ -930,7 +954,9 @@ export const DatasetViewer: React.FC<DatasetViewerProps> = ({
                   <div
                     key={col.name}
                     className={`group relative flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-medium border transition-all duration-300 ease-out ${
-                      isId
+                      isMuestra
+                        ? "bg-cyan-600/15 text-cyan-700 dark:text-cyan-300 border-cyan-500/30 ring-1 ring-cyan-500/30"
+                        : isId
                         ? "bg-amber-600/15 text-amber-700 dark:text-amber-300 border-amber-500/30 ring-1 ring-amber-500/40"
                         : isContext
                         ? "bg-purple-600/15 text-purple-700 dark:text-purple-300 border-purple-500/30 ring-1 ring-purple-500/30"
@@ -953,22 +979,6 @@ export const DatasetViewer: React.FC<DatasetViewerProps> = ({
                       </Badge>
                     )}
 
-                    {isId && (
-                      <Badge variant="secondary" className="text-[9px] font-bold px-1.5 py-0 bg-amber-500/20 text-amber-400 uppercase">
-                        {t("dataset.roleIdBtn")}
-                      </Badge>
-                    )}
-                    {isContext && (
-                      <Badge variant="secondary" className="text-[9px] font-bold px-1.5 py-0 bg-purple-500/20 text-purple-400 uppercase">
-                        {t("dataset.roleContextBtn")}
-                      </Badge>
-                    )}
-                    {isSpec && (
-                      <Badge variant="secondary" className="text-[9px] font-bold px-1.5 py-0 bg-blue-500/20 text-blue-400 uppercase">
-                        {t("dataset.roleSpecBtn")}
-                      </Badge>
-                    )}
-
                     <div className="flex items-center gap-1 border-l pl-1.5 ml-1 border-current/20">
                       <Button
                         type="button"
@@ -981,6 +991,18 @@ export const DatasetViewer: React.FC<DatasetViewerProps> = ({
                         }`}
                       >
                         {t("dataset.roleIdBtn")}
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        title={isMuestra ? "Desmarcar como MUESTRA" : "Marcar como MUESTRA (dato principal)"}
+                        onClick={() => toggleMuestraColumn(col.name)}
+                        className={`h-5 px-1.5 text-[10px] rounded transition-colors ${
+                          isMuestra ? "bg-cyan-500/30 text-cyan-700 dark:text-cyan-200 font-bold" : "hover:bg-foreground/10"
+                        }`}
+                      >
+                        MUESTRA
                       </Button>
                       <Button
                         type="button"

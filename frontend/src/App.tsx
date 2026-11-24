@@ -87,6 +87,8 @@ import {
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
   Dialog,
   DialogContent,
@@ -220,15 +222,34 @@ export function App() {
     setEditingTemplateId(null);
   };
 
-  const handleSaveTemplateStep = async () => {
+  const [showSaveTemplateModal, setShowSaveTemplateModal] = useState<boolean>(false);
+  const [templateNameInput, setTemplateNameInput] = useState<string>("");
+  const [templateNameError, setTemplateNameError] = useState<string | null>(null);
+
+  const handleSaveTemplateStep = () => {
     if (!selectedDataset) return;
+    setTemplateNameInput(
+      initialLaunchConfig?.name?.trim() ||
+        `Plantilla: ${selectedDataset.name.replace(/\.[^/.]+$/, "")} — ${taskType}`
+    );
+    setTemplateNameError(null);
+    setShowSaveTemplateModal(true);
+  };
+
+  const handleConfirmSaveTemplate = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedDataset) return;
+    const cleanName = templateNameInput.trim();
+    if (!cleanName) {
+      setTemplateNameError("Introduce un nombre para la plantilla.");
+      return;
+    }
     setSavingTemplateStep(true);
     setTemplateSavedFeedback(false);
+    setTemplateNameError(null);
     try {
       const payload = {
-        name:
-          initialLaunchConfig?.name?.trim() ||
-          `Plantilla: ${selectedDataset.name.replace(/\.[^/.]+$/, "")} — ${taskType}`,
+        name: cleanName,
         description: initialLaunchConfig?.description || "",
         dataset_id: selectedDataset.id,
         dataset_name: selectedDataset.name,
@@ -258,10 +279,21 @@ export function App() {
         const created = await createExperiment(payload, false);
         setEditingTemplateId(created.id);
       }
+      setInitialLaunchConfig((prev) => ({
+        ...(prev || {
+          name: cleanName,
+          description: "",
+          executionMode: "sequential",
+          evalSpec: {},
+        }),
+        name: cleanName,
+      }));
+      setShowSaveTemplateModal(false);
       setTemplateSavedFeedback(true);
       setTimeout(() => setTemplateSavedFeedback(false), 3000);
-    } catch (err) {
+    } catch (err: any) {
       console.error("Error saving template step:", err);
+      setTemplateNameError(err?.message || "Error al guardar la plantilla.");
     } finally {
       setSavingTemplateStep(false);
     }
@@ -1759,6 +1791,64 @@ export function App() {
               </div>
             )}
           </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={showSaveTemplateModal} onOpenChange={(open) => !open && setShowSaveTemplateModal(false)}>
+        <DialogContent className="sm:max-w-md bg-card border-border">
+          <DialogHeader>
+            <DialogTitle className="text-sm font-bold flex items-center gap-2">
+              <Save className="w-4 h-4 text-primary" />
+              <span>{editingTemplateId ? "Actualizar Plantilla" : "Guardar Plantilla"}</span>
+            </DialogTitle>
+            <DialogDescription className="text-xs">
+              Introduce el nombre con el que quieres guardar esta plantilla de experimento.
+            </DialogDescription>
+          </DialogHeader>
+
+          <form onSubmit={handleConfirmSaveTemplate} className="space-y-3">
+            <div className="space-y-1.5">
+              <Label htmlFor="save-template-name-input" className="text-xs font-semibold">
+                Nombre de la plantilla
+              </Label>
+              <Input
+                id="save-template-name-input"
+                value={templateNameInput}
+                onChange={(e) => setTemplateNameInput(e.target.value)}
+                placeholder="Ej. Aaker Reviews v3 (Qwen + Gemini)"
+                autoFocus
+                className="text-xs h-9"
+              />
+            </div>
+
+            {templateNameError && (
+              <p className="text-xs text-destructive font-medium">{templateNameError}</p>
+            )}
+
+            <div className="flex justify-end gap-2 pt-1">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setShowSaveTemplateModal(false)}
+              >
+                Cancelar
+              </Button>
+              <Button type="submit" size="sm" disabled={savingTemplateStep} className="gap-1.5">
+                {savingTemplateStep ? (
+                  <>
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    <span>Guardando...</span>
+                  </>
+                ) : (
+                  <>
+                    <Save className="w-3.5 h-3.5" />
+                    <span>Guardar</span>
+                  </>
+                )}
+              </Button>
+            </div>
+          </form>
         </DialogContent>
       </Dialog>
 

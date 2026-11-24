@@ -682,7 +682,7 @@ REGLAS DE EVALUACIÓN:
                 if mv in not_selected_vars:
                     issues.append(PromptValidationIssue(
                         severity="error",
-                        message=f"La variable '{{{mv}}}' no está habilitada para inyectar en el prompt (solo se permiten columnas de TEXTO, ID o CONTEXTO del Paso 1).",
+                        message=f"La variable '{{{mv}}}' no está habilitada para inyectar en el prompt (solo se permiten columnas de MUESTRA, ID o CONTEXTO del Paso 1).",
                         suggestion=f"Si necesitas pasar '{mv}' al modelo, cámbiala a TEXTO o CONTEXTO en el Paso 1 (las columnas SPEC son solo para métricas/evaluación)."
                     ))
                 else:
