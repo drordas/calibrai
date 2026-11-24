@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { DatasetSummary, PaginatedRowsResponse, ShareEntry, ShareUser } from "../types";
+import { DashboardPromptsModal } from "./DashboardPromptsModal";
 import {
   copyDataset,
   deleteDataset,
@@ -7,6 +8,7 @@ import {
   fetchDatasets,
   fetchDatasetShares,
   fetchPaginatedRows,
+  fetchSavedPrompts,
   fetchShareableUsers,
   renameDataset,
   respondToDatasetShare,
@@ -55,6 +57,7 @@ import {
   Database,
   Download,
   Eye,
+  FileCode,
   Loader2,
   Pencil,
   Plus,
@@ -119,6 +122,10 @@ export const DashboardDatasetsModal: React.FC<DashboardDatasetsModalProps> = ({
   // Export state
   const [exportingId, setExportingId] = useState<string | null>(null);
 
+  // Associated prompts per dataset
+  const [promptCountsByDataset, setPromptCountsByDataset] = useState<Record<string, number>>({});
+  const [promptsModalDatasetId, setPromptsModalDatasetId] = useState<string | null>(null);
+
   // Inline rename state
   const [editingDatasetId, setEditingDatasetId] = useState<string | null>(null);
   const [editingName, setEditingName] = useState("");
@@ -129,8 +136,18 @@ export const DashboardDatasetsModal: React.FC<DashboardDatasetsModalProps> = ({
     setLoading(true);
     setError(null);
     try {
-      const data = await fetchDatasets();
+      const [data, savedPrompts] = await Promise.all([
+        fetchDatasets(),
+        fetchSavedPrompts().catch(() => []),
+      ]);
       setDatasets(data);
+      const counts: Record<string, number> = {};
+      for (const sp of savedPrompts) {
+        if (sp.dataset_id) {
+          counts[sp.dataset_id] = (counts[sp.dataset_id] || 0) + 1;
+        }
+      }
+      setPromptCountsByDataset(counts);
     } catch (err: any) {
       setError(err?.message || t("common.error"));
     } finally {
@@ -496,6 +513,30 @@ export const DashboardDatasetsModal: React.FC<DashboardDatasetsModalProps> = ({
                           >
                             <Eye className="w-3.5 h-3.5" />
                           </Button>
+                          {(() => {
+                            const promptCount = promptCountsByDataset[ds.id] || 0;
+                            return promptCount > 0 ? (
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => setPromptsModalDatasetId(ds.id)}
+                                className="h-7 px-1.5 rounded-sm text-muted-foreground hover:text-foreground hover:bg-muted gap-1 text-[10px] font-mono"
+                                title={`Ver prompts asociados (${promptCount})`}
+                              >
+                                <FileCode className="w-3.5 h-3.5" />
+                                <span>{promptCount}</span>
+                              </Button>
+                            ) : (
+                              <span
+                                className="inline-flex items-center justify-center h-7 px-1.5 gap-1 text-[10px] font-mono text-muted-foreground/45 cursor-default select-none"
+                                title="Sin prompts asociados"
+                              >
+                                <FileCode className="w-3.5 h-3.5" />
+                                <span>0</span>
+                              </span>
+                            );
+                          })()}
                           <Button
                             type="button"
                             variant="ghost"
@@ -583,7 +624,7 @@ export const DashboardDatasetsModal: React.FC<DashboardDatasetsModalProps> = ({
           <DialogHeader className="border-b border-border pb-3">
             <DialogTitle className="font-serif text-lg font-bold text-foreground flex items-center gap-2">
               <Database className="w-4 h-4 text-primary" />
-              {t("dashboardDatasets.modalTitle")}
+              <span>Datasets y Prompts</span>
             </DialogTitle>
             <DialogDescription className="text-xs text-muted-foreground">
               {t("dashboardDatasets.modalDesc")}
@@ -1012,6 +1053,15 @@ export const DashboardDatasetsModal: React.FC<DashboardDatasetsModalProps> = ({
           </form>
         </DialogContent>
       </Dialog>
+
+      <DashboardPromptsModal
+        isOpen={Boolean(promptsModalDatasetId)}
+        initialDatasetFilter={promptsModalDatasetId || "all"}
+        onClose={() => {
+          setPromptsModalDatasetId(null);
+          loadDatasets();
+        }}
+      />
     </>
   );
 };

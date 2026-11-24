@@ -427,6 +427,27 @@ class LLMManager:
 
         return False, clean_url, [], 0, f"No se pudo conectar con Ollama en {clean_url}. Asegúrate de que el servicio esté ejecutándose en tu máquina (ej: 'ollama serve')."
 
+    @staticmethod
+    def _parse_int_header(headers: Any, key: str) -> Optional[int]:
+        raw = headers.get(key)
+        if raw is None:
+            return None
+        try:
+            return int(float(str(raw).strip()))
+        except (TypeError, ValueError):
+            return None
+
+    @staticmethod
+    def _classify_cloud_model(model_id: str) -> str:
+        low = model_id.lower()
+        if any(k in low for k in ["imagen", "image", "dall-e", "veo"]):
+            return "imagenes"
+        if any(k in low for k in ["coder", "codex", "code", "o1", "o3", "o4", "deepseek-r1"]):
+            return "programacion"
+        if any(k in low for k in ["gemini-1.5", "gemini-2", "gemini-3", "gpt-4o", "gpt-4.1", "gpt-5", "omni", "vision", "llama-4"]):
+            return "omnimodales"
+        return "texto"
+
     async def discover_remote_models(self, provider: str, api_key: str) -> tuple[bool, List[ModelCatalogItem], Optional[str]]:
         """Validate API Key and discover available models from cloud providers on-demand."""
         prov = provider.lower().strip()
@@ -437,7 +458,7 @@ class LLMManager:
         # 1. OPENAI
         if prov == "openai":
             try:
-                async with httpx.AsyncClient(timeout=8.0) as client:
+                async with httpx.AsyncClient(timeout=12.0) as client:
                     res = await client.get(
                         "https://api.openai.com/v1/models",
                         headers={"Authorization": f"Bearer {key}"}
@@ -448,25 +469,59 @@ class LLMManager:
                         return False, [], f"Error de OpenAI ({res.status_code}): {res.text}"
 
                     data = res.json().get("data", [])
-                    # Filter relevant chat completion models
-                    valid_prefixes = ["gpt-4o", "gpt-4-", "o1", "o3", "gpt-3.5-turbo"]
+                    valid_prefixes = ["gpt-4o", "gpt-4.1", "gpt-4-", "gpt-5", "o1", "o3", "o4", "codex", "gpt-3.5-turbo"]
+                    skip_tokens = ["realtime", "audio", "transcribe", "tts", "search", "diarize"]
                     matched_ids = [
-                        m["id"] for m in data 
-                        if any(m["id"].startswith(p) for p in valid_prefixes) and "realtime" not in m["id"] and "audio" not in m["id"]
+                        m["id"] for m in data
+                        if any(m["id"].startswith(p) for p in valid_prefixes)
+                        and not any(tok in m["id"].lower() for tok in skip_tokens)
                     ]
 
-                    # Standard curated order
-                    priority = ["gpt-4o-mini", "gpt-4o", "o1-mini", "gpt-4-turbo", "gpt-3.5-turbo"]
+                    priority = ["gpt-4o-mini", "gpt-4o", "gpt-4.1-mini", "gpt-4.1", "o3-mini", "o1-mini", "gpt-4-turbo", "gpt-3.5-turbo"]
                     sorted_ids = sorted(
                         matched_ids,
                         key=lambda x: priority.index(x) if x in priority else 99
                     )
 
+                    # Probe accessibility in parallel (filters models not enabled for the key's tier/project)
+                    sem = asyncio.Semaphore(5)
+
+                    async def _probe_openai_model(mid: str) -> tuple[str, bool, Optional[int], Optional[int]]:
+                        async with sem:
+                            try:
+                                low = mid.lower()
+                                token_param = "max_completion_tokens" if any(low.startswith(p) for p in ["o1", "o3", "o4", "gpt-5"]) else "max_tokens"
+                                probe_res = await client.post(
+                                    "https://api.openai.com/v1/chat/completions",
+                                    headers={"Authorization": f"Bearer {key}"},
+                                    json={
+                                        "model": mid,
+                                        "messages": [{"role": "user", "content": "ok"}],
+                                        token_param: 1,
+                                    },
+                                    timeout=6.0,
+                                )
+                                rpm = self._parse_int_header(probe_res.headers, "x-ratelimit-limit-requests")
+                                tpm = self._parse_int_header(probe_res.headers, "x-ratelimit-limit-tokens")
+                                if probe_res.status_code == 200:
+                                    return mid, True, rpm, tpm
+                                if probe_res.status_code == 429:
+                                    body_low = probe_res.text.lower()
+                                    if "insufficient_quota" in body_low:
+                                        return mid, False, None, None
+                                    return mid, True, rpm, tpm
+                                return mid, False, None, None
+                            except Exception:
+                                return mid, False, None, None
+
+                    probed = await asyncio.gather(*[_probe_openai_model(mid) for mid in sorted_ids])
+                    accessible = [(mid, rpm, tpm) for mid, ok, rpm, tpm in probed if ok]
+
                     items: List[ModelCatalogItem] = []
-                    for mid in sorted_ids:
-                        is_mini = "mini" in mid
-                        cost_in = 0.15 if is_mini else (1.10 if "o1" in mid else 2.50)
-                        cost_out = 0.60 if is_mini else (4.40 if "o1" in mid else 10.00)
+                    for mid, rpm, tpm in accessible:
+                        is_mini = "mini" in mid or "nano" in mid
+                        cost_in = 0.15 if is_mini else (1.10 if mid.startswith(("o1", "o3", "o4")) else 2.50)
+                        cost_out = 0.60 if is_mini else (4.40 if mid.startswith(("o1", "o3", "o4")) else 10.00)
                         items.append(
                             ModelCatalogItem(
                                 id=f"openai/{mid}",
@@ -477,7 +532,11 @@ class LLMManager:
                                 context_window=128000,
                                 cost_per_million_input=cost_in,
                                 cost_per_million_output=cost_out,
-                                description=f"Modelo OpenAI verificado en tu cuenta con API Key activa."
+                                category=self._classify_cloud_model(mid),
+                                billing_tier="paid",
+                                rpm_limit=rpm,
+                                tpm_limit=tpm,
+                                description=f"Modelo OpenAI accesible con tu API Key activa."
                             )
                         )
                     return True, items, None
@@ -487,7 +546,7 @@ class LLMManager:
         # 2. GOOGLE GEMINI
         elif prov == "gemini":
             try:
-                async with httpx.AsyncClient(timeout=8.0) as client:
+                async with httpx.AsyncClient(timeout=12.0) as client:
                     res = await client.get(
                         f"https://generativelanguage.googleapis.com/v1beta/models?key={key}"
                     )
@@ -497,25 +556,74 @@ class LLMManager:
                         return False, [], f"Error de Google Gemini ({res.status_code}): {res.text}"
 
                     raw_models = res.json().get("models", [])
-                    items: List[ModelCatalogItem] = []
+                    skip_tokens = [
+                        "embedding", "aqa", "bisect", "tts", "robotics",
+                        "computer-use", "native-audio", "live", "veo",
+                    ]
+                    candidates = []
                     for m in raw_models:
                         name = m.get("name", "").replace("models/", "")
                         methods = m.get("supportedGenerationMethods", [])
-                        if "generateContent" in methods and "gemini" in name:
-                            is_flash = "flash" in name
-                            items.append(
-                                ModelCatalogItem(
-                                    id=f"gemini/{name}",
-                                    name=m.get("displayName", name),
-                                    provider="gemini",
-                                    is_local=False,
-                                    is_available=True,
-                                    context_window=m.get("inputTokenLimit", 1000000),
-                                    cost_per_million_input=0.075 if is_flash else 1.25,
-                                    cost_per_million_output=0.30 if is_flash else 5.00,
-                                    description=m.get("description", "Modelo multimodal Google Gemini verificado.")
+                        if "generateContent" in methods and ("gemini" in name or "imagen" in name):
+                            if not any(tok in name.lower() for tok in skip_tokens):
+                                candidates.append((name, m))
+
+                    # Probe each candidate in parallel to verify actual plan/tier accessibility
+                    sem = asyncio.Semaphore(5)
+
+                    async def _probe_gemini_model(model_name: str, meta: dict):
+                        low_name = model_name.lower()
+                        # Image-generation models don't accept plain text-only generateContent without image config
+                        if "imagen" in low_name or "image" in low_name:
+                            return (model_name, meta, True, False)
+                        async with sem:
+                            try:
+                                probe_res = await client.post(
+                                    f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={key}",
+                                    json={
+                                        "contents": [{"parts": [{"text": "ok"}]}],
+                                        "generationConfig": {"maxOutputTokens": 1},
+                                    },
+                                    timeout=6.0,
                                 )
+                                if probe_res.status_code == 200:
+                                    return (model_name, meta, True, False)
+                                if probe_res.status_code == 429:
+                                    body_low = probe_res.text.lower()
+                                    is_free_signal = "freetier" in body_low or "free_tier" in body_low
+                                    if "limit: 0" in body_low or "\"limit\": 0" in body_low or (is_free_signal and "0" in body_low):
+                                        return (model_name, meta, False, is_free_signal)
+                                    # Transient RPM rate limit means the model IS accessible on this key
+                                    return (model_name, meta, True, is_free_signal)
+                                return (model_name, meta, False, False)
+                            except Exception:
+                                return (model_name, meta, False, False)
+
+                    probed = await asyncio.gather(
+                        *[_probe_gemini_model(name, meta) for name, meta in candidates]
+                    )
+                    detected_free_tier = any(free_sig for _, _, _, free_sig in probed)
+
+                    items: List[ModelCatalogItem] = []
+                    for name, m, is_accessible, _ in probed:
+                        if not is_accessible:
+                            continue
+                        is_flash = "flash" in name
+                        items.append(
+                            ModelCatalogItem(
+                                id=f"gemini/{name}",
+                                name=m.get("displayName", name),
+                                provider="gemini",
+                                is_local=False,
+                                is_available=True,
+                                context_window=m.get("inputTokenLimit", 1000000),
+                                cost_per_million_input=0.075 if is_flash else 1.25,
+                                cost_per_million_output=0.30 if is_flash else 5.00,
+                                category=self._classify_cloud_model(name),
+                                billing_tier="free" if detected_free_tier else None,
+                                description=m.get("description", "Modelo Google Gemini accesible con tu API Key.")
                             )
+                        )
                     # Sort so flash & 1.5/2.5 are top
                     items.sort(key=lambda x: 0 if "flash" in x.id else (1 if "pro" in x.id else 2))
                     return True, items, None
@@ -552,6 +660,7 @@ class LLMManager:
                             context_window=ctx,
                             cost_per_million_input=cin,
                             cost_per_million_output=cout,
+                            category=self._classify_cloud_model(cid),
                             description=cdesc
                         )
                         for cid, cname, cin, cout, ctx, cdesc in curated
@@ -563,7 +672,7 @@ class LLMManager:
         # 4. GROQ
         elif prov == "groq":
             try:
-                async with httpx.AsyncClient(timeout=8.0) as client:
+                async with httpx.AsyncClient(timeout=12.0) as client:
                     res = await client.get(
                         "https://api.groq.com/openai/v1/models",
                         headers={"Authorization": f"Bearer {key}"}
@@ -574,23 +683,65 @@ class LLMManager:
                         return False, [], f"Error de Groq ({res.status_code}): {res.text}"
 
                     data = res.json().get("data", [])
-                    items: List[ModelCatalogItem] = []
-                    for m in data:
-                        mid = m["id"]
-                        if not any(k in mid for k in ["whisper", "guard"]):
-                            items.append(
-                                ModelCatalogItem(
-                                    id=f"groq/{mid}",
-                                    name=f"Groq {mid}",
-                                    provider="groq",
-                                    is_local=False,
-                                    is_available=True,
-                                    context_window=m.get("context_window", 32768) or 32768,
-                                    cost_per_million_input=0.05,
-                                    cost_per_million_output=0.08,
-                                    description="Inferencia ultrarrápida en chips LPU de Groq."
+                    skip_groq = ["whisper", "guard", "tts", "orpheus"]
+                    candidates = [
+                        m for m in data
+                        if not any(k in m["id"].lower() for k in skip_groq)
+                    ]
+
+                    sem = asyncio.Semaphore(5)
+
+                    async def _probe_groq_model(m_obj: dict) -> tuple[dict, bool, Optional[int], Optional[int]]:
+                        mid = m_obj["id"]
+                        async with sem:
+                            try:
+                                probe_res = await client.post(
+                                    "https://api.groq.com/openai/v1/chat/completions",
+                                    headers={"Authorization": f"Bearer {key}"},
+                                    json={
+                                        "model": mid,
+                                        "messages": [{"role": "user", "content": "ok"}],
+                                        "max_tokens": 1,
+                                    },
+                                    timeout=6.0,
                                 )
+                                rpm = self._parse_int_header(probe_res.headers, "x-ratelimit-limit-requests")
+                                tpm = self._parse_int_header(probe_res.headers, "x-ratelimit-limit-tokens")
+                                if probe_res.status_code == 200:
+                                    return m_obj, True, rpm, tpm
+                                if probe_res.status_code == 429:
+                                    body_low = probe_res.text.lower()
+                                    if "insufficient_quota" in body_low:
+                                        return m_obj, False, None, None
+                                    return m_obj, True, rpm, tpm
+                                return m_obj, False, None, None
+                            except Exception:
+                                return m_obj, False, None, None
+
+                    probed = await asyncio.gather(*[_probe_groq_model(m) for m in candidates])
+
+                    items: List[ModelCatalogItem] = []
+                    for m, ok, rpm, tpm in probed:
+                        if not ok:
+                            continue
+                        mid = m["id"]
+                        items.append(
+                            ModelCatalogItem(
+                                id=f"groq/{mid}",
+                                name=f"Groq {mid}",
+                                provider="groq",
+                                is_local=False,
+                                is_available=True,
+                                context_window=m.get("context_window", 32768) or 32768,
+                                cost_per_million_input=0.05,
+                                cost_per_million_output=0.08,
+                                category=self._classify_cloud_model(mid),
+                                billing_tier="free" if (rpm is not None and rpm <= 60) else None,
+                                rpm_limit=rpm,
+                                tpm_limit=tpm,
+                                description="Inferencia ultrarrápida accesible en chips LPU de Groq."
                             )
+                        )
                     return True, items, None
             except Exception as e:
                 return False, [], f"Error al conectar con Groq: {str(e)}"

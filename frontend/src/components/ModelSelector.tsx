@@ -31,6 +31,12 @@ import {
   AlertTriangle,
   Zap,
   Thermometer,
+  Save,
+  FolderOpen,
+  Share2,
+  Lock,
+  Users,
+  X,
 } from "lucide-react";
 import {
   discoverLocalModels,
@@ -38,6 +44,15 @@ import {
   updateUserConfig,
   detectSystemVram,
   calculateContextSize,
+  fetchConnectionProfiles,
+  saveConnectionProfile,
+  deleteConnectionProfile,
+  fetchProfileShares,
+  shareConnectionProfile,
+  revokeProfileShare,
+  fetchShareableUsers,
+  ConnectionProfileItem,
+  ConnectionProfileShareItem,
 } from "../services/api";
 import {
   Card,
@@ -52,6 +67,22 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 
 interface ModelSelectorProps {
   availableModels: ModelCatalogItem[];
@@ -149,16 +180,271 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
   const [localError, setLocalError] = useState<string | null>(null);
   const [localSuccessMsg, setLocalSuccessMsg] = useState<string | null>(null);
 
+  // Saved Connection Profiles (Ollama URLs & Cloud API Keys)
+  const [connectionProfiles, setConnectionProfiles] = useState<ConnectionProfileItem[]>([]);
+  const [activeLocalProfile, setActiveLocalProfile] = useState<ConnectionProfileItem | null>(null);
+  const [activeCloudProfiles, setActiveCloudProfiles] = useState<Record<string, ConnectionProfileItem | null>>({});
+  const [saveProfileModal, setSaveProfileModal] = useState<{
+    open: boolean;
+    provider: string;
+    value: string;
+  } | null>(null);
+  const [profileNameInput, setProfileNameInput] = useState<string>("");
+  const [isSavingProfile, setIsSavingProfile] = useState<boolean>(false);
+  const [profileError, setProfileError] = useState<string | null>(null);
+
+  // Share Connection Profile Modal states
+  const [shareProfileTarget, setShareProfileTarget] = useState<ConnectionProfileItem | null>(null);
+  const [shareableUsers, setShareableUsers] = useState<Array<{ id: number; username: string; full_name?: string | null }>>([]);
+  const [profileShares, setProfileShares] = useState<ConnectionProfileShareItem[]>([]);
+  const [shareTargetUserId, setShareTargetUserId] = useState<number | "">("");
+  const [shareMaxVramGb, setShareMaxVramGb] = useState<string>("");
+  const [isSharingProfile, setIsSharingProfile] = useState<boolean>(false);
+  const [shareError, setShareError] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetchConnectionProfiles()
+      .then((rows) => {
+        setConnectionProfiles(rows);
+        const savedOllamaPid = apiKeys["ollama_profile_id"];
+        if (savedOllamaPid) {
+          const match = rows.find((r) => String(r.id) === String(savedOllamaPid) && r.provider === "ollama");
+          if (match) setActiveLocalProfile(match);
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  const handleOpenSaveProfile = (provider: string, value: string) => {
+    setProfileNameInput("");
+    setProfileError(null);
+    setSaveProfileModal({ open: true, provider, value: value.trim() });
+  };
+
+  const handleConfirmSaveProfile = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!saveProfileModal) return;
+    const cleanName = profileNameInput.trim();
+    if (!cleanName) {
+      setProfileError("Introduce un nombre para el perfil.");
+      return;
+    }
+    if (saveProfileModal.provider === "ollama" && (systemVramGb === null || systemVramGb <= 0)) {
+      setProfileError("Debes seleccionar la VRAM del sistema (GPU) antes de guardar un perfil local.");
+      return;
+    }
+    setIsSavingProfile(true);
+    setProfileError(null);
+    try {
+      const created = await saveConnectionProfile({
+        name: cleanName,
+        provider: saveProfileModal.provider,
+        ollama_url: saveProfileModal.provider === "ollama" ? saveProfileModal.value : "",
+        api_key: saveProfileModal.provider === "ollama" ? "" : saveProfileModal.value,
+        vram_gb: saveProfileModal.provider === "ollama" ? systemVramGb : null,
+      });
+      setConnectionProfiles((prev) => [created, ...prev]);
+      setSaveProfileModal(null);
+      setProfileNameInput("");
+    } catch (err: any) {
+      setProfileError(err.message || "Error al guardar el perfil.");
+    } finally {
+      setIsSavingProfile(false);
+    }
+  };
+
+  const handleDeleteProfile = async (profileId: number) => {
+    try {
+      await deleteConnectionProfile(profileId);
+      setConnectionProfiles((prev) => prev.filter((p) => p.id !== profileId));
+      if (activeLocalProfile?.id === profileId) setActiveLocalProfile(null);
+    } catch (err) {
+      console.error("Error deleting connection profile:", err);
+    }
+  };
+
+  const handleOpenShareProfile = async (profile: ConnectionProfileItem) => {
+    setShareProfileTarget(profile);
+    setShareTargetUserId("");
+    setShareMaxVramGb(profile.provider === "ollama" && profile.vram_gb ? String(profile.vram_gb) : "");
+    setShareError(null);
+    try {
+      const [users, shares] = await Promise.all([
+        fetchShareableUsers(),
+        fetchProfileShares(profile.id),
+      ]);
+      setShareableUsers(users);
+      setProfileShares(shares);
+    } catch (err: any) {
+      setShareError(err.message || "Error al cargar usuarios o comparticiones.");
+    }
+  };
+
+  const handleConfirmShareProfile = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!shareProfileTarget || !shareTargetUserId) return;
+    setShareError(null);
+    let maxVram: number | null = null;
+    if (shareProfileTarget.provider === "ollama") {
+      const parsed = parseFloat(shareMaxVramGb);
+      const ownerVram = shareProfileTarget.vram_gb || 0;
+      if (isNaN(parsed) || parsed <= 0 || parsed > ownerVram) {
+        setShareError(`La VRAM compartida debe estar entre 1 y ${ownerVram} GB.`);
+        return;
+      }
+      maxVram = parsed;
+    }
+    setIsSharingProfile(true);
+    try {
+      const created = await shareConnectionProfile(shareProfileTarget.id, {
+        target_user_id: Number(shareTargetUserId),
+        max_vram_gb: maxVram,
+      });
+      setProfileShares((prev) => [
+        created,
+        ...prev.filter((s) => s.target_user_id !== created.target_user_id),
+      ]);
+      setShareTargetUserId("");
+    } catch (err: any) {
+      setShareError(err.message || "Error al compartir el perfil.");
+    } finally {
+      setIsSharingProfile(false);
+    }
+  };
+
+  const handleRevokeShare = async (shareId: number) => {
+    if (!shareProfileTarget) return;
+    try {
+      await revokeProfileShare(shareProfileTarget.id, shareId);
+      setProfileShares((prev) => prev.filter((s) => s.id !== shareId));
+    } catch (err: any) {
+      setShareError(err.message || "Error al revocar el acceso.");
+    }
+  };
+
+  const renderProfileControls = (
+    provider: string,
+    currentValue: string,
+    onLoadProfile: (profile: ConnectionProfileItem) => void
+  ) => {
+    const matchingProfiles = connectionProfiles.filter(
+      (p) => p.provider.toLowerCase() === provider.toLowerCase()
+    );
+    return (
+      <div className="flex items-center gap-1.5 flex-wrap">
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-7 px-2.5 text-[11px] font-medium gap-1.5 bg-background/80 hover:bg-muted border-border"
+            >
+              <FolderOpen className="w-3 h-3 text-primary" />
+              <span>Cargar perfil ({matchingProfiles.length})</span>
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-80">
+            <DropdownMenuLabel className="text-[11px] text-muted-foreground font-normal">
+              Perfiles guardados ({provider === "ollama" ? "Ollama" : provider.toUpperCase()})
+            </DropdownMenuLabel>
+            <DropdownMenuSeparator />
+            {matchingProfiles.length === 0 ? (
+              <div className="px-2.5 py-2 text-[11px] text-muted-foreground">
+                No hay perfiles guardados para {provider === "ollama" ? "Ollama" : provider.toUpperCase()}.
+              </div>
+            ) : (
+              matchingProfiles.map((p) => (
+                <DropdownMenuItem
+                  key={p.id}
+                  onClick={() => onLoadProfile(p)}
+                  className="flex items-center justify-between gap-2 cursor-pointer"
+                >
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-xs font-semibold truncate">{p.name}</span>
+                      {p.is_shared && (
+                        <Badge variant="outline" className="text-[9px] py-0 px-1 bg-primary/10 text-primary border-primary/30 shrink-0">
+                          @{p.owner_username}
+                        </Badge>
+                      )}
+                    </div>
+                    <div className="text-[10px] font-mono text-muted-foreground truncate">
+                      {p.is_shared
+                        ? p.provider === "ollama"
+                          ? `URL oculta · Máx ${p.max_vram_gb ?? "?"} GB VRAM`
+                          : "API-Key oculta (compartido)"
+                        : p.provider === "ollama"
+                        ? `${p.ollama_url} · ${p.vram_gb ?? "?"} GB VRAM`
+                        : p.api_key.length > 8
+                        ? `${p.api_key.slice(0, 4)}••••${p.api_key.slice(-4)}`
+                        : "••••••••"}
+                    </div>
+                  </div>
+                  {!p.is_shared && (
+                    <div className="flex items-center gap-0.5 shrink-0">
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleOpenShareProfile(p);
+                        }}
+                        title="Compartir perfil"
+                        aria-label={`Compartir perfil ${p.name}`}
+                        className="p-1 rounded hover:bg-primary/15 text-muted-foreground hover:text-primary transition-colors"
+                      >
+                        <Share2 className="w-3 h-3" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleDeleteProfile(p.id);
+                        }}
+                        title="Eliminar perfil"
+                        aria-label={`Eliminar perfil ${p.name}`}
+                        className="p-1 rounded hover:bg-destructive/15 text-muted-foreground hover:text-destructive transition-colors"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                      </button>
+                    </div>
+                  )}
+                </DropdownMenuItem>
+              ))
+            )}
+          </DropdownMenuContent>
+        </DropdownMenu>
+
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          disabled={!currentValue.trim()}
+          onClick={() => handleOpenSaveProfile(provider, currentValue)}
+          className="h-7 px-2.5 text-[11px] font-medium gap-1.5 bg-background/80 hover:bg-muted border-border"
+          title={
+            provider === "ollama"
+              ? "Guardar esta URL y VRAM como perfil de conexión"
+              : "Guardar esta API-Key como perfil de conexión"
+          }
+        >
+          <Save className="w-3 h-3 text-primary" />
+          <span>Guardar perfil</span>
+        </Button>
+      </div>
+    );
+  };
+
   // Preset VRAM sizes (GB)
   const VRAM_PRESETS = [6, 8, 12, 16, 24, 32, 48, 80];
 
-  // VRAM & Context Sizing States
-  const [systemVramGb, setSystemVramGb] = useState<number>(() => {
+  // VRAM & Context Sizing States (starts null until selected or autodetected)
+  const [systemVramGb, setSystemVramGb] = useState<number | null>(() => {
     const saved = apiKeys["system_vram_gb"];
-    if (saved && !isNaN(parseFloat(saved))) {
+    if (saved && !isNaN(parseFloat(saved)) && parseFloat(saved) > 0) {
       return parseFloat(saved);
     }
-    return 16;
+    return null;
   });
   const [isDetectingVram, setIsDetectingVram] = useState<boolean>(false);
   const [detectedVramInfo, setDetectedVramInfo] = useState<DetectVramResponse | null>(null);
@@ -200,15 +486,20 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
   }, [selectedDataset?.id, inputTextColumns, contextColumns, template, systemPrompt]);
 
   // 2. Autodetect System VRAM
-  const handleDetectVram = async (targetUrl?: string) => {
+  const handleDetectVram = async (targetUrl?: string, profileId?: number) => {
     setIsDetectingVram(true);
     try {
-      const urlToUse = targetUrl || ollamaUrl;
-      const res = await detectSystemVram(urlToUse);
+      const pid = profileId ?? (activeLocalProfile?.is_shared ? activeLocalProfile.id : undefined);
+      const urlToUse = pid ? undefined : (targetUrl || ollamaUrl);
+      const res = await detectSystemVram(urlToUse, pid);
       setDetectedVramInfo(res);
       if (res.detected && res.vram_gb && res.vram_gb > 0) {
-        setSystemVramGb(res.vram_gb);
-        const updated = { ...apiKeys, system_vram_gb: String(res.vram_gb) };
+        const cap = activeLocalProfile?.is_shared && activeLocalProfile.max_vram_gb
+          ? activeLocalProfile.max_vram_gb
+          : null;
+        const finalVram = cap !== null ? Math.min(res.vram_gb, cap) : res.vram_gb;
+        setSystemVramGb(finalVram);
+        const updated = { ...apiKeys, system_vram_gb: String(finalVram) };
         setApiKeys(updated);
         updateUserConfig({ api_keys: updated }).catch(() => {});
       }
@@ -224,11 +515,15 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
     }
   };
 
-  // 3. Set VRAM manually or via preset
+  // 3. Set VRAM manually or via preset (respecting shared profile cap)
   const handleSetVram = (vram: number) => {
     if (vram > 0) {
-      setSystemVramGb(vram);
-      const updated = { ...apiKeys, system_vram_gb: String(vram) };
+      const cap = activeLocalProfile?.is_shared && activeLocalProfile.max_vram_gb
+        ? activeLocalProfile.max_vram_gb
+        : null;
+      const clamped = cap !== null ? Math.min(vram, cap) : vram;
+      setSystemVramGb(clamped);
+      const updated = { ...apiKeys, system_vram_gb: String(clamped) };
       setApiKeys(updated);
       updateUserConfig({ api_keys: updated }).catch(() => {});
     }
@@ -267,7 +562,7 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
     const kvCacheGb = contextTokens * paramFactor * 0.000035;
     const overheadGb = 0.6;
     const totalVramGb = Math.round((weightsGb + kvCacheGb + overheadGb) * 10) / 10;
-    const fitsInVram = totalVramGb <= systemVramGb;
+    const fitsInVram = systemVramGb !== null ? totalVramGb <= systemVramGb : true;
 
     return {
       weightsGb: Math.round(weightsGb * 10) / 10,
@@ -292,6 +587,7 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
   const [showKeyText, setShowKeyText] = useState<boolean>(false);
   const [discoveringRemote, setDiscoveringRemote] = useState<boolean>(false);
   const [remoteDiscoveredModels, setRemoteDiscoveredModels] = useState<ModelCatalogItem[]>([]);
+  const [remoteCategoryFilter, setRemoteCategoryFilter] = useState<string>("all");
   const [remoteError, setRemoteError] = useState<string | null>(null);
   const [remoteSuccessMsg, setRemoteSuccessMsg] = useState<string | null>(null);
 
@@ -309,33 +605,42 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
     setRemoteError(null);
     setRemoteSuccessMsg(null);
     setRemoteDiscoveredModels([]);
+    setRemoteCategoryFilter("all");
   };
 
   // 1. Discover Local Models
   const handleDiscoverLocal = async () => {
-    if (!ollamaUrl.trim()) {
-      setLocalError("Introduce la URL del servidor Ollama antes de detectar modelos.");
+    const isSharedLocal = Boolean(activeLocalProfile?.is_shared);
+    if (!isSharedLocal && !ollamaUrl.trim()) {
+      setLocalError("Introduce la URL del servidor Ollama o carga un perfil antes de detectar modelos.");
       return;
     }
     setDiscoveringLocal(true);
     setLocalError(null);
     setLocalSuccessMsg(null);
     try {
-      const res = await discoverLocalModels(ollamaUrl);
+      const res = isSharedLocal && activeLocalProfile
+        ? await discoverLocalModels(undefined, activeLocalProfile.id)
+        : await discoverLocalModels(ollamaUrl);
       if (res.is_online && res.models.length > 0) {
         setLocalDiscoveredModels(res.models);
         const excludedNote = (res.excluded_remote_models && res.excluded_remote_models > 0)
           ? ` (${res.excluded_remote_models} modelos remotos/cloud tipo proxy fueron excluidos para asegurar ejecución estrictamente local)`
           : "";
-        setLocalSuccessMsg(`Servidor conectado en ${res.resolved_url}. Se encontraron ${res.models.length} modelos instalados localmente en disco${excludedNote}.`);
-        
-        // Save verified ollama URL
-        const updatedKeys = { ...apiKeys, ollama_url: res.resolved_url || ollamaUrl };
-        setApiKeys(updatedKeys);
-        updateUserConfig({ ollama_url: res.resolved_url || ollamaUrl, api_keys: updatedKeys }).catch(() => {});
+        setLocalSuccessMsg(
+          isSharedLocal
+            ? `Perfil compartido conectado. Se encontraron ${res.models.length} modelos disponibles${excludedNote}.`
+            : `Servidor conectado en ${res.resolved_url}. Se encontraron ${res.models.length} modelos instalados localmente en disco${excludedNote}.`
+        );
 
-        // Autodetect VRAM for this host
-        handleDetectVram(res.resolved_url || ollamaUrl);
+        if (!isSharedLocal) {
+          const updatedKeys = { ...apiKeys, ollama_url: res.resolved_url || ollamaUrl };
+          setApiKeys(updatedKeys);
+          updateUserConfig({ ollama_url: res.resolved_url || ollamaUrl, api_keys: updatedKeys }).catch(() => {});
+          handleDetectVram(res.resolved_url || ollamaUrl);
+        } else if (activeLocalProfile) {
+          handleDetectVram(undefined, activeLocalProfile.id);
+        }
 
         // Merge into availableModels if not present, pruning non-local ollama items
         if (setAvailableModels) {
@@ -365,7 +670,9 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
 
   // 2. Discover Remote Models
   const handleDiscoverRemote = async () => {
-    if (!currentKeyInput.trim()) {
+    const sharedCloud = activeCloudProfiles[selectedCloudProvider];
+    const isSharedCloud = Boolean(sharedCloud?.is_shared);
+    if (!isSharedCloud && !currentKeyInput.trim()) {
       setRemoteError(t("models.enterApiKeyPrompt", { provider: selectedCloudProvider.toUpperCase() }));
       return;
     }
@@ -374,15 +681,19 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
     setRemoteError(null);
     setRemoteSuccessMsg(null);
     try {
-      const res = await discoverRemoteModels(selectedCloudProvider, currentKeyInput.trim());
+      const res = isSharedCloud && sharedCloud
+        ? await discoverRemoteModels(selectedCloudProvider, "", sharedCloud.id)
+        : await discoverRemoteModels(selectedCloudProvider, currentKeyInput.trim());
       if (res.is_valid && res.models.length > 0) {
         setRemoteDiscoveredModels(res.models);
+        setRemoteCategoryFilter("all");
         setRemoteSuccessMsg(t("models.credentialsVerifiedMsg", { provider: selectedCloudProvider.toUpperCase(), count: res.models.length }));
-        
-        // Save the valid key in state and user configuration
-        const updatedKeys = { ...apiKeys, [selectedCloudProvider]: currentKeyInput.trim() };
-        setApiKeys(updatedKeys);
-        updateUserConfig({ api_keys: updatedKeys }).catch(() => {});
+
+        if (!isSharedCloud) {
+          const updatedKeys = { ...apiKeys, [selectedCloudProvider]: currentKeyInput.trim() };
+          setApiKeys(updatedKeys);
+          updateUserConfig({ api_keys: updatedKeys }).catch(() => {});
+        }
 
         // Merge into availableModels
         if (setAvailableModels) {
@@ -535,7 +846,7 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
           estimatedVramWithBatch: vramReq.totalVramGb,
         };
       }
-      const vramFree = Math.max(0, systemVramGb - vramReq.weightsGb - vramReq.overheadGb);
+      const vramFree = Math.max(0, (systemVramGb ?? 16) - vramReq.weightsGb - vramReq.overheadGb);
       const kvPerStream = Math.max(0.01, vramReq.kvCacheGb);
       const modelBatchLimit = Math.max(1, Math.floor(vramFree / kvPerStream));
       if (modelBatchLimit < minBatchCap) {
@@ -727,7 +1038,7 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
               <span>1 ({t("models.strictSequential")})</span>
               {estimatedVramWithBatch && (
                 <span className="text-emerald-400/90 font-semibold">
-                  {t("models.vramWithBatch", { est: estimatedVramWithBatch, total: systemVramGb })}
+                  {t("models.vramWithBatch", { est: estimatedVramWithBatch, total: systemVramGb ?? "?" })}
                 </span>
               )}
               <span>{t("models.maxSafeFlows", { count: maxBatchSize })}</span>
@@ -738,7 +1049,7 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
             <p className="text-[11px] text-muted-foreground flex items-center gap-1.5">
               <Sparkles className="w-3.5 h-3.5 text-amber-400 shrink-0" />
               <span>
-                {t("models.speedupBatch", { speedup: batchSize, rows: batchSize, vram: systemVramGb })}
+                {t("models.speedupBatch", { speedup: batchSize, rows: batchSize, vram: systemVramGb ?? "?" })}
               </span>
             </p>
           ) : (
@@ -939,7 +1250,7 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
                       <div className="flex items-start gap-1.5 p-2 rounded-lg bg-destructive/20 border border-destructive/30 text-[11px] text-destructive font-semibold">
                         <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
                         <span>
-                          {t("models.exceedsVramWarning", { req: vramReq.totalVramGb, avail: systemVramGb })}
+                          {t("models.exceedsVramWarning", { req: vramReq.totalVramGb, avail: systemVramGb ?? 0 })}
                         </span>
                       </div>
                     )}
@@ -1104,14 +1415,41 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
               </div>
 
               <div className="flex flex-col sm:flex-row items-center gap-2.5">
-                <Input
-                  id="ollama-url-input"
-                  type="text"
-                  value={ollamaUrl}
-                  onChange={(e) => setOllamaUrl(e.target.value)}
-                  placeholder="http://localhost:11434"
-                  className="font-mono text-xs bg-background/80 h-9"
-                />
+                {activeLocalProfile?.is_shared ? (
+                  <div className="w-full h-9 px-3 rounded-md border border-primary/30 bg-primary/10 flex items-center justify-between gap-2 text-xs">
+                    <span className="flex items-center gap-2 text-foreground font-medium truncate">
+                      <Lock className="w-3.5 h-3.5 text-primary shrink-0" />
+                      <span className="truncate">
+                        Perfil compartido: <strong>{activeLocalProfile.name}</strong> (@{activeLocalProfile.owner_username}) · URL oculta
+                      </span>
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setActiveLocalProfile(null);
+                        const updatedKeys = { ...apiKeys, ollama_profile_id: "" };
+                        setApiKeys(updatedKeys);
+                        updateUserConfig({ api_keys: updatedKeys }).catch(() => {});
+                      }}
+                      title="Desconectar perfil compartido"
+                      className="p-1 rounded hover:bg-primary/20 text-muted-foreground hover:text-foreground shrink-0 cursor-pointer"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                ) : (
+                  <Input
+                    id="ollama-url-input"
+                    type="text"
+                    value={ollamaUrl}
+                    onChange={(e) => {
+                      setOllamaUrl(e.target.value);
+                      if (activeLocalProfile) setActiveLocalProfile(null);
+                    }}
+                    placeholder="http://localhost:11434"
+                    className="font-mono text-xs bg-background/80 h-9"
+                  />
+                )}
                 <Button
                   type="button"
                   onClick={handleDiscoverLocal}
@@ -1213,11 +1551,23 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
                     </span>
                   </div>
                   <div className="flex items-center gap-2">
+                    {activeLocalProfile?.is_shared && activeLocalProfile.max_vram_gb != null && (
+                      <Badge
+                        variant="outline"
+                        className="font-mono text-[10px] bg-amber-500/10 text-amber-400 border-amber-500/30"
+                      >
+                        Máx: {activeLocalProfile.max_vram_gb} GB
+                      </Badge>
+                    )}
                     <Badge
                       variant="outline"
-                      className="font-mono text-xs font-bold bg-emerald-500/10 text-emerald-400 border-emerald-500/30"
+                      className={`font-mono text-xs font-bold ${
+                        systemVramGb !== null
+                          ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/30"
+                          : "bg-amber-500/10 text-amber-400 border-amber-500/30"
+                      }`}
                     >
-                      {systemVramGb} GB VRAM
+                      {systemVramGb !== null ? `${systemVramGb} GB VRAM` : "Sin seleccionar"}
                     </Badge>
                     <Button
                       type="button"
@@ -1253,26 +1603,39 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
 
                 {/* Preset VRAM Buttons */}
                 <div className="flex items-center gap-1.5 flex-wrap pt-0.5">
-                  {VRAM_PRESETS.map((vram) => (
-                    <Button
-                      key={vram}
-                      size="sm"
-                      type="button"
-                      variant={systemVramGb === vram ? "default" : "secondary"}
-                      onClick={() => handleSetVram(vram)}
-                      className={`h-7 px-2.5 text-[11px] font-mono font-bold transition-all ${
-                        systemVramGb === vram ? "shadow-md shadow-primary/20" : ""
-                      }`}
-                    >
-                      {vram} GB
-                    </Button>
-                  ))}
+                  {VRAM_PRESETS.map((vram) => {
+                    const maxCap =
+                      activeLocalProfile?.is_shared && activeLocalProfile.max_vram_gb != null
+                        ? activeLocalProfile.max_vram_gb
+                        : null;
+                    const disabledByCap = maxCap !== null && vram > maxCap;
+                    return (
+                      <Button
+                        key={vram}
+                        size="sm"
+                        type="button"
+                        disabled={disabledByCap}
+                        variant={systemVramGb === vram ? "default" : "secondary"}
+                        onClick={() => handleSetVram(vram)}
+                        title={disabledByCap ? `Límite compartido: ${maxCap} GB` : undefined}
+                        className={`h-7 px-2.5 text-[11px] font-mono font-bold transition-all ${
+                          systemVramGb === vram ? "shadow-md shadow-primary/20" : ""
+                        }`}
+                      >
+                        {vram} GB
+                      </Button>
+                    );
+                  })}
                   <div className="flex items-center gap-1 ml-auto">
                     <Input
                       type="number"
                       min={1}
-                      max={512}
-                      value={systemVramGb}
+                      max={
+                        activeLocalProfile?.is_shared && activeLocalProfile.max_vram_gb != null
+                          ? activeLocalProfile.max_vram_gb
+                          : 512
+                      }
+                      value={systemVramGb ?? ""}
                       onChange={(e) => {
                         const val = parseFloat(e.target.value);
                         if (!isNaN(val) && val > 0) handleSetVram(val);
@@ -1284,6 +1647,46 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
                   </div>
                 </div>
               </div>
+            </div>
+
+            {/* Connection Profiles Bar (below 2. VRAM del Sistema, right-aligned) */}
+            <div className="flex justify-end">
+              {renderProfileControls("ollama", ollamaUrl, (profile) => {
+                setLocalError(null);
+                setActiveLocalProfile(profile);
+                if (profile.is_shared) {
+                  setOllamaUrl("");
+                  const cap = profile.max_vram_gb ?? null;
+                  if (cap !== null) {
+                    const nextVram = systemVramGb !== null ? Math.min(systemVramGb, cap) : cap;
+                    setSystemVramGb(nextVram);
+                    const updatedKeys = {
+                      ...apiKeys,
+                      ollama_url: "",
+                      ollama_profile_id: String(profile.id),
+                      system_vram_gb: String(nextVram),
+                    };
+                    setApiKeys(updatedKeys);
+                    updateUserConfig({ ollama_url: "", api_keys: updatedKeys }).catch(() => {});
+                  } else {
+                    const updatedKeys = { ...apiKeys, ollama_url: "", ollama_profile_id: String(profile.id) };
+                    setApiKeys(updatedKeys);
+                    updateUserConfig({ ollama_url: "", api_keys: updatedKeys }).catch(() => {});
+                  }
+                } else {
+                  setOllamaUrl(profile.ollama_url);
+                  const profVram = profile.vram_gb ?? systemVramGb;
+                  if (profVram !== null && profVram > 0) setSystemVramGb(profVram);
+                  const updatedKeys = {
+                    ...apiKeys,
+                    ollama_url: profile.ollama_url,
+                    ollama_profile_id: String(profile.id),
+                    ...(profVram ? { system_vram_gb: String(profVram) } : {}),
+                  };
+                  setApiKeys(updatedKeys);
+                  updateUserConfig({ ollama_url: profile.ollama_url, api_keys: updatedKeys }).catch(() => {});
+                }
+              })}
             </div>
 
             {/* Local Error feedback */}
@@ -1311,7 +1714,9 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
                 <div className="text-xs font-bold text-foreground flex items-center justify-between">
                   <span>{t("models.detectedLocalModels", { count: localDiscoveredModels.length })}</span>
                   <span className="text-[11px] font-normal text-muted-foreground">
-                    {t("models.compatibleWithVram", { vram: systemVramGb, tokens: requiredContextTokens.toLocaleString() })}
+                    {systemVramGb !== null
+                      ? t("models.compatibleWithVram", { vram: systemVramGb, tokens: requiredContextTokens.toLocaleString() })
+                      : "VRAM sin seleccionar"}
                   </span>
                 </div>
 
@@ -1356,7 +1761,7 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
                                 className="text-[10px] font-mono text-destructive border-destructive/40 bg-destructive/15 gap-1"
                               >
                                 <AlertTriangle className="w-3 h-3 text-destructive" />
-                                <span>~{vramReq.totalVramGb} GB ({t("models.exceedsSystemVram", { vram: systemVramGb })})</span>
+                                <span>~{vramReq.totalVramGb} GB ({t("models.exceedsSystemVram", { vram: systemVramGb ?? 0 })})</span>
                               </Badge>
                             )}
 
@@ -1401,7 +1806,7 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
                               disabled={true}
                               variant="outline"
                               className="h-7 px-2.5 text-[11px] font-semibold text-destructive/80 border-destructive/30 opacity-70 cursor-not-allowed gap-1.5"
-                              title={t("models.doesNotFitVramTooltip", { req: vramReq.totalVramGb, tokens: requiredContextTokens, avail: systemVramGb })}
+                              title={t("models.doesNotFitVramTooltip", { req: vramReq.totalVramGb, tokens: requiredContextTokens, avail: systemVramGb ?? 0 })}
                             >
                               <AlertTriangle className="w-3 h-3 text-destructive" />
                               <span>{t("models.doesNotFitVram")}</span>
@@ -1481,32 +1886,62 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
               </div>
 
               <div className="flex flex-col sm:flex-row items-center gap-2.5">
-                <div className="relative w-full">
-                  <Input
-                    id="cloud-key-input"
-                    type={showKeyText ? "text" : "password"}
-                    value={currentKeyInput}
-                    onChange={(e) => setCurrentKeyInput(e.target.value)}
-                    placeholder={
-                      selectedCloudProvider === "openai"
-                        ? "sk-proj-..."
-                        : selectedCloudProvider === "gemini"
-                        ? "AIzaSy..."
-                        : selectedCloudProvider === "anthropic"
-                        ? "sk-ant-..."
-                        : "gsk_..."
-                    }
-                    className="font-mono text-xs bg-background/80 h-9 pr-9"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowKeyText(!showKeyText)}
-                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                    title={showKeyText ? t("models.hideKey") : t("models.showKey")}
-                  >
-                    {showKeyText ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
-                  </button>
-                </div>
+                {activeCloudProfiles[selectedCloudProvider]?.is_shared ? (
+                  <div className="w-full h-9 px-3 rounded-md border border-primary/30 bg-primary/10 flex items-center justify-between gap-2 text-xs">
+                    <span className="flex items-center gap-2 text-foreground font-medium truncate">
+                      <Lock className="w-3.5 h-3.5 text-primary shrink-0" />
+                      <span className="truncate">
+                        Perfil compartido: <strong>{activeCloudProfiles[selectedCloudProvider]?.name}</strong> (@
+                        {activeCloudProfiles[selectedCloudProvider]?.owner_username}) · API-Key oculta
+                      </span>
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setActiveCloudProfiles((prev) => ({ ...prev, [selectedCloudProvider]: null }));
+                        const updatedKeys = { ...apiKeys, [`${selectedCloudProvider}_profile_id`]: "" };
+                        setApiKeys(updatedKeys);
+                        updateUserConfig({ api_keys: updatedKeys }).catch(() => {});
+                      }}
+                      title="Desconectar perfil compartido"
+                      className="p-1 rounded hover:bg-primary/20 text-muted-foreground hover:text-foreground shrink-0 cursor-pointer"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                ) : (
+                  <div className="relative w-full">
+                    <Input
+                      id="cloud-key-input"
+                      type={showKeyText ? "text" : "password"}
+                      value={currentKeyInput}
+                      onChange={(e) => {
+                        setCurrentKeyInput(e.target.value);
+                        if (activeCloudProfiles[selectedCloudProvider]) {
+                          setActiveCloudProfiles((prev) => ({ ...prev, [selectedCloudProvider]: null }));
+                        }
+                      }}
+                      placeholder={
+                        selectedCloudProvider === "openai"
+                          ? "sk-proj-..."
+                          : selectedCloudProvider === "gemini"
+                          ? "AIzaSy..."
+                          : selectedCloudProvider === "anthropic"
+                          ? "sk-ant-..."
+                          : "gsk_..."
+                      }
+                      className="font-mono text-xs bg-background/80 h-9 pr-9"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowKeyText(!showKeyText)}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                      title={showKeyText ? t("models.hideKey") : t("models.showKey")}
+                    >
+                      {showKeyText ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                    </button>
+                  </div>
+                )}
 
                 <Button
                   type="button"
@@ -1526,6 +1961,32 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
                     </>
                   )}
                 </Button>
+              </div>
+
+              <div className="flex justify-end">
+                {renderProfileControls(selectedCloudProvider, currentKeyInput, (profile) => {
+                  setRemoteError(null);
+                  setActiveCloudProfiles((prev) => ({ ...prev, [selectedCloudProvider]: profile }));
+                  if (profile.is_shared) {
+                    setCurrentKeyInput("");
+                    const updatedKeys = {
+                      ...apiKeys,
+                      [selectedCloudProvider]: "",
+                      [`${selectedCloudProvider}_profile_id`]: String(profile.id),
+                    };
+                    setApiKeys(updatedKeys);
+                    updateUserConfig({ api_keys: updatedKeys }).catch(() => {});
+                  } else {
+                    setCurrentKeyInput(profile.api_key);
+                    const updatedKeys = {
+                      ...apiKeys,
+                      [selectedCloudProvider]: profile.api_key,
+                      [`${selectedCloudProvider}_profile_id`]: String(profile.id),
+                    };
+                    setApiKeys(updatedKeys);
+                    updateUserConfig({ api_keys: updatedKeys }).catch(() => {});
+                  }
+                })}
               </div>
             </div>
 
@@ -1549,14 +2010,83 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
             )}
 
             {/* Discovered Remote Models Grid */}
-            {remoteDiscoveredModels.length > 0 && (
-              <div className="space-y-2 pt-1">
-                <div className="text-xs font-bold text-foreground flex items-center gap-2">
-                  <span>{t("models.availableAccountModels", { count: remoteDiscoveredModels.length })}</span>
+            {remoteDiscoveredModels.length > 0 && (() => {
+              const categoryDefs = [
+                { id: "all", label: "Todos" },
+                { id: "texto", label: "Texto" },
+                { id: "programacion", label: "Programación" },
+                { id: "omnimodales", label: "Omnimodales" },
+                { id: "imagenes", label: "Imágenes" },
+              ];
+              const getCategoryBadge = (cat?: string) => {
+                const c = (cat || "texto").toLowerCase();
+                if (c === "programacion") {
+                  return (
+                    <Badge variant="outline" className="text-[10px] font-mono bg-indigo-500/10 text-indigo-400 border-indigo-500/30">
+                      Programación
+                    </Badge>
+                  );
+                }
+                if (c === "omnimodales") {
+                  return (
+                    <Badge variant="outline" className="text-[10px] font-mono bg-amber-500/10 text-amber-500 border-amber-500/30">
+                      Omnimodal
+                    </Badge>
+                  );
+                }
+                if (c === "imagenes") {
+                  return (
+                    <Badge variant="outline" className="text-[10px] font-mono bg-pink-500/10 text-pink-400 border-pink-500/30">
+                      Imágenes
+                    </Badge>
+                  );
+                }
+                return (
+                  <Badge variant="outline" className="text-[10px] font-mono bg-emerald-500/10 text-emerald-500 border-emerald-500/30">
+                    Texto
+                  </Badge>
+                );
+              };
+
+              const visibleRemoteModels =
+                remoteCategoryFilter === "all"
+                  ? remoteDiscoveredModels
+                  : remoteDiscoveredModels.filter((m) => (m.category || "texto") === remoteCategoryFilter);
+
+              return (
+              <div className="space-y-3 pt-1">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <div className="text-xs font-bold text-foreground flex items-center gap-2">
+                    <span>{t("models.availableAccountModels", { count: visibleRemoteModels.length })}</span>
+                  </div>
+                  <div className="flex items-center gap-1 flex-wrap">
+                    {categoryDefs.map((cat) => {
+                      const count =
+                        cat.id === "all"
+                          ? remoteDiscoveredModels.length
+                          : remoteDiscoveredModels.filter((m) => (m.category || "texto") === cat.id).length;
+                      if (cat.id !== "all" && count === 0) return null;
+                      const active = remoteCategoryFilter === cat.id;
+                      return (
+                        <button
+                          key={cat.id}
+                          type="button"
+                          onClick={() => setRemoteCategoryFilter(cat.id)}
+                          className={`px-2 py-1 rounded-sm text-[11px] font-medium border transition-colors cursor-pointer ${
+                            active
+                              ? "bg-primary text-primary-foreground border-primary font-semibold"
+                              : "bg-card text-muted-foreground border-border hover:text-foreground hover:bg-muted"
+                          }`}
+                        >
+                          {cat.label} ({count})
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                  {remoteDiscoveredModels.map((m) => {
+                  {visibleRemoteModels.map((m) => {
                     const isAdded = selectedModelIds.includes(m.id);
                     return (
                       <div
@@ -1567,18 +2097,38 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
                             : "glass-panel-subtle hover:bg-muted/40 border-border/70"
                         }`}
                       >
-                        <div className="space-y-1">
-                          <div className="flex items-center justify-between gap-2">
+                        <div className="space-y-1.5">
+                          <div className="flex items-start justify-between gap-2">
                             <span className="font-bold text-sm text-foreground break-all">{m.name}</span>
-                            {getProviderBadge(m.provider, m.is_local)}
+                            <div className="flex flex-col items-end gap-1 shrink-0">
+                              {getProviderBadge(m.provider, m.is_local)}
+                              {getCategoryBadge(m.category)}
+                            </div>
                           </div>
                           <p className="text-[11px] text-muted-foreground leading-relaxed line-clamp-2">
                             {m.description}
                           </p>
+                          {(m.rpm_limit || m.tpm_limit) && (
+                            <div className="flex items-center gap-2 text-[10px] font-mono text-muted-foreground pt-0.5">
+                              {m.rpm_limit ? <span>RPM: {m.rpm_limit.toLocaleString()}</span> : null}
+                              {m.tpm_limit ? <span>TPM: {m.tpm_limit.toLocaleString()}</span> : null}
+                            </div>
+                          )}
                         </div>
 
                         <div className="flex items-center justify-between pt-2 border-t border-border/40 text-[10px] font-mono text-muted-foreground">
-                          <span>${m.cost_per_million_input.toFixed(2)} / M tokens</span>
+                          <span className="inline-flex items-center gap-1.5">
+                            {m.billing_tier === "free" ? (
+                              <>
+                                <span className="line-through opacity-60">${m.cost_per_million_input.toFixed(2)} / M</span>
+                                <Badge variant="outline" className="text-[9px] py-0 px-1 bg-emerald-500/10 text-emerald-500 border-emerald-500/30">
+                                  Free Tier
+                                </Badge>
+                              </>
+                            ) : (
+                              <span>${m.cost_per_million_input.toFixed(2)} / M tokens</span>
+                            )}
+                          </span>
                           {isAdded ? (
                             <Button
                               type="button"
@@ -1606,7 +2156,8 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
                   })}
                 </div>
               </div>
-            )}
+              );
+            })()}
           </div>
         )}
 
@@ -1676,6 +2227,218 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
           </div>
         )}
       </Card>
+
+      {/* Save Connection Profile Dialog */}
+      <Dialog
+        open={Boolean(saveProfileModal?.open)}
+        onOpenChange={(open) => {
+          if (!open) setSaveProfileModal(null);
+        }}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-sm font-bold flex items-center gap-2">
+              <Save className="w-4 h-4 text-primary" />
+              <span>Guardar perfil de conexión</span>
+            </DialogTitle>
+            <DialogDescription className="text-xs">
+              {saveProfileModal?.provider === "ollama"
+                ? "Guarda esta URL de servidor Ollama con un nombre para reutilizarla en cualquier experimento."
+                : `Guarda esta API-Key de ${saveProfileModal?.provider.toUpperCase()} con un nombre para cargarla rápidamente.`}
+            </DialogDescription>
+          </DialogHeader>
+
+          <form onSubmit={handleConfirmSaveProfile} className="space-y-3">
+            <div className="space-y-1.5">
+              <Label htmlFor="connection-profile-name" className="text-xs font-semibold">
+                Nombre del perfil
+              </Label>
+              <Input
+                id="connection-profile-name"
+                value={profileNameInput}
+                onChange={(e) => setProfileNameInput(e.target.value)}
+                placeholder={
+                  saveProfileModal?.provider === "ollama"
+                    ? "Ej. Ollama Local / Servidor GPU Lab"
+                    : `Ej. ${saveProfileModal?.provider.toUpperCase()} Trabajo`
+                }
+                autoFocus
+                className="text-xs h-9"
+              />
+            </div>
+
+            <div className="p-2.5 rounded-md bg-muted/40 border border-border/60 text-[11px] font-mono text-muted-foreground break-all space-y-1">
+              {saveProfileModal?.provider === "ollama" ? (
+                <>
+                  <div>URL: {saveProfileModal?.value}</div>
+                  <div>
+                    VRAM del sistema:{" "}
+                    {systemVramGb !== null ? (
+                      <strong className="text-foreground">{systemVramGb} GB</strong>
+                    ) : (
+                      <strong className="text-destructive">Sin seleccionar</strong>
+                    )}
+                  </div>
+                </>
+              ) : (
+                `API-Key (${saveProfileModal?.provider.toUpperCase()}): ${
+                  saveProfileModal?.value && saveProfileModal.value.length > 8
+                    ? `${saveProfileModal.value.slice(0, 4)}••••${saveProfileModal.value.slice(-4)}`
+                    : "••••••••"
+                }`
+              )}
+            </div>
+
+            {saveProfileModal?.provider === "ollama" && (systemVramGb === null || systemVramGb <= 0) && (
+              <div className="p-2.5 rounded-md bg-destructive/10 border border-destructive/30 text-xs text-destructive flex items-start gap-2">
+                <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                <span>
+                  No has seleccionado la VRAM del sistema en <strong>2. VRAM del Sistema (GPU)</strong>. Selecciona la VRAM antes de guardar un perfil local.
+                </span>
+              </div>
+            )}
+
+            {profileError && (
+              <p className="text-xs text-destructive font-medium">{profileError}</p>
+            )}
+
+            <DialogFooter className="gap-2 sm:gap-0">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setSaveProfileModal(null)}
+              >
+                Cancelar
+              </Button>
+              <Button
+                type="submit"
+                size="sm"
+                disabled={
+                  isSavingProfile ||
+                  (saveProfileModal?.provider === "ollama" && (systemVramGb === null || systemVramGb <= 0))
+                }
+                className="gap-1.5"
+              >
+                {isSavingProfile ? (
+                  <>
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    <span>Guardando...</span>
+                  </>
+                ) : (
+                  <>
+                    <Save className="w-3.5 h-3.5" />
+                    <span>Guardar perfil</span>
+                  </>
+                )}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Share Connection Profile Dialog */}
+      <Dialog
+        open={Boolean(shareProfileTarget)}
+        onOpenChange={(open) => {
+          if (!open) setShareProfileTarget(null);
+        }}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-sm font-bold flex items-center gap-2">
+              <Share2 className="w-4 h-4 text-primary" />
+              <span>Compartir perfil: {shareProfileTarget?.name}</span>
+            </DialogTitle>
+            <DialogDescription className="text-xs">
+              El destinatario podrá usar este perfil sin ver nunca la URL ni la API-Key.
+            </DialogDescription>
+          </DialogHeader>
+
+          <form onSubmit={handleConfirmShareProfile} className="space-y-3">
+            <div className="space-y-1.5">
+              <Label htmlFor="share-profile-user" className="text-xs font-semibold flex items-center gap-1.5">
+                <Users className="w-3.5 h-3.5 text-muted-foreground" />
+                <span>Usuario destinatario</span>
+              </Label>
+              <select
+                id="share-profile-user"
+                value={shareTargetUserId}
+                onChange={(e) => setShareTargetUserId(e.target.value ? Number(e.target.value) : "")}
+                className="w-full h-9 rounded-md border border-border bg-background px-3 text-xs"
+              >
+                <option value="">Selecciona un usuario...</option>
+                {shareableUsers.map((u) => (
+                  <option key={u.id} value={u.id}>
+                    @{u.username} {u.full_name ? `(${u.full_name})` : ""}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {shareProfileTarget?.provider === "ollama" && (
+              <div className="space-y-1.5">
+                <Label htmlFor="share-profile-vram" className="text-xs font-semibold">
+                  VRAM máxima a compartir (GB) — Máx. del perfil: {shareProfileTarget.vram_gb ?? 0} GB
+                </Label>
+                <Input
+                  id="share-profile-vram"
+                  type="number"
+                  min={1}
+                  max={shareProfileTarget.vram_gb || 512}
+                  step={1}
+                  value={shareMaxVramGb}
+                  onChange={(e) => setShareMaxVramGb(e.target.value)}
+                  className="text-xs font-mono h-9"
+                />
+              </div>
+            )}
+
+            {shareError && <p className="text-xs text-destructive font-medium">{shareError}</p>}
+
+            <div className="flex justify-end">
+              <Button type="submit" size="sm" disabled={isSharingProfile || !shareTargetUserId} className="gap-1.5">
+                {isSharingProfile ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Share2 className="w-3.5 h-3.5" />}
+                <span>Compartir</span>
+              </Button>
+            </div>
+          </form>
+
+          {profileShares.length > 0 && (
+            <div className="pt-3 border-t border-border space-y-2">
+              <div className="text-[11px] font-semibold text-muted-foreground">
+                Usuarios con acceso ({profileShares.length})
+              </div>
+              <div className="space-y-1.5 max-h-40 overflow-y-auto">
+                {profileShares.map((s) => (
+                  <div
+                    key={s.id}
+                    className="flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-md bg-muted/30 border border-border/50 text-xs"
+                  >
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className="font-mono font-semibold truncate">@{s.target_username}</span>
+                      {s.max_vram_gb != null && (
+                        <Badge variant="outline" className="text-[10px] font-mono py-0 px-1.5">
+                          Máx {s.max_vram_gb} GB
+                        </Badge>
+                      )}
+                    </div>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => handleRevokeShare(s.id)}
+                      className="h-6 px-2 text-[11px] text-destructive hover:bg-destructive/10"
+                    >
+                      Revocar
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

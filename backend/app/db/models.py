@@ -23,6 +23,7 @@ class User(Base):
     saved_benchmarks = relationship("SavedBenchmark", back_populates="user", cascade="all, delete-orphan")
     experiments = relationship("Experiment", back_populates="user", cascade="all, delete-orphan")
     saved_prompts = relationship("SavedPrompt", back_populates="user", cascade="all, delete-orphan")
+    connection_profiles = relationship("ConnectionProfile", back_populates="user", cascade="all, delete-orphan")
 
 
 class DatasetRecord(Base):
@@ -172,3 +173,33 @@ class SavedPrompt(Base):
     updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
 
     user = relationship("User", back_populates="saved_prompts")
+
+
+class ConnectionProfile(Base):
+    __tablename__ = "connection_profiles"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    name = Column(String(255), nullable=False)
+    provider = Column(String(50), nullable=False, index=True)  # "ollama" | "openai" | "gemini" | "anthropic" | "groq"
+    ollama_url = Column(String(255), default="", nullable=False)
+    api_key = Column(Text, default="", nullable=False)
+    vram_gb = Column(Float, nullable=True)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+
+    user = relationship("User", back_populates="connection_profiles")
+    shares = relationship("ConnectionProfileShare", back_populates="profile", cascade="all, delete-orphan")
+
+
+class ConnectionProfileShare(Base):
+    __tablename__ = "connection_profile_shares"
+
+    id = Column(Integer, primary_key=True, index=True)
+    profile_id = Column(Integer, ForeignKey("connection_profiles.id", ondelete="CASCADE"), nullable=False, index=True)
+    owner_user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    target_user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    max_vram_gb = Column(Float, nullable=True)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+
+    profile = relationship("ConnectionProfile", back_populates="shares")

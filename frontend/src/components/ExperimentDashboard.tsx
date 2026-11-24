@@ -52,9 +52,12 @@ import {
   Users,
   Check,
   X,
+  FlaskConical,
+  LayoutTemplate,
+  Plug,
 } from "lucide-react";
 import { DashboardDatasetsModal } from "./DashboardDatasetsModal";
-import { DashboardPromptsModal } from "./DashboardPromptsModal";
+import { DashboardConnectionsModal } from "./DashboardConnectionsModal";
 import { Label } from "@/components/ui/label";
 import {
   Select,
@@ -111,7 +114,7 @@ export const ExperimentDashboard: React.FC<ExperimentDashboardProps> = ({
   const [showDetailModal, setShowDetailModal] = useState<boolean>(false);
   const [showCreateMenu, setShowCreateMenu] = useState<boolean>(false);
   const [showDatasetsModal, setShowDatasetsModal] = useState<boolean>(false);
-  const [showPromptsModal, setShowPromptsModal] = useState<boolean>(false);
+  const [showConnectionsModal, setShowConnectionsModal] = useState<boolean>(false);
   const [actionLoadingId, setActionLoadingId] = useState<string | null>(null);
   const [dashboardError, setDashboardError] = useState<string | null>(null);
   const [dashboardFeedback, setDashboardFeedback] = useState<string | null>(null);
@@ -366,7 +369,7 @@ export const ExperimentDashboard: React.FC<ExperimentDashboardProps> = ({
                 aria-expanded={showCreateMenu}
                 className="h-9 w-full justify-start px-3.5 text-xs font-semibold bg-primary text-primary-foreground hover:bg-primary/90 gap-1.5 rounded-sm cursor-pointer transition-colors"
               >
-                <Plus className="w-3.5 h-3.5 shrink-0" />
+                <FlaskConical className="w-3.5 h-3.5 shrink-0" />
                 <span className="truncate">{t("dashboard.createExperiment")}</span>
                 <ChevronDown className="w-3.5 h-3.5 ml-auto opacity-80 shrink-0" />
               </Button>
@@ -410,9 +413,9 @@ export const ExperimentDashboard: React.FC<ExperimentDashboardProps> = ({
                 type="button"
                 variant="outline"
                 onClick={onNewTemplate}
-                className="h-9 w-full justify-start px-3.5 text-xs font-semibold border-primary/40 bg-primary/5 hover:bg-primary/10 text-primary gap-1.5 rounded-sm cursor-pointer transition-colors"
+                className="h-9 w-full justify-start px-3.5 text-xs font-semibold border-border bg-card hover:bg-muted text-foreground gap-1.5 rounded-sm cursor-pointer transition-colors"
               >
-                <Plus className="w-3.5 h-3.5 shrink-0" />
+                <LayoutTemplate className="w-3.5 h-3.5 text-primary shrink-0" />
                 <span>{t("templates.createTemplate")}</span>
               </Button>
             )}
@@ -424,17 +427,17 @@ export const ExperimentDashboard: React.FC<ExperimentDashboardProps> = ({
               className="h-9 w-full justify-start px-3.5 text-xs font-semibold border-border bg-card hover:bg-muted text-foreground gap-1.5 rounded-sm cursor-pointer transition-colors"
             >
               <Database className="w-3.5 h-3.5 text-primary shrink-0" />
-              <span>{t("dashboardDatasets.viewDatasets")}</span>
+              <span>Datasets y Prompts</span>
             </Button>
 
             <Button
               type="button"
               variant="outline"
-              onClick={() => setShowPromptsModal(true)}
+              onClick={() => setShowConnectionsModal(true)}
               className="h-9 w-full justify-start px-3.5 text-xs font-semibold border-border bg-card hover:bg-muted text-foreground gap-1.5 rounded-sm cursor-pointer transition-colors"
             >
-              <FileCode className="w-3.5 h-3.5 text-primary shrink-0" />
-              <span>Gestionar Prompts</span>
+              <Plug className="w-3.5 h-3.5 text-primary shrink-0" />
+              <span>Gestionar Conexiones</span>
             </Button>
           </div>
         </div>
@@ -1124,9 +1127,9 @@ export const ExperimentDashboard: React.FC<ExperimentDashboardProps> = ({
         }}
       />
 
-      <DashboardPromptsModal
-        isOpen={showPromptsModal}
-        onClose={() => setShowPromptsModal(false)}
+      <DashboardConnectionsModal
+        isOpen={showConnectionsModal}
+        onClose={() => setShowConnectionsModal(false)}
       />
 
       {/* Share Experiment Dialog */}

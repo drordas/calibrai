@@ -43,16 +43,19 @@ import {
   Loader2,
   Pencil,
   Trash2,
+  Users,
 } from "lucide-react";
 
 interface DashboardPromptsModalProps {
   isOpen: boolean;
   onClose: () => void;
+  initialDatasetFilter?: string;
 }
 
 export const DashboardPromptsModal: React.FC<DashboardPromptsModalProps> = ({
   isOpen,
   onClose,
+  initialDatasetFilter,
 }) => {
   const [prompts, setPrompts] = useState<SavedPromptItem[]>([]);
   const [datasets, setDatasets] = useState<DatasetSummary[]>([]);
@@ -91,6 +94,7 @@ export const DashboardPromptsModal: React.FC<DashboardPromptsModalProps> = ({
 
   useEffect(() => {
     if (isOpen) {
+      setSelectedDatasetFilter(initialDatasetFilter || "all");
       setPreviewTarget(null);
       setEditTarget(null);
       setDeleteTarget(null);
@@ -353,24 +357,37 @@ export const DashboardPromptsModal: React.FC<DashboardPromptsModalProps> = ({
             ) : (
               <>
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-1">
-                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                    <span>Filtrar por Dataset de Tareas:</span>
-                    <div className="w-60">
-                      <Select value={selectedDatasetFilter} onValueChange={setSelectedDatasetFilter}>
-                        <SelectTrigger className="h-8 text-xs bg-background border-border rounded-sm">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent className="bg-card border-border rounded-sm text-xs">
-                          <SelectItem value="all">Todos los datasets ({prompts.length})</SelectItem>
-                          {taskDatasets.map((ds) => (
-                            <SelectItem key={ds.id} value={ds.id}>
-                              {ds.name}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                  {initialDatasetFilter && initialDatasetFilter !== "all" ? (
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                      <span>Dataset de Tareas:</span>
+                      <Badge
+                        variant="outline"
+                        className="text-[11px] font-mono rounded-sm border-border bg-muted/30 text-foreground gap-1"
+                      >
+                        <Database className="w-3 h-3 text-primary" />
+                        <span>{getDatasetLabel(initialDatasetFilter)}</span>
+                      </Badge>
                     </div>
-                  </div>
+                  ) : (
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                      <span>Filtrar por Dataset de Tareas:</span>
+                      <div className="w-60">
+                        <Select value={selectedDatasetFilter} onValueChange={setSelectedDatasetFilter}>
+                          <SelectTrigger className="h-8 text-xs bg-background border-border rounded-sm">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent className="bg-card border-border rounded-sm text-xs">
+                            <SelectItem value="all">Todos los datasets ({prompts.length})</SelectItem>
+                            {taskDatasets.map((ds) => (
+                              <SelectItem key={ds.id} value={ds.id}>
+                                {ds.name}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+                  )}
 
                   <Badge variant="outline" className="text-[11px] font-mono rounded-sm self-start sm:self-auto">
                     {filteredPrompts.length} {filteredPrompts.length === 1 ? "prompt" : "prompts"}
@@ -403,10 +420,27 @@ export const DashboardPromptsModal: React.FC<DashboardPromptsModalProps> = ({
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {filteredPrompts.map((item) => (
+                        {filteredPrompts.map((item) => {
+                          const linkedDs = datasets.find((d) => d.id === item.dataset_id);
+                          const isSharedPrompt = Boolean(linkedDs?.is_shared || linkedDs?.is_shared_by_owner);
+                          return (
                           <TableRow key={item.id} className="border-b border-border/60">
                             <TableCell className="py-2.5 text-xs font-semibold text-foreground">
-                              {item.name}
+                              <div className="flex items-center gap-1.5 min-w-0">
+                                {isSharedPrompt && (
+                                  <span
+                                    title={
+                                      linkedDs?.shared_by
+                                        ? `Compartido por @${linkedDs.shared_by}`
+                                        : "Compartido"
+                                    }
+                                    className="inline-flex items-center text-primary shrink-0"
+                                  >
+                                    <Users className="w-3.5 h-3.5" />
+                                  </span>
+                                )}
+                                <span className="truncate">{item.name}</span>
+                              </div>
                             </TableCell>
                             <TableCell className="py-2.5">
                               <Badge
@@ -452,7 +486,8 @@ export const DashboardPromptsModal: React.FC<DashboardPromptsModalProps> = ({
                               </div>
                             </TableCell>
                           </TableRow>
-                        ))}
+                          );
+                        })}
                       </TableBody>
                     </Table>
                   </div>

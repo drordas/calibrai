@@ -158,7 +158,36 @@ class ExperimentQueueManager:
                 return
 
             user_config = db.query(UserConfiguration).filter(UserConfiguration.user_id == exp.user_id).first()
-            api_keys = user_config.api_keys if user_config and user_config.api_keys else {}
+            api_keys = dict(user_config.api_keys) if user_config and user_config.api_keys else {}
+
+            # Resolve any shared/saved connection profile IDs without storing raw secrets in recipient config
+            from backend.app.db.models import ConnectionProfile, ConnectionProfileShare
+            for key_name, prov_target in [
+                ("ollama_profile_id", "ollama_url"),
+                ("openai_profile_id", "openai"),
+                ("gemini_profile_id", "gemini"),
+                ("anthropic_profile_id", "anthropic"),
+                ("groq_profile_id", "groq"),
+            ]:
+                pid_raw = api_keys.get(key_name)
+                if pid_raw and not api_keys.get(prov_target):
+                    try:
+                        pid = int(pid_raw)
+                        prof = db.query(ConnectionProfile).filter(ConnectionProfile.id == pid).first()
+                        if prof:
+                            has_access = prof.user_id == exp.user_id or (
+                                db.query(ConnectionProfileShare)
+                                .filter(
+                                    ConnectionProfileShare.profile_id == pid,
+                                    ConnectionProfileShare.target_user_id == exp.user_id,
+                                )
+                                .first()
+                                is not None
+                            )
+                            if has_access:
+                                api_keys[prov_target] = prof.ollama_url if prof.provider == "ollama" else prof.api_key
+                    except (TypeError, ValueError):
+                        pass
 
             # 1. Clean prompt template & extract evaluation specification
             clean_template, eval_spec = prompt_engine.extract_evaluation_spec(exp.template, exp.task_type)

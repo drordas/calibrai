@@ -32,6 +32,10 @@ class ModelCatalogItem(BaseModel):
     parameter_size: Optional[str] = None
     quantization_level: Optional[str] = None
     estimated_vram_gb: Optional[float] = None
+    category: str = "texto"  # "texto" | "programacion" | "imagenes" | "omnimodales"
+    billing_tier: Optional[str] = None  # "free" | "paid" | None
+    rpm_limit: Optional[int] = None
+    tpm_limit: Optional[int] = None
 
 def clean_marker_fragments(val: str) -> List[str]:
     """Cleans marker string split by || and removes 'blank', brackets, or empty tokens."""

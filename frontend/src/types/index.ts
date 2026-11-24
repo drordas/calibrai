@@ -77,6 +77,10 @@ export interface ModelCatalogItem {
   parameter_size?: string;
   quantization_level?: string;
   estimated_vram_gb?: number;
+  category?: "texto" | "programacion" | "imagenes" | "omnimodales" | string;
+  billing_tier?: "free" | "paid" | string | null;
+  rpm_limit?: number | null;
+  tpm_limit?: number | null;
 }
 
 export interface DiscoverLocalResponse {

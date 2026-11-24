@@ -499,28 +499,42 @@ export async function checkOllama(url?: string): Promise<{ is_online: boolean; m
   return res.json();
 }
 
-export async function discoverLocalModels(url?: string): Promise<DiscoverLocalResponse> {
+export async function discoverLocalModels(url?: string, profileId?: number): Promise<DiscoverLocalResponse> {
   const res = await fetch(`${API_BASE}/models/discover-local`, {
     method: "POST",
     headers: getAuthHeaders(),
-    body: JSON.stringify({ url: url || "http://localhost:11434" }),
+    body: JSON.stringify({
+      url: url || (profileId ? "" : "http://localhost:11434"),
+      profile_id: profileId ?? null,
+    }),
   });
   if (!res.ok) throw new Error("Error al consultar servidor local");
   return res.json();
 }
 
-export async function discoverRemoteModels(provider: string, apiKey: string): Promise<DiscoverRemoteResponse> {
+export async function discoverRemoteModels(
+  provider: string,
+  apiKey: string,
+  profileId?: number
+): Promise<DiscoverRemoteResponse> {
   const res = await fetch(`${API_BASE}/models/discover-remote`, {
     method: "POST",
     headers: getAuthHeaders(),
-    body: JSON.stringify({ provider, api_key: apiKey }),
+    body: JSON.stringify({
+      provider,
+      api_key: apiKey,
+      profile_id: profileId ?? null,
+    }),
   });
   if (!res.ok) throw new Error("Error al validar clave de API con el proveedor");
   return res.json();
 }
 
-export async function detectSystemVram(url?: string): Promise<DetectVramResponse> {
-  const query = url ? `?url=${encodeURIComponent(url)}` : "";
+export async function detectSystemVram(url?: string, profileId?: number): Promise<DetectVramResponse> {
+  const params = new URLSearchParams();
+  if (url) params.set("url", url);
+  if (profileId !== undefined) params.set("profile_id", String(profileId));
+  const query = params.toString() ? `?${params.toString()}` : "";
   const res = await fetch(`${API_BASE}/models/detect-vram${query}`, {
     headers: getAuthHeaders(),
   });
@@ -864,4 +878,135 @@ export function subscribeToExperimentStream(
   return () => {
     eventSource.close();
   };
+}
+
+export interface ConnectionProfileItem {
+  id: number;
+  name: string;
+  provider: string;
+  ollama_url: string;
+  api_key: string;
+  vram_gb?: number | null;
+  is_shared?: boolean;
+  owner_username?: string | null;
+  max_vram_gb?: number | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ConnectionProfileShareItem {
+  id: number;
+  profile_id: number;
+  target_user_id: number;
+  target_username: string;
+  max_vram_gb?: number | null;
+  created_at: string;
+}
+
+export async function fetchConnectionProfiles(provider?: string): Promise<ConnectionProfileItem[]> {
+  const query = provider ? `?provider=${encodeURIComponent(provider)}` : "";
+  const res = await fetch(`${API_BASE}/models/profiles${query}`, {
+    headers: getAuthHeaders(),
+  });
+  if (!res.ok) throw new Error("Error al cargar perfiles de conexión");
+  return res.json();
+}
+
+export async function saveConnectionProfile(payload: {
+  name: string;
+  provider: string;
+  ollama_url?: string;
+  api_key?: string;
+  vram_gb?: number | null;
+}): Promise<ConnectionProfileItem> {
+  const res = await fetch(`${API_BASE}/models/profiles`, {
+    method: "POST",
+    headers: getAuthHeaders(),
+    body: JSON.stringify({
+      name: payload.name,
+      provider: payload.provider,
+      ollama_url: payload.ollama_url || "",
+      api_key: payload.api_key || "",
+      vram_gb: payload.vram_gb ?? null,
+    }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: "Error al guardar el perfil de conexión" }));
+    throw new Error(err.detail || "Error al guardar el perfil de conexión");
+  }
+  return res.json();
+}
+
+export async function updateConnectionProfile(
+  profileId: number,
+  payload: {
+    name: string;
+    provider: string;
+    ollama_url?: string;
+    api_key?: string;
+    vram_gb?: number | null;
+  }
+): Promise<ConnectionProfileItem> {
+  const res = await fetch(`${API_BASE}/models/profiles/${profileId}`, {
+    method: "PUT",
+    headers: getAuthHeaders(),
+    body: JSON.stringify({
+      name: payload.name,
+      provider: payload.provider,
+      ollama_url: payload.ollama_url || "",
+      api_key: payload.api_key || "",
+      vram_gb: payload.vram_gb ?? null,
+    }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: "Error al actualizar el perfil de conexión" }));
+    throw new Error(err.detail || "Error al actualizar el perfil de conexión");
+  }
+  return res.json();
+}
+
+export async function deleteConnectionProfile(profileId: number): Promise<void> {
+  const res = await fetch(`${API_BASE}/models/profiles/${profileId}`, {
+    method: "DELETE",
+    headers: getAuthHeaders(),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: "Error al eliminar el perfil de conexión" }));
+    throw new Error(err.detail || "Error al eliminar el perfil de conexión");
+  }
+}
+
+export async function fetchProfileShares(profileId: number): Promise<ConnectionProfileShareItem[]> {
+  const res = await fetch(`${API_BASE}/models/profiles/${profileId}/shares`, {
+    headers: getAuthHeaders(),
+  });
+  if (!res.ok) throw new Error("Error al cargar comparticiones del perfil");
+  return res.json();
+}
+
+export async function shareConnectionProfile(
+  profileId: number,
+  payload: { target_user_id: number; max_vram_gb?: number | null }
+): Promise<ConnectionProfileShareItem> {
+  const res = await fetch(`${API_BASE}/models/profiles/${profileId}/share`, {
+    method: "POST",
+    headers: getAuthHeaders(),
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: "Error al compartir el perfil" }));
+    throw new Error(err.detail || "Error al compartir el perfil");
+  }
+  return res.json();
+}
+
+export async function revokeProfileShare(profileId: number, shareId: number): Promise<void> {
+  const res = await fetch(`${API_BASE}/models/profiles/${profileId}/shares/${shareId}`, {
+    method: "DELETE",
+    headers: getAuthHeaders(),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: "Error al revocar acceso al perfil" }));
+    throw new Error(err.detail || "Error al revocar acceso al perfil");
+  }
 }
