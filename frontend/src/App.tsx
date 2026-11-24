@@ -615,11 +615,11 @@ export function App() {
           </button>
 
           {/* Center Monograph Section Navigation (Responsive on both mobile and desktop) */}
-          <nav aria-label="Secciones principales" className="order-3 md:order-2 w-full md:w-auto flex items-center justify-between md:justify-start gap-1 border border-border bg-card/80 p-1 rounded-sm">
+          <nav aria-label="Secciones principales" className="order-3 lg:order-2 w-full lg:w-auto flex items-center justify-between lg:justify-start gap-1 border border-border bg-card/80 p-1 rounded-sm">
             <button
               type="button"
               onClick={() => setCurrentMode("dashboard")}
-              className={`flex-1 md:flex-initial flex items-center justify-center gap-1.5 px-2.5 sm:px-3.5 py-1.5 text-xs font-serif transition-colors cursor-pointer rounded-sm ${
+              className={`flex-1 lg:flex-initial flex items-center justify-center gap-1.5 px-2.5 sm:px-3.5 py-1.5 text-xs font-serif transition-colors cursor-pointer rounded-sm ${
                 currentMode === "dashboard"
                   ? "bg-primary text-primary-foreground font-bold"
                   : "text-foreground/80 hover:text-foreground hover:bg-muted/60 font-medium"
@@ -642,7 +642,7 @@ export function App() {
                   ? t("nav.tooltipNewBenchmark")
                   : undefined
               }
-              className={`flex-1 md:flex-initial flex items-center justify-center gap-1.5 px-2.5 sm:px-3.5 py-1.5 text-xs font-serif transition-colors rounded-sm ${
+              className={`flex-1 lg:flex-initial flex items-center justify-center gap-1.5 px-2.5 sm:px-3.5 py-1.5 text-xs font-serif transition-colors rounded-sm ${
                 !selectedDataset && currentMode !== "wizard"
                   ? "opacity-40 cursor-not-allowed text-muted-foreground"
                   : currentMode === "wizard"
@@ -675,7 +675,7 @@ export function App() {
                   ? t("nav.tooltipResultsNoData")
                   : undefined
               }
-              className={`flex-1 md:flex-initial flex items-center justify-center gap-1.5 px-2.5 sm:px-3.5 py-1.5 text-xs font-serif transition-colors rounded-sm ${
+              className={`flex-1 lg:flex-initial flex items-center justify-center gap-1.5 px-2.5 sm:px-3.5 py-1.5 text-xs font-serif transition-colors rounded-sm ${
                 !selectedDataset || !hasBenchmarkResults
                   ? "opacity-40 cursor-not-allowed text-muted-foreground"
                   : currentMode === "results"
@@ -701,7 +701,7 @@ export function App() {
           </nav>
 
           {/* Right Action Suite */}
-          <div className="order-2 md:order-3 flex items-center gap-1 sm:gap-1.5 shrink-0">
+          <div className="order-2 lg:order-3 ml-auto lg:ml-0 flex items-center gap-1 sm:gap-1.5 shrink-0">
             {isRunning && (
               <Badge
                 variant="outline"
@@ -721,7 +721,7 @@ export function App() {
               title={t("saved.viewHistoryTooltip")}
             >
               <Bookmark className="w-3.5 h-3.5 text-primary" />
-              <span className="hidden sm:inline">{t("saved.history")}</span>
+              <span className="hidden xl:inline">{t("saved.history")}</span>
             </Button>
 
             {/* Save Current Benchmark Button */}
@@ -733,7 +733,7 @@ export function App() {
                 title={t("saved.saveResultsTooltip")}
               >
                 <Save className="w-3.5 h-3.5" />
-                <span className="hidden sm:inline">{t("common.save")}</span>
+                <span className="hidden xl:inline">{t("common.save")}</span>
               </Button>
             )}
 
@@ -746,7 +746,7 @@ export function App() {
               title={t("profile.openTooltip")}
             >
               <UserIcon className="w-3.5 h-3.5 text-primary" />
-              <span className="hidden sm:inline text-foreground">{currentUser.username}</span>
+              <span className="hidden xl:inline text-foreground">{currentUser.username}</span>
             </Button>
 
             {/* Notifications Bell */}

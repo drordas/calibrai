@@ -51,6 +51,8 @@ import {
   ArrowLeft,
   ChevronDown,
   ChevronRight,
+  Search,
+  PencilSparkles,
 } from "lucide-react";
 import {
   Dialog,
@@ -82,6 +84,14 @@ import {
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 interface PromptEditorProps {
   dataset: DatasetSummary;
@@ -477,6 +487,8 @@ function generateDefaultFormula(fn: string, args: string[]): string {
 // Component
 // ---------------------------------------------------------
 
+type PromptFieldKey = "instructions" | "examples" | "output";
+
 export const PromptEditor: React.FC<PromptEditorProps> = ({
   dataset,
   inputColumns,
@@ -539,9 +551,12 @@ export const PromptEditor: React.FC<PromptEditorProps> = ({
   const [computedSpecs, setComputedSpecs] = useState<ComputedSpec[]>([]);
   const [metricBindings, setMetricBindings] = useState<MetricBindingsMap>(initialDecomposed.metricBindings || {});
   const promptTextareaRef = useRef<HTMLTextAreaElement | null>(null);
-  const lastCursorRef = useRef<{ start: number; end: number } | null>(null);
-  const pendingCaretPosRef = useRef<number | null>(null);
+  const examplesTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const lastCursorRef = useRef<{ field: PromptFieldKey; start: number; end: number } | null>(null);
+  const pendingCaretPosRef = useRef<{ field: PromptFieldKey; pos: number } | null>(null);
+  const jumpCycleIndexRef = useRef<Record<string, number>>({});
   const [braceAutocomplete, setBraceAutocomplete] = useState<{
+    field: "instructions" | "examples";
     query: string;
     replaceStart: number;
     replaceEnd: number;
@@ -550,12 +565,20 @@ export const PromptEditor: React.FC<PromptEditorProps> = ({
 
   // Restore caret position synchronously after promptRealText updates from variable insertion
   useLayoutEffect(() => {
-    if (pendingCaretPosRef.current !== null && promptTextareaRef.current) {
-      const pos = pendingCaretPosRef.current;
+    if (pendingCaretPosRef.current !== null) {
+      const { field, pos } = pendingCaretPosRef.current;
       pendingCaretPosRef.current = null;
-      promptTextareaRef.current.focus();
-      promptTextareaRef.current.setSelectionRange(pos, pos);
-      lastCursorRef.current = { start: pos, end: pos };
+      const targetEl =
+        field === "examples"
+          ? examplesTextareaRef.current
+          : field === "output"
+          ? outputTextareaRef.current
+          : promptTextareaRef.current;
+      if (targetEl) {
+        targetEl.focus();
+        targetEl.setSelectionRange(pos, pos);
+        lastCursorRef.current = { field, start: pos, end: pos };
+      }
     }
   }, [promptRealText]);
 
@@ -1333,12 +1356,7 @@ export const PromptEditor: React.FC<PromptEditorProps> = ({
   // Handlers for 3 Parts
   // -------------------------------------------------------
 
-  // Part 1(ii): Instructions change (with inline `{` variable autocomplete trigger)
-  const handleInstructionsChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    const val = e.target.value;
-    const caretPos = e.target.selectionStart ?? val.length;
-    lastCursorRef.current = { start: caretPos, end: e.target.selectionEnd ?? caretPos };
-
+  const updateBraceAutocomplete = (val: string, caretPos: number, field: "instructions" | "examples") => {
     const beforeCaret = val.slice(0, caretPos);
     const openBraceMatch = beforeCaret.match(/\{([a-zA-Z0-9_.-]*)$/);
     if (openBraceMatch && selectedDatasetVars.length > 0) {
@@ -1346,6 +1364,7 @@ export const PromptEditor: React.FC<PromptEditorProps> = ({
       const replaceStart = caretPos - openBraceMatch[0].length;
       const replaceEnd = val[caretPos] === "}" ? caretPos + 1 : caretPos;
       setBraceAutocomplete({
+        field,
         query,
         replaceStart,
         replaceEnd,
@@ -1354,6 +1373,14 @@ export const PromptEditor: React.FC<PromptEditorProps> = ({
     } else {
       setBraceAutocomplete(null);
     }
+  };
+
+  // Part 1(ii): Instructions change (with inline `{` variable autocomplete trigger)
+  const handleInstructionsChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const val = e.target.value;
+    const caretPos = e.target.selectionStart ?? val.length;
+    lastCursorRef.current = { field: "instructions", start: caretPos, end: e.target.selectionEnd ?? caretPos };
+    updateBraceAutocomplete(val, caretPos, "instructions");
 
     setInstructionsText(val);
     const composed = composePromptSections(val, examplesText, outputPromptText, useJsonOutput);
@@ -1363,6 +1390,10 @@ export const PromptEditor: React.FC<PromptEditorProps> = ({
 
   const handleExamplesChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const val = e.target.value;
+    const caretPos = e.target.selectionStart ?? val.length;
+    lastCursorRef.current = { field: "examples", start: caretPos, end: e.target.selectionEnd ?? caretPos };
+    updateBraceAutocomplete(val, caretPos, "examples");
+
     setExamplesText(val);
     const composed = composePromptSections(instructionsText, val, outputPromptText, useJsonOutput);
     setPromptRealText(composed);
@@ -1371,6 +1402,8 @@ export const PromptEditor: React.FC<PromptEditorProps> = ({
 
   const handleOutputPromptChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const val = e.target.value;
+    const caretPos = e.target.selectionStart ?? val.length;
+    lastCursorRef.current = { field: "output", start: caretPos, end: e.target.selectionEnd ?? caretPos };
     setOutputPromptText(val);
     const composed = composePromptSections(instructionsText, examplesText, val, useJsonOutput);
     setPromptRealText(composed);
@@ -1722,22 +1755,44 @@ export const PromptEditor: React.FC<PromptEditorProps> = ({
     }
   };
 
-  // Insert variable {col} into Part 1(ii) Instructions at exact cursor position without jumping to end
+  // Insert variable {col} into the active prompt section (Instructions, Examples, or Output) at exact cursor position
   const insertVariable = (varName: string, replaceRange?: { start: number; end: number }) => {
     const textToInsert = `{${varName}}`;
-    const textarea = promptTextareaRef.current;
-    const current = instructionsText;
+    const targetField: PromptFieldKey =
+      replaceRange && braceAutocomplete
+        ? braceAutocomplete.field
+        : lastCursorRef.current?.field || "instructions";
+
+    const textarea =
+      targetField === "examples"
+        ? examplesTextareaRef.current
+        : targetField === "output"
+        ? outputTextareaRef.current
+        : promptTextareaRef.current;
+
+    const current =
+      targetField === "examples"
+        ? examplesText
+        : targetField === "output"
+        ? outputPromptText
+        : instructionsText;
+
+    const cursorForField =
+      lastCursorRef.current && lastCursorRef.current.field === targetField
+        ? lastCursorRef.current
+        : null;
+
     const start = replaceRange
       ? replaceRange.start
-      : lastCursorRef.current
-      ? lastCursorRef.current.start
+      : cursorForField
+      ? cursorForField.start
       : textarea
       ? textarea.selectionStart
       : current.length;
     const end = replaceRange
       ? replaceRange.end
-      : lastCursorRef.current
-      ? lastCursorRef.current.end
+      : cursorForField
+      ? cursorForField.end
       : textarea
       ? textarea.selectionEnd
       : start;
@@ -1745,14 +1800,299 @@ export const PromptEditor: React.FC<PromptEditorProps> = ({
     const updated = current.substring(0, start) + textToInsert + current.substring(end);
     const nextCaretPos = start + textToInsert.length;
 
-    pendingCaretPosRef.current = nextCaretPos;
-    lastCursorRef.current = { start: nextCaretPos, end: nextCaretPos };
+    pendingCaretPosRef.current = { field: targetField, pos: nextCaretPos };
+    lastCursorRef.current = { field: targetField, start: nextCaretPos, end: nextCaretPos };
     setBraceAutocomplete(null);
-    setOpenInstructionsSection(true);
-    setInstructionsText(updated);
-    const composed = composePromptSections(updated, examplesText, outputPromptText, useJsonOutput);
+
+    let nextInstr = instructionsText;
+    let nextExamples = examplesText;
+    let nextOutput = outputPromptText;
+
+    if (targetField === "examples") {
+      nextExamples = updated;
+      setOpenExamplesSection(true);
+      setExamplesText(updated);
+    } else if (targetField === "output") {
+      nextOutput = updated;
+      setOpenOutputSection(true);
+      setOutputPromptText(updated);
+    } else {
+      nextInstr = updated;
+      setOpenInstructionsSection(true);
+      setInstructionsText(updated);
+    }
+
+    const composed = composePromptSections(nextInstr, nextExamples, nextOutput, useJsonOutput);
     setPromptRealText(composed);
     syncAndValidate(composed, outputSchemaText, computedSpecs);
+  };
+
+  const missingVarOccurrences = useMemo(() => {
+    const list: Array<{
+      varName: string;
+      field: PromptFieldKey;
+      fieldLabel: string;
+      start: number;
+      end: number;
+      line: number;
+    }> = [];
+    if (missingVarsList.length === 0) return list;
+
+    const sources: Array<{ field: PromptFieldKey; fieldLabel: string; text: string }> = [
+      { field: "instructions", fieldLabel: "(ii) Instrucciones", text: instructionsText },
+      { field: "examples", fieldLabel: "(iii) Ejemplos", text: examplesText },
+    ];
+    if (!useJsonOutput) {
+      sources.push({ field: "output", fieldLabel: "(iv) Salida", text: outputPromptText });
+    }
+
+    for (const mv of missingVarsList) {
+      const token = `{${mv}}`;
+      for (const src of sources) {
+        let searchFrom = 0;
+        while (true) {
+          const idx = src.text.indexOf(token, searchFrom);
+          if (idx === -1) break;
+          const line = src.text.slice(0, idx).split("\n").length;
+          list.push({
+            varName: mv,
+            field: src.field,
+            fieldLabel: src.fieldLabel,
+            start: idx,
+            end: idx + token.length,
+            line,
+          });
+          searchFrom = idx + token.length;
+        }
+      }
+    }
+    return list;
+  }, [missingVarsList, instructionsText, examplesText, outputPromptText, useJsonOutput]);
+
+  const jumpToMissingVariable = (varName: string, fieldFilter?: PromptFieldKey) => {
+    const matches = missingVarOccurrences.filter(
+      (o) => o.varName === varName && (!fieldFilter || o.field === fieldFilter)
+    );
+    if (matches.length === 0) return;
+
+    const cycleKey = `${varName}:${fieldFilter || "all"}`;
+    const prevIdx = jumpCycleIndexRef.current[cycleKey] ?? -1;
+    const nextIdx = (prevIdx + 1) % matches.length;
+    jumpCycleIndexRef.current[cycleKey] = nextIdx;
+    const occ = matches[nextIdx];
+
+    if (occ.field === "instructions") setOpenInstructionsSection(true);
+    else if (occ.field === "examples") setOpenExamplesSection(true);
+    else setOpenOutputSection(true);
+
+    setTimeout(() => {
+      const el =
+        occ.field === "examples"
+          ? examplesTextareaRef.current
+          : occ.field === "output"
+          ? outputTextareaRef.current
+          : promptTextareaRef.current;
+      if (!el) return;
+
+      // Measure exact visual Y offset of occ.start (accounting for wrapped lines)
+      const style = window.getComputedStyle(el);
+      const mirror = document.createElement("div");
+      mirror.style.position = "absolute";
+      mirror.style.visibility = "hidden";
+      mirror.style.pointerEvents = "none";
+      mirror.style.top = "-9999px";
+      mirror.style.left = "-9999px";
+      mirror.style.width = `${el.clientWidth}px`;
+      mirror.style.boxSizing = "border-box";
+      mirror.style.padding = style.padding;
+      mirror.style.fontFamily = style.fontFamily;
+      mirror.style.fontSize = style.fontSize;
+      mirror.style.fontWeight = style.fontWeight;
+      mirror.style.lineHeight = style.lineHeight;
+      mirror.style.letterSpacing = style.letterSpacing;
+      mirror.style.whiteSpace = "pre-wrap";
+      mirror.style.wordWrap = "break-word";
+      mirror.style.overflowWrap = "break-word";
+      mirror.textContent = el.value.slice(0, occ.start);
+      const marker = document.createElement("span");
+      marker.textContent = el.value.slice(occ.start, occ.end) || "|";
+      mirror.appendChild(marker);
+      document.body.appendChild(mirror);
+      const caretTop = marker.offsetTop;
+      const markerHeight = marker.offsetHeight || 18;
+      document.body.removeChild(mirror);
+
+      el.focus({ preventScroll: true });
+      el.setSelectionRange(occ.start, occ.end);
+      lastCursorRef.current = { field: occ.field, start: occ.start, end: occ.end };
+      el.scrollTop = Math.max(0, caretTop - el.clientHeight / 2 + markerHeight / 2);
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
+    }, 25);
+  };
+
+  const replaceVariableOccurrences = (
+    oldVar: string,
+    newVar: string,
+    fieldFilter?: PromptFieldKey
+  ) => {
+    const oldToken = `{${oldVar}}`;
+    const newToken = `{${newVar}}`;
+    let nextInstr = instructionsText;
+    let nextExamples = examplesText;
+    let nextOutput = outputPromptText;
+
+    if (!fieldFilter || fieldFilter === "instructions") {
+      nextInstr = instructionsText.split(oldToken).join(newToken);
+      if (nextInstr !== instructionsText) setInstructionsText(nextInstr);
+    }
+    if (!fieldFilter || fieldFilter === "examples") {
+      nextExamples = examplesText.split(oldToken).join(newToken);
+      if (nextExamples !== examplesText) setExamplesText(nextExamples);
+    }
+    if ((!fieldFilter && !useJsonOutput) || fieldFilter === "output") {
+      nextOutput = outputPromptText.split(oldToken).join(newToken);
+      if (nextOutput !== outputPromptText) setOutputPromptText(nextOutput);
+    }
+
+    const composed = composePromptSections(nextInstr, nextExamples, nextOutput, useJsonOutput);
+    setPromptRealText(composed);
+    syncAndValidate(composed, outputSchemaText, computedSpecs);
+  };
+
+  const renderBraceAutocompleteDropdown = (field: "instructions" | "examples") => {
+    if (!braceAutocomplete || braceAutocomplete.field !== field || filteredAutocompleteVars.length === 0) {
+      return null;
+    }
+    return (
+      <div className="p-2 rounded-sm bg-card border-2 border-primary/50 shadow-md space-y-1.5 z-20">
+        <div className="flex items-center justify-between text-[10px] font-mono text-muted-foreground">
+          <span className="font-semibold text-foreground flex items-center gap-1">
+            <Tag className="w-3 h-3 text-primary" />
+            <span>
+              Inyectar variable del dataset{" "}
+              {braceAutocomplete.query ? `(filtro: "{${braceAutocomplete.query}")` : ""}:
+            </span>
+          </span>
+          <span>↑↓ elegir &middot; Enter/Tab o clic insertar &middot; Esc cerrar</span>
+        </div>
+        <div className="flex flex-wrap gap-1.5">
+          {filteredAutocompleteVars.map((v, idx) => {
+            const isSelected = idx === braceAutocomplete.activeIndex;
+            return (
+              <button
+                key={v.name}
+                type="button"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() =>
+                  insertVariable(v.name, {
+                    start: braceAutocomplete.replaceStart,
+                    end: braceAutocomplete.replaceEnd,
+                  })
+                }
+                className={`px-2 py-1 rounded-sm text-xs font-mono flex items-center gap-1.5 border transition-colors cursor-pointer ${
+                  isSelected
+                    ? "bg-primary text-primary-foreground border-primary font-bold"
+                    : "bg-background text-foreground border-border hover:border-primary/40 hover:bg-muted"
+                }`}
+              >
+                <span>{`{${v.name}}`}</span>
+                <span
+                  className={`text-[9px] px-1 py-0 rounded-sm font-sans font-bold ${
+                    isSelected
+                      ? "bg-background/20 text-primary-foreground"
+                      : "bg-muted text-muted-foreground"
+                  }`}
+                >
+                  {v.role}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    );
+  };
+
+  const renderMissingVarChips = (fieldFilter?: PromptFieldKey) => {
+    const items = missingVarOccurrences.filter((o) => !fieldFilter || o.field === fieldFilter);
+    if (items.length === 0) return null;
+
+    const counts = new Map<string, number>();
+    for (const item of items) {
+      counts.set(item.varName, (counts.get(item.varName) || 0) + 1);
+    }
+    const uniqueVars = Array.from(counts.keys());
+    const maxVarChars = Math.max(...uniqueVars.map((v) => v.length + 2));
+
+    return (
+      <div className="flex flex-wrap items-center gap-1.5 pt-1">
+        {uniqueVars.map((varName) => {
+          const count = counts.get(varName) || 1;
+          return (
+          <div
+            key={`${fieldFilter || "all"}:${varName}`}
+            className="inline-flex items-center justify-between gap-1.5 pl-2 pr-1 py-0.5 rounded-sm border border-destructive/40 bg-destructive/10 text-destructive text-[11px] font-mono whitespace-nowrap"
+          >
+            <span style={{ minWidth: `${maxVarChars}ch` }}>{`{${varName}}`}</span>
+            <span className="inline-flex items-center gap-1 shrink-0">
+              <Badge
+                variant="outline"
+                className="text-[10px] font-mono py-0 px-1.5 bg-background/80 text-muted-foreground border-border"
+                title={`${count} ${count === 1 ? "aparición" : "apariciones"}`}
+              >
+                x{count}
+              </Badge>
+              <button
+                type="button"
+                onClick={() => jumpToMissingVariable(varName, fieldFilter)}
+                title={`Localizar {${varName}} en el texto`}
+                aria-label={`Localizar {${varName}} en el texto`}
+                className="p-0.5 rounded-sm hover:bg-destructive/20 transition-colors cursor-pointer"
+              >
+                <Search className="w-3 h-3" />
+              </button>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button
+                    type="button"
+                    title={`Reemplazar todas las coincidencias de {${varName}}`}
+                    aria-label={`Reemplazar {${varName}}`}
+                    className="p-0.5 rounded-sm hover:bg-destructive/20 transition-colors cursor-pointer"
+                  >
+                    <PencilSparkles className="w-3 h-3" />
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start" className="w-60">
+                  <DropdownMenuLabel className="text-[11px] font-normal text-muted-foreground">
+                    Reemplazar <span className="font-mono font-semibold text-foreground">{`{${varName}}`}</span> por:
+                  </DropdownMenuLabel>
+                  <DropdownMenuSeparator />
+                  {selectedDatasetVars.length === 0 ? (
+                    <div className="px-2 py-1.5 text-[11px] text-muted-foreground">
+                      No hay variables habilitadas en el Paso 1.
+                    </div>
+                  ) : (
+                    selectedDatasetVars.map((v) => (
+                      <DropdownMenuItem
+                        key={v.name}
+                        onClick={() => replaceVariableOccurrences(varName, v.name, fieldFilter)}
+                        className="flex items-center justify-between gap-2 text-xs font-mono cursor-pointer"
+                      >
+                        <span className="truncate">{`{${v.name}}`}</span>
+                        <Badge variant="outline" className="text-[9px] font-sans py-0 px-1">
+                          {v.role}
+                        </Badge>
+                      </DropdownMenuItem>
+                    ))
+                  )}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </span>
+          </div>
+          );
+        })}
+      </div>
+    );
   };
 
   // Raw YAML manual editor handler (for advanced users)
@@ -2284,54 +2624,7 @@ export const PromptEditor: React.FC<PromptEditorProps> = ({
                     </button>
                     {openInstructionsSection && (
                       <div className="p-2.5 border-t border-border/60 space-y-2">
-                        {braceAutocomplete && filteredAutocompleteVars.length > 0 && (
-                          <div className="p-2 rounded-sm bg-card border-2 border-primary/50 shadow-md space-y-1.5 z-20">
-                            <div className="flex items-center justify-between text-[10px] font-mono text-muted-foreground">
-                              <span className="font-semibold text-foreground flex items-center gap-1">
-                                <Tag className="w-3 h-3 text-primary" />
-                                <span>
-                                  Inyectar variable del dataset{" "}
-                                  {braceAutocomplete.query ? `(filtro: "{${braceAutocomplete.query}")` : ""}:
-                                </span>
-                              </span>
-                              <span>↑↓ elegir &middot; Enter/Tab o clic insertar &middot; Esc cerrar</span>
-                            </div>
-                            <div className="flex flex-wrap gap-1.5">
-                              {filteredAutocompleteVars.map((v, idx) => {
-                                const isSelected = idx === braceAutocomplete.activeIndex;
-                                return (
-                                  <button
-                                    key={v.name}
-                                    type="button"
-                                    onMouseDown={(e) => e.preventDefault()}
-                                    onClick={() =>
-                                      insertVariable(v.name, {
-                                        start: braceAutocomplete.replaceStart,
-                                        end: braceAutocomplete.replaceEnd,
-                                      })
-                                    }
-                                    className={`px-2 py-1 rounded-sm text-xs font-mono flex items-center gap-1.5 border transition-colors cursor-pointer ${
-                                      isSelected
-                                        ? "bg-primary text-primary-foreground border-primary font-bold"
-                                        : "bg-background text-foreground border-border hover:border-primary/40 hover:bg-muted"
-                                    }`}
-                                  >
-                                    <span>{`{${v.name}}`}</span>
-                                    <span
-                                      className={`text-[9px] px-1 py-0 rounded-sm font-sans font-bold ${
-                                        isSelected
-                                          ? "bg-background/20 text-primary-foreground"
-                                          : "bg-muted text-muted-foreground"
-                                      }`}
-                                    >
-                                      {v.role}
-                                    </span>
-                                  </button>
-                                );
-                              })}
-                            </div>
-                          </div>
-                        )}
+                        {renderBraceAutocompleteDropdown("instructions")}
                         <Textarea
                           ref={promptTextareaRef}
                           id="template-real-prompt"
@@ -2340,18 +2633,21 @@ export const PromptEditor: React.FC<PromptEditorProps> = ({
                           onKeyDown={handlePromptKeyDown}
                           onSelect={(e) => {
                             lastCursorRef.current = {
+                              field: "instructions",
                               start: e.currentTarget.selectionStart,
                               end: e.currentTarget.selectionEnd,
                             };
                           }}
                           onClick={(e) => {
                             lastCursorRef.current = {
+                              field: "instructions",
                               start: e.currentTarget.selectionStart,
                               end: e.currentTarget.selectionEnd,
                             };
                           }}
                           onKeyUp={(e) => {
                             lastCursorRef.current = {
+                              field: "instructions",
                               start: e.currentTarget.selectionStart,
                               end: e.currentTarget.selectionEnd,
                             };
@@ -2365,6 +2661,7 @@ export const PromptEditor: React.FC<PromptEditorProps> = ({
                           }`}
                           placeholder={t("prompt.promptRealPlaceholder")}
                         />
+                        {renderMissingVarChips("instructions")}
                       </div>
                     )}
                   </div>
@@ -2396,11 +2693,35 @@ export const PromptEditor: React.FC<PromptEditorProps> = ({
                       </Badge>
                     </button>
                     {openExamplesSection && (
-                      <div className="p-2.5 border-t border-border/60">
+                      <div className="p-2.5 border-t border-border/60 space-y-2">
+                        {renderBraceAutocompleteDropdown("examples")}
                         <Textarea
+                          ref={examplesTextareaRef}
                           id="template-examples-prompt"
                           value={examplesText}
                           onChange={handleExamplesChange}
+                          onKeyDown={handlePromptKeyDown}
+                          onSelect={(e) => {
+                            lastCursorRef.current = {
+                              field: "examples",
+                              start: e.currentTarget.selectionStart,
+                              end: e.currentTarget.selectionEnd,
+                            };
+                          }}
+                          onClick={(e) => {
+                            lastCursorRef.current = {
+                              field: "examples",
+                              start: e.currentTarget.selectionStart,
+                              end: e.currentTarget.selectionEnd,
+                            };
+                          }}
+                          onKeyUp={(e) => {
+                            lastCursorRef.current = {
+                              field: "examples",
+                              start: e.currentTarget.selectionStart,
+                              end: e.currentTarget.selectionEnd,
+                            };
+                          }}
                           rows={5}
                           aria-label="Prompt de Ejemplos"
                           className={`w-full p-3 text-xs font-mono bg-background/80 resize-y leading-relaxed ${
@@ -2408,8 +2729,9 @@ export const PromptEditor: React.FC<PromptEditorProps> = ({
                               ? "border-destructive focus-visible:ring-destructive/30"
                               : "border-border/80 focus:ring-primary/20"
                           }`}
-                          placeholder="Ejemplos few-shot opcionales (no afectan al linter JSON ↔ Prompt)..."
+                          placeholder="Ejemplos few-shot opcionales (puedes usar { para insertar variables)..."
                         />
+                        {renderMissingVarChips("examples")}
                       </div>
                     )}
                   </div>
@@ -2510,6 +2832,27 @@ export const PromptEditor: React.FC<PromptEditorProps> = ({
                           id="template-output-prompt"
                           value={outputPromptText}
                           onChange={handleOutputPromptChange}
+                          onSelect={(e) => {
+                            lastCursorRef.current = {
+                              field: "output",
+                              start: e.currentTarget.selectionStart,
+                              end: e.currentTarget.selectionEnd,
+                            };
+                          }}
+                          onClick={(e) => {
+                            lastCursorRef.current = {
+                              field: "output",
+                              start: e.currentTarget.selectionStart,
+                              end: e.currentTarget.selectionEnd,
+                            };
+                          }}
+                          onKeyUp={(e) => {
+                            lastCursorRef.current = {
+                              field: "output",
+                              start: e.currentTarget.selectionStart,
+                              end: e.currentTarget.selectionEnd,
+                            };
+                          }}
                           rows={5}
                           aria-label="Prompt de Salida"
                           className={`w-full p-3 text-xs font-mono bg-background/80 resize-y leading-relaxed ${
@@ -2519,6 +2862,7 @@ export const PromptEditor: React.FC<PromptEditorProps> = ({
                           }`}
                           placeholder="Plantilla de bloques/campos de salida que debe rellenar el modelo..."
                         />
+                        {renderMissingVarChips("output")}
 
                         {selectedJsonBlockPreview && (
                           <div
@@ -3568,59 +3912,87 @@ export const PromptEditor: React.FC<PromptEditorProps> = ({
                   <span>{t("linterExtra.check1Title")}</span>
                 </div>
 
-                {validation?.issues.length === 0 && unusedPromptVars.length === 0 && (
-                  <Alert className="bg-emerald-500/10 border-emerald-500/25 text-emerald-600 dark:text-emerald-400 text-xs py-2.5">
-                    <CheckCircle2 className="w-4 h-4 text-emerald-500" />
-                    <AlertTitle className="text-xs font-bold">{t("prompt.checksSuccessTitle")}</AlertTitle>
-                    <AlertDescription className="text-[11px] opacity-80 mt-0.5">
-                      {t("prompt.checksSuccessDesc")}
-                    </AlertDescription>
-                  </Alert>
-                )}
-
-                {unusedPromptVars.length > 0 && (
-                  <Alert className="py-2 text-xs bg-amber-500/10 border-amber-500/30 text-amber-600 dark:text-amber-400">
-                    <AlertTriangle className="w-4 h-4 text-amber-500" />
-                    <AlertTitle className="text-xs font-semibold ml-2">
-                      {t("linterExtra.unusedPromptTitle")}
-                    </AlertTitle>
-                    <AlertDescription className="text-[11px] opacity-90 mt-1 ml-2">
-                      {t("linterExtra.unusedPromptDesc")}{" "}
-                      <span className="font-mono font-semibold">
-                        {unusedPromptVars.map((v) => `{${v}}`).join(", ")}
-                      </span>
-                    </AlertDescription>
-                  </Alert>
-                )}
-
-                {validation?.issues.map((issue, idx) => {
-                  const isError = issue.severity === "error";
-                  const isWarning = issue.severity === "warning";
-
-                  return (
-                    <Alert
-                      key={idx}
-                      variant={isError ? "destructive" : "default"}
-                      className={`py-2 text-xs ${
-                        isWarning ? "bg-amber-500/10 border-amber-500/30 text-amber-600 dark:text-amber-400" : ""
-                      }`}
-                    >
-                      {isError ? (
-                        <AlertCircle className="w-4 h-4" />
-                      ) : isWarning ? (
-                        <AlertTriangle className="w-4 h-4 text-amber-500" />
-                      ) : (
-                        <Info className="w-4 h-4 text-primary" />
-                      )}
-                      <AlertTitle className="text-xs font-medium ml-2">{issue.message}</AlertTitle>
-                      {issue.suggestion && (
-                        <AlertDescription className="text-[11px] opacity-80 mt-1 italic font-mono ml-2">
-                          {issue.suggestion}
-                        </AlertDescription>
-                      )}
-                    </Alert>
+                {(() => {
+                  const allIssues = validation?.issues || [];
+                  const otherIssues = allIssues.filter(
+                    (i) =>
+                      !i.message.startsWith("Incoherencia JSON") &&
+                      !(i.severity === "error" && missingVarsList.some((mv) => i.message.includes(`{${mv}}`)))
                   );
-                })}
+                  const hasMissingVars = missingVarsList.length > 0;
+                  return (
+                    <>
+                      {otherIssues.length === 0 && !hasMissingVars && unusedPromptVars.length === 0 && (
+                        <Alert className="bg-emerald-500/10 border-emerald-500/25 text-emerald-600 dark:text-emerald-400 text-xs py-2.5">
+                          <CheckCircle2 className="w-4 h-4 text-emerald-500" />
+                          <AlertTitle className="text-xs font-bold">{t("prompt.checksSuccessTitle")}</AlertTitle>
+                          <AlertDescription className="text-[11px] opacity-80 mt-0.5">
+                            {t("prompt.checksSuccessDesc")}
+                          </AlertDescription>
+                        </Alert>
+                      )}
+
+                      {unusedPromptVars.length > 0 && (
+                        <Alert className="py-2 text-xs bg-amber-500/10 border-amber-500/30 text-amber-600 dark:text-amber-400">
+                          <AlertTriangle className="w-4 h-4 text-amber-500" />
+                          <AlertTitle className="text-xs font-semibold ml-2">
+                            {t("linterExtra.unusedPromptTitle")}
+                          </AlertTitle>
+                          <AlertDescription className="text-[11px] opacity-90 mt-1 ml-2">
+                            {t("linterExtra.unusedPromptDesc")}{" "}
+                            <span className="font-mono font-semibold">
+                              {unusedPromptVars.map((v) => `{${v}}`).join(", ")}
+                            </span>
+                          </AlertDescription>
+                        </Alert>
+                      )}
+
+                      {hasMissingVars && (
+                        <Alert variant="destructive" className="py-2.5 text-xs">
+                          <AlertCircle className="w-4 h-4" />
+                          <AlertTitle className="text-xs font-semibold ml-2">
+                            Variables no válidas en el prompt
+                          </AlertTitle>
+                          <AlertDescription className="ml-2 mt-1 space-y-1.5">
+                            <p className="text-[11px] opacity-90">
+                              Solo se permiten variables de ID, CONTEXTO o SPEC del Paso 1:
+                            </p>
+                            {renderMissingVarChips()}
+                          </AlertDescription>
+                        </Alert>
+                      )}
+
+                      {otherIssues.map((issue, idx) => {
+                        const isError = issue.severity === "error";
+                        const isWarning = issue.severity === "warning";
+
+                        return (
+                          <Alert
+                            key={idx}
+                            variant={isError ? "destructive" : "default"}
+                            className={`py-2 text-xs ${
+                              isWarning ? "bg-amber-500/10 border-amber-500/30 text-amber-600 dark:text-amber-400" : ""
+                            }`}
+                          >
+                            {isError ? (
+                              <AlertCircle className="w-4 h-4" />
+                            ) : isWarning ? (
+                              <AlertTriangle className="w-4 h-4 text-amber-500" />
+                            ) : (
+                              <Info className="w-4 h-4 text-primary" />
+                            )}
+                            <AlertTitle className="text-xs font-medium ml-2">{issue.message}</AlertTitle>
+                            {issue.suggestion && (
+                              <AlertDescription className="text-[11px] opacity-80 mt-1 italic font-mono ml-2">
+                                {issue.suggestion}
+                              </AlertDescription>
+                            )}
+                          </Alert>
+                        );
+                      })}
+                    </>
+                  );
+                })()}
               </div>
 
               {/* Elemento 2: Uso de variables de tipo SPEC */}
@@ -3648,11 +4020,11 @@ export const PromptEditor: React.FC<PromptEditorProps> = ({
                 )}
               </div>
 
-              {/* Elemento 3: Coherencia JSON <-> Prompt */}
+              {/* Elemento 3: Coherencia JSON vs Prompt */}
               <div className="space-y-2 pt-2 border-t border-border/40">
                 <div className="text-[11px] font-semibold text-foreground/90 flex items-center gap-1.5">
                   <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
-                  <span>3. Coherencia JSON ↔ Prompt</span>
+                  <span>3. Coherencia JSON vs Prompt</span>
                 </div>
 
                 {!jsonPromptCoherence.hasSchema ? (
@@ -3679,6 +4051,22 @@ export const PromptEditor: React.FC<PromptEditorProps> = ({
                       Faltan: {jsonPromptCoherence.missingKeys.join(", ")}
                     </AlertDescription>
                   </Alert>
+                ) : (validation?.issues || []).some((i) => i.message.startsWith("Incoherencia JSON")) ? (
+                  <>
+                    {(validation?.issues || [])
+                      .filter((i) => i.message.startsWith("Incoherencia JSON"))
+                      .map((issue, idx) => (
+                        <Alert key={`json-issue-${idx}`} variant="destructive" className="py-2 text-xs">
+                          <AlertCircle className="w-4 h-4" />
+                          <AlertTitle className="text-xs font-medium ml-2">{issue.message}</AlertTitle>
+                          {issue.suggestion && (
+                            <AlertDescription className="text-[11px] opacity-80 mt-1 italic font-mono ml-2">
+                              {issue.suggestion}
+                            </AlertDescription>
+                          )}
+                        </Alert>
+                      ))}
+                  </>
                 ) : (
                   <Alert className="bg-emerald-500/10 border-emerald-500/25 text-emerald-600 dark:text-emerald-400 text-xs py-2.5">
                     <CheckCircle2 className="w-4 h-4 text-emerald-500" />
