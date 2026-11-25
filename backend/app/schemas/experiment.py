@@ -103,6 +103,7 @@ class ExperimentResponse(BaseModel):
 class ExperimentShareRequest(BaseModel):
     target_user_id: int
     share_mode: str = "view"  # "view" | "edit" | "copy"
+    dataset_share_mode: Optional[str] = None  # "view" | "edit" | "copy" for template's linked dataset
 
 
 class ExperimentShareRespondRequest(BaseModel):

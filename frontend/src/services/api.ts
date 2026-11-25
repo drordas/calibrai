@@ -833,12 +833,17 @@ export async function revokeExperimentShare(experimentId: string, shareId: numbe
 export async function shareExperimentWithUser(
   experimentId: string,
   targetUserId: number,
-  shareMode: "view" | "edit" | "copy" = "view"
+  shareMode: "view" | "edit" | "copy" = "view",
+  datasetShareMode?: "view" | "edit" | "copy"
 ): Promise<void> {
   const res = await fetch(`${API_BASE}/experiments/${experimentId}/share`, {
     method: "POST",
     headers: getAuthHeaders(),
-    body: JSON.stringify({ target_user_id: targetUserId, share_mode: shareMode }),
+    body: JSON.stringify({
+      target_user_id: targetUserId,
+      share_mode: shareMode,
+      ...(datasetShareMode ? { dataset_share_mode: datasetShareMode } : {}),
+    }),
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: "Error compartiendo experimento" }));

@@ -15,6 +15,7 @@ import {
   deleteExperiment,
   subscribeToExperimentStream,
   fetchShareableUsers,
+  fetchDatasetShares,
   fetchExperimentShares,
   revokeExperimentShare,
   updateExperimentShareMode,
@@ -129,6 +130,8 @@ export const ExperimentDashboard: React.FC<ExperimentDashboardProps> = ({
 
   // Share Experiment state
   const [shareExpTarget, setShareExpTarget] = useState<ExperimentSummary | null>(null);
+  const [shareDatasetMode, setShareDatasetMode] = useState<"view" | "edit" | "copy">("view");
+  const [templateDatasetShares, setTemplateDatasetShares] = useState<ShareEntry[]>([]);
   const [accessModalExp, setAccessModalExp] = useState<ExperimentSummary | null>(null);
   const [shareExpMode, setShareExpMode] = useState<"view" | "edit" | "copy">("view");
   const [shareUsers, setShareUsers] = useState<ShareUser[]>([]);
@@ -215,18 +218,24 @@ export const ExperimentDashboard: React.FC<ExperimentDashboardProps> = ({
     e.stopPropagation();
     setShareExpTarget(exp);
     setShareExpMode("view");
+    setShareDatasetMode("view");
     setShareUsers([]);
     setActiveExpShares([]);
+    setTemplateDatasetShares([]);
     setShareUsersLoading(true);
     setDashboardError(null);
     setDashboardFeedback(null);
     try {
-      const [users, shares] = await Promise.all([
+      const [users, shares, dsShares] = await Promise.all([
         fetchShareableUsers(),
         fetchExperimentShares(exp.id).catch(() => []),
+        exp.status === "draft" && exp.dataset_id
+          ? fetchDatasetShares(exp.dataset_id).catch(() => [])
+          : Promise.resolve([]),
       ]);
       setShareUsers(users);
       setActiveExpShares(shares);
+      setTemplateDatasetShares(dsShares);
     } catch (err: any) {
       setDashboardError(err?.message || t("common.error"));
       setShareExpTarget(null);
@@ -239,9 +248,22 @@ export const ExperimentDashboard: React.FC<ExperimentDashboardProps> = ({
     if (!shareExpTarget) return;
     setSharingUserId(targetUser.id);
     try {
-      await shareExperimentWithUser(shareExpTarget.id, targetUser.id, shareExpMode);
+      const isTemplate = shareExpTarget.status === "draft";
+      const existingDsShare = isTemplate
+        ? templateDatasetShares.find((s) => s.target_user_id === targetUser.id)
+        : undefined;
+      await shareExperimentWithUser(
+        shareExpTarget.id,
+        targetUser.id,
+        shareExpMode,
+        isTemplate && !existingDsShare ? shareDatasetMode : undefined
+      );
       setShareExpTarget(null);
-      setDashboardFeedback(t("dashboardDatasets.shareExpSuccess", { username: targetUser.username }));
+      setDashboardFeedback(
+        isTemplate
+          ? `Plantilla compartida con @${targetUser.username}.`
+          : t("dashboardDatasets.shareExpSuccess", { username: targetUser.username })
+      );
       await loadExperimentsList();
     } catch (err: any) {
       setDashboardError(err?.message || t("common.error"));
@@ -1013,14 +1035,14 @@ export const ExperimentDashboard: React.FC<ExperimentDashboardProps> = ({
                         </Button>
                       </>
                     ) : (
-                      (exp.status === "completed" || exp.status === "running" || exp.status === "queued" || exp.status === "paused") && !exp.is_shared && (
+                      (exp.status === "completed" || exp.status === "running" || exp.status === "queued" || exp.status === "paused" || exp.status === "draft") && !exp.is_shared && (
                         <Button
                           type="button"
                           variant="ghost"
                           size="icon"
                           onClick={(e) => handleOpenShareExp(exp, e)}
                           className="h-7 w-7 text-muted-foreground hover:text-primary hover:bg-primary/10 rounded-md transition-all duration-150"
-                          title={t("dashboardDatasets.shareExperimentTitle")}
+                          title={exp.status === "draft" ? "Compartir plantilla" : t("dashboardDatasets.shareExperimentTitle")}
                         >
                           <Share2 className="w-3 h-3" />
                         </Button>
@@ -1279,23 +1301,54 @@ export const ExperimentDashboard: React.FC<ExperimentDashboardProps> = ({
         onClose={() => setShowConnectionsModal(false)}
       />
 
-      {/* Share Experiment Dialog */}
+      {/* Share Experiment / Template Dialog */}
       <Dialog open={Boolean(shareExpTarget)} onOpenChange={(open) => !open && setShareExpTarget(null)}>
-        <DialogContent className="sm:max-w-md bg-card border-border rounded-sm shadow-none">
+        <DialogContent className="sm:max-w-lg bg-card border-border rounded-sm shadow-none">
           <DialogHeader className="border-b border-border pb-3">
             <DialogTitle className="font-serif text-base font-bold text-foreground flex items-center gap-2">
               <Share2 className="w-4 h-4 text-primary" />
-              {t("dashboardDatasets.shareExperimentTitle")}
+              {shareExpTarget?.status === "draft" ? "Compartir Plantilla" : t("dashboardDatasets.shareExperimentTitle")}
             </DialogTitle>
             <DialogDescription className="text-xs text-muted-foreground">
-              {t("dashboardDatasets.shareExperimentDesc", { name: shareExpTarget?.name || "" })}
+              {shareExpTarget?.status === "draft"
+                ? `Comparte la plantilla "${shareExpTarget?.name || ""}" junto con su dataset asociado.`
+                : t("dashboardDatasets.shareExperimentDesc", { name: shareExpTarget?.name || "" })}
             </DialogDescription>
           </DialogHeader>
 
           <div className="space-y-3 py-2">
+            {shareExpTarget?.status === "draft" && (
+              <div className="p-2.5 rounded-sm border border-border bg-muted/30 space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <Label className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground">
+                    Dataset asociado
+                  </Label>
+                  <Badge variant="outline" className="text-[11px] font-mono rounded-sm gap-1">
+                    <Database className="w-3 h-3 text-primary" />
+                    <span>{shareExpTarget.dataset_name || shareExpTarget.dataset_id}</span>
+                  </Badge>
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-[11px] text-muted-foreground">
+                    Modo de compartición del dataset (si aún no está compartido con el usuario)
+                  </Label>
+                  <Select value={shareDatasetMode} onValueChange={(v) => setShareDatasetMode(v as "view" | "edit" | "copy")}>
+                    <SelectTrigger className="h-8 text-xs bg-background border-border rounded-sm">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent className="bg-card border-border rounded-sm shadow-none">
+                      <SelectItem value="view" className="text-xs">{t("dashboardDatasets.modeView")}</SelectItem>
+                      <SelectItem value="edit" className="text-xs">{t("dashboardDatasets.modeEdit")}</SelectItem>
+                      <SelectItem value="copy" className="text-xs">{t("dashboardDatasets.modeCopy")}</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            )}
+
             <div className="space-y-1.5">
               <Label className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground">
-                {t("dashboardDatasets.shareModeLabel")}
+                {shareExpTarget?.status === "draft" ? "Modo de compartición de la plantilla" : t("dashboardDatasets.shareModeLabel")}
               </Label>
               <Select value={shareExpMode} onValueChange={(v) => setShareExpMode(v as "view" | "edit" | "copy")}>
                 <SelectTrigger className="h-9 text-xs bg-background border-border rounded-sm">
@@ -1360,36 +1413,56 @@ export const ExperimentDashboard: React.FC<ExperimentDashboardProps> = ({
                     </div>
                   );
                 }
-                return availableShareUsers.map((u) => (
-                  <div
-                    key={u.id}
-                    className="flex items-center justify-between gap-3 p-2.5 border border-border rounded-sm bg-background"
-                  >
-                    <div className="min-w-0">
-                      <div className="text-xs font-mono font-medium text-foreground truncate">
-                        @{u.username}
-                      </div>
-                      {u.full_name && (
-                        <div className="text-[11px] text-muted-foreground truncate">
-                          {u.full_name}
-                        </div>
-                      )}
-                    </div>
-                    <Button
-                      type="button"
-                      size="sm"
-                      disabled={sharingUserId === u.id}
-                      onClick={() => handleShareExpWithUser(u)}
-                      className="h-7 px-3 text-xs rounded-sm bg-primary text-primary-foreground hover:bg-primary/90 shrink-0"
+                return availableShareUsers.map((u) => {
+                  const existingDsShare =
+                    shareExpTarget?.status === "draft"
+                      ? templateDatasetShares.find((s) => s.target_user_id === u.id)
+                      : undefined;
+                  return (
+                    <div
+                      key={u.id}
+                      className="flex items-center justify-between gap-3 p-2.5 border border-border rounded-sm bg-background"
                     >
-                      {sharingUserId === u.id ? (
-                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                      ) : (
-                        t("dashboardDatasets.shareBtn")
-                      )}
-                    </Button>
-                  </div>
-                ));
+                      <div className="min-w-0 flex-1 space-y-1">
+                        <div className="text-xs font-mono font-medium text-foreground truncate">
+                          @{u.username}
+                        </div>
+                        {u.full_name && (
+                          <div className="text-[11px] text-muted-foreground truncate">
+                            {u.full_name}
+                          </div>
+                        )}
+                        {shareExpTarget?.status === "draft" && existingDsShare && (
+                          <div className="pt-0.5">
+                            <Select value={existingDsShare.share_mode} disabled>
+                              <SelectTrigger className="h-6 w-48 text-[10px] font-mono bg-muted/40 border-border rounded-sm opacity-80">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="view" className="text-xs">{t("dashboardDatasets.modeView")}</SelectItem>
+                                <SelectItem value="edit" className="text-xs">{t("dashboardDatasets.modeEdit")}</SelectItem>
+                                <SelectItem value="copy" className="text-xs">{t("dashboardDatasets.modeCopy")}</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+                        )}
+                      </div>
+                      <Button
+                        type="button"
+                        size="sm"
+                        disabled={sharingUserId === u.id}
+                        onClick={() => handleShareExpWithUser(u)}
+                        className="h-7 px-3 text-xs rounded-sm bg-primary text-primary-foreground hover:bg-primary/90 shrink-0"
+                      >
+                        {sharingUserId === u.id ? (
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        ) : (
+                          t("dashboardDatasets.shareBtn")
+                        )}
+                      </Button>
+                    </div>
+                  );
+                });
               })()}
             </div>
           </div>

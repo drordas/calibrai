@@ -1,14 +1,18 @@
 import uuid
 import json
 import asyncio
+import shutil
+from pathlib import Path
 from typing import List, Optional, Dict, Any, Tuple
 from pydantic import BaseModel
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from backend.app.db.session import get_db
-from backend.app.db.models import User, Experiment, ExperimentShare
+from backend.app.db.models import User, Experiment, ExperimentShare, DatasetRecord, DatasetShare
 from backend.app.api.auth import get_current_user
+from backend.app.core.config import settings
+from backend.app.core.dataset_engine import dataset_engine
 from backend.app.schemas.experiment import (
     ExperimentCreate,
     ExperimentSummary,
@@ -345,8 +349,8 @@ def share_experiment(
     ).first()
     if not exp:
         raise HTTPException(status_code=404, detail="Experimento no encontrado")
-    if exp.status not in ("completed", "running", "queued", "paused"):
-        raise HTTPException(status_code=400, detail="Solo se pueden compartir experimentos en ejecución, pausados o finalizados")
+    if exp.status not in ("completed", "running", "queued", "paused", "draft"):
+        raise HTTPException(status_code=400, detail="Solo se pueden compartir plantillas o experimentos en ejecución, pausados o finalizados")
     if req.target_user_id == current_user.id:
         raise HTTPException(status_code=400, detail="No puedes compartir un experimento contigo mismo")
 
@@ -354,6 +358,61 @@ def share_experiment(
     target_user = db.query(User).filter(User.id == req.target_user_id, User.is_active == True).first()
     if not target_user:
         raise HTTPException(status_code=404, detail="Usuario destino no encontrado")
+
+    effective_dataset_id = exp.dataset_id
+    if exp.status == "draft" and exp.dataset_id:
+        ds_rec = db.query(DatasetRecord).filter(DatasetRecord.dataset_id == exp.dataset_id).first()
+        owned_by_target = bool(ds_rec and ds_rec.owner_user_id == target_user.id)
+        existing_ds_share = (
+            db.query(DatasetShare)
+            .filter(
+                DatasetShare.target_user_id == target_user.id,
+                (DatasetShare.dataset_id == exp.dataset_id) | (DatasetShare.source_dataset_id == exp.dataset_id),
+            )
+            .first()
+        )
+        if not owned_by_target and not existing_ds_share:
+            ds_mode = req.dataset_share_mode if req.dataset_share_mode in ("view", "edit", "copy") else "view"
+            if ds_mode == "copy":
+                ds_summary = dataset_engine.get_dataset(exp.dataset_id)
+                meta = dataset_engine.datasets.get(exp.dataset_id)
+                src_path = meta.get("file_path") if meta else None
+                if not ds_summary or not src_path or not Path(src_path).exists():
+                    raise HTTPException(status_code=500, detail="No se encontró el archivo origen del dataset para copiar")
+                copy_stem = f"copy_{uuid.uuid4().hex[:8]}_{Path(src_path).stem}"
+                copy_filename = f"{copy_stem}{Path(src_path).suffix}"
+                copy_path = settings.upload_dir / copy_filename
+                shutil.copy2(src_path, copy_path)
+                copied_summary = dataset_engine.register_dataset(
+                    file_path=copy_path,
+                    name=f"{ds_summary.name} (Copia)",
+                    is_sample=False,
+                    dataset_id=f"upload_{copy_stem}",
+                    is_ground_truth=ds_summary.is_ground_truth,
+                    force_new=True,
+                )
+                effective_dataset_id = copied_summary.id
+                db.add(
+                    DatasetRecord(
+                        dataset_id=effective_dataset_id,
+                        owner_user_id=target_user.id,
+                        display_name=f"{ds_summary.name} (Copia)",
+                        is_ground_truth=ds_summary.is_ground_truth,
+                    )
+                )
+            db.add(
+                DatasetShare(
+                    dataset_id=effective_dataset_id,
+                    source_dataset_id=exp.dataset_id,
+                    owner_user_id=current_user.id,
+                    target_user_id=target_user.id,
+                    share_mode=ds_mode,
+                    status="accepted",
+                )
+            )
+            db.flush()
+        elif existing_ds_share:
+            effective_dataset_id = existing_ds_share.dataset_id
 
     target_exp_id = exp.id
     if mode == "copy":
@@ -363,7 +422,7 @@ def share_experiment(
             user_id=target_user.id,
             name=f"{exp.name} (Copia)",
             description=exp.description or "",
-            dataset_id=exp.dataset_id,
+            dataset_id=effective_dataset_id,
             dataset_name=exp.dataset_name or "",
             input_columns=list(exp.input_columns or []),
             context_columns=list(exp.context_columns or []),
