@@ -1,12 +1,15 @@
 import uuid
 import json
 import asyncio
+import io
+import re
 import shutil
+import zipfile
 from pathlib import Path
 from typing import List, Optional, Dict, Any, Tuple
 from pydantic import BaseModel
 from fastapi import APIRouter, Depends, HTTPException, Query
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response, StreamingResponse
 from sqlalchemy.orm import Session
 from backend.app.db.session import get_db
 from backend.app.db.models import User, Experiment, ExperimentShare, DatasetRecord, DatasetShare
@@ -1156,3 +1159,88 @@ def audit_pairwise_discrepancies(
         },
         "discrepancies": discrepancies
     }
+
+
+class ExportModelsJsonRequest(BaseModel):
+    model_ids: List[str]
+
+
+@router.post("/{experiment_id}/export-json")
+def export_experiment_models_json(
+    experiment_id: str,
+    req: ExportModelsJsonRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    exp, _ = _get_accessible_experiment(experiment_id, current_user, db, require_edit=False)
+    raw_results = exp.raw_results or {}
+    if not req.model_ids:
+        raise HTTPException(status_code=400, detail="Selecciona al menos un modelo para exportar")
+
+    resolved_items: List[Tuple[str, List[Dict[str, Any]]]] = []
+    seen_keys = set()
+    for req_id in req.model_ids:
+        matched_key = None
+        if req_id in raw_results:
+            matched_key = req_id
+        else:
+            for k in raw_results.keys():
+                if req_id == k or k.endswith(f"/{req_id}") or req_id in k:
+                    matched_key = k
+                    break
+        if matched_key and matched_key not in seen_keys:
+            seen_keys.add(matched_key)
+            resolved_items.append((matched_key, raw_results.get(matched_key) or []))
+
+    if not resolved_items:
+        raise HTTPException(status_code=404, detail="No se encontraron resultados JSON para los modelos seleccionados")
+
+    def build_model_payload(model_key: str, rows: List[Dict[str, Any]]) -> Dict[str, Any]:
+        return {
+            "experiment_id": exp.id,
+            "experiment_name": exp.name,
+            "model_id": model_key,
+            "dataset_id": exp.dataset_id,
+            "total_samples": len(rows),
+            "results": [
+                {
+                    "sample_id": _resolve_sample_id(r, idx, exp.id_column)[1],
+                    "input": r.get("row_context") or {},
+                    "output": r.get("parsed_json") if r.get("parsed_json") is not None else r.get("raw_output"),
+                    "latency_ms": r.get("latency_ms"),
+                    "error": r.get("error"),
+                }
+                for idx, r in enumerate(rows)
+            ],
+        }
+
+    def safe_slug(val: str) -> str:
+        return re.sub(r"[^a-zA-Z0-9._-]+", "_", val).strip("_") or "model"
+
+    if len(resolved_items) == 1:
+        model_key, rows = resolved_items[0]
+        payload = build_model_payload(model_key, rows)
+        filename = f"{safe_slug(model_key.split('/')[-1])}.json"
+        return Response(
+            content=json.dumps(payload, ensure_ascii=False, indent=2),
+            media_type="application/json; charset=utf-8",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+
+    zip_buf = io.BytesIO()
+    used_names: Dict[str, int] = {}
+    with zipfile.ZipFile(zip_buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for model_key, rows in resolved_items:
+            payload = build_model_payload(model_key, rows)
+            base_name = safe_slug(model_key.split("/")[-1])
+            count = used_names.get(base_name, 0)
+            used_names[base_name] = count + 1
+            entry_name = f"{base_name}.json" if count == 0 else f"{base_name}_{count + 1}.json"
+            zf.writestr(entry_name, json.dumps(payload, ensure_ascii=False, indent=2))
+
+    zip_name = f"{safe_slug(exp.name or exp.id)}_models_json.zip"
+    return Response(
+        content=zip_buf.getvalue(),
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{zip_name}"'},
+    )

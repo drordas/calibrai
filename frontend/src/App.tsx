@@ -29,6 +29,7 @@ import {
   markAllNotificationsRead,
   dismissExperimentNotification,
   dismissShareNotification,
+  exportExperimentModelsJson,
 } from "./services/api";
 import { LoginPage } from "./components/LoginPage";
 import { DatasetViewer } from "./components/DatasetViewer";
@@ -76,6 +77,7 @@ import {
   Bell,
   Check,
   CheckCheck,
+  Download,
   Upload,
 } from "lucide-react";
 import {
@@ -101,6 +103,10 @@ import {
 export function App() {
   const { t, syncWithUserConfig } = useTranslation();
   const [isDark, setIsDark] = useState<boolean>(false);
+  const [showExportJsonModal, setShowExportJsonModal] = useState(false);
+  const [exportSelectedModelIds, setExportSelectedModelIds] = useState<string[]>([]);
+  const [isExportingJson, setIsExportingJson] = useState(false);
+  const [exportJsonError, setExportJsonError] = useState<string | null>(null);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [, setUserConfig] = useState<UserConfig | null>(null);
   const [checkingAuth, setCheckingAuth] = useState<boolean>(true);
@@ -1586,6 +1592,25 @@ export function App() {
                       </Button>
                     )}
 
+                    {currentExperimentId && Object.values(summaries).some((s) => !s.is_human_baseline) && (
+                      <Button
+                        id="btn-export-models-json"
+                        onClick={() => {
+                          const modelIds = Object.values(summaries)
+                            .filter((s) => !s.is_human_baseline)
+                            .map((s) => s.model_id);
+                          setExportSelectedModelIds(modelIds);
+                          setExportJsonError(null);
+                          setShowExportJsonModal(true);
+                        }}
+                        variant="secondary"
+                        className="gap-2 h-10 px-4 text-xs font-semibold rounded-sm border border-border"
+                      >
+                        <Download className="w-4 h-4 text-muted-foreground" />
+                        <span>Exportar JSON</span>
+                      </Button>
+                    )}
+
                     {isQualitativeValidation && (
                       <Button
                         id="btn-view-methodology"
@@ -1869,6 +1894,147 @@ export function App() {
           handleLogout();
         }}
       />
+
+      {/* Export Model JSON / ZIP Dialog */}
+      <Dialog open={showExportJsonModal} onOpenChange={setShowExportJsonModal}>
+        <DialogContent className="sm:max-w-md bg-card border-border rounded-sm shadow-none">
+          <DialogHeader className="border-b border-border pb-3">
+            <DialogTitle className="font-serif text-base font-bold text-foreground flex items-center gap-2">
+              <Download className="w-4 h-4 text-primary" />
+              <span>Exportar JSON generado</span>
+            </DialogTitle>
+            <DialogDescription className="text-xs text-muted-foreground">
+              Elige un modelo para descargar su archivo <span className="font-mono">.json</span>, o selecciona varios/todos para exportarlos en un archivo <span className="font-mono">.zip</span>.
+            </DialogDescription>
+          </DialogHeader>
+
+          {(() => {
+            const exportableModels = Object.values(summaries).filter((s) => !s.is_human_baseline);
+            const allSelected =
+              exportableModels.length > 0 &&
+              exportSelectedModelIds.length === exportableModels.length;
+
+            const toggleModel = (modelId: string) => {
+              setExportSelectedModelIds((prev) =>
+                prev.includes(modelId) ? prev.filter((id) => id !== modelId) : [...prev, modelId]
+              );
+            };
+
+            const handleExportConfirm = async () => {
+              if (!currentExperimentId || exportSelectedModelIds.length === 0) return;
+              setIsExportingJson(true);
+              setExportJsonError(null);
+              try {
+                const { blob, filename } = await exportExperimentModelsJson(
+                  currentExperimentId,
+                  exportSelectedModelIds
+                );
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement("a");
+                a.href = url;
+                a.download = filename;
+                document.body.appendChild(a);
+                a.click();
+                a.remove();
+                URL.revokeObjectURL(url);
+                setShowExportJsonModal(false);
+              } catch (err: any) {
+                setExportJsonError(err?.message || "Error al exportar los resultados JSON");
+              } finally {
+                setIsExportingJson(false);
+              }
+            };
+
+            return (
+              <div className="space-y-3 py-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-mono text-muted-foreground">
+                    {exportSelectedModelIds.length} de {exportableModels.length} seleccionados
+                  </span>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() =>
+                      setExportSelectedModelIds(
+                        allSelected ? [] : exportableModels.map((m) => m.model_id)
+                      )
+                    }
+                    className="h-7 px-2 text-xs text-primary"
+                  >
+                    {allSelected ? "Deseleccionar todos" : "Seleccionar todos"}
+                  </Button>
+                </div>
+
+                <div className="max-h-60 overflow-y-auto space-y-1.5 border border-border rounded-sm p-2 bg-background">
+                  {exportableModels.map((m) => {
+                    const checked = exportSelectedModelIds.includes(m.model_id);
+                    return (
+                      <label
+                        key={m.model_id}
+                        className={`flex items-center justify-between gap-2 p-2 rounded-sm border cursor-pointer transition-colors ${
+                          checked
+                            ? "border-primary/40 bg-primary/5"
+                            : "border-transparent hover:bg-muted/40"
+                        }`}
+                      >
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={() => toggleModel(m.model_id)}
+                            className="h-3.5 w-3.5 accent-primary rounded-sm"
+                          />
+                          <span className="text-xs font-mono font-medium text-foreground truncate">
+                            {m.model_name || m.model_id.split("/").slice(1).join("/") || m.model_id}
+                          </span>
+                        </div>
+                        <Badge variant="outline" className="text-[10px] font-mono uppercase shrink-0">
+                          {m.model_id.includes("/") ? m.model_id.split("/")[0] : "llm"}
+                        </Badge>
+                      </label>
+                    );
+                  })}
+                </div>
+
+                {exportJsonError && (
+                  <p className="text-xs text-destructive font-medium">{exportJsonError}</p>
+                )}
+
+                <div className="flex items-center justify-end gap-2 pt-2 border-t border-border">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setShowExportJsonModal(false)}
+                    className="h-8 text-xs rounded-sm"
+                  >
+                    Cancelar
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    disabled={isExportingJson || exportSelectedModelIds.length === 0}
+                    onClick={handleExportConfirm}
+                    className="h-8 text-xs rounded-sm gap-1.5"
+                  >
+                    {isExportingJson ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <Download className="w-3.5 h-3.5" />
+                    )}
+                    <span>
+                      {exportSelectedModelIds.length > 1
+                        ? `Exportar ZIP (${exportSelectedModelIds.length} modelos)`
+                        : "Exportar JSON"}
+                    </span>
+                  </Button>
+                </div>
+              </div>
+            );
+          })()}
+        </DialogContent>
+      </Dialog>
 
     </div>
   );

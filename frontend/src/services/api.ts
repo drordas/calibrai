@@ -1134,3 +1134,24 @@ export async function revokeProfileShare(profileId: number, shareId: number): Pr
     throw new Error(err.detail || "Error al revocar acceso al perfil");
   }
 }
+
+export async function exportExperimentModelsJson(
+  experimentId: string,
+  modelIds: string[]
+): Promise<{ blob: Blob; filename: string }> {
+  const res = await fetch(`${API_BASE}/experiments/${experimentId}/export-json`, {
+    method: "POST",
+    headers: getAuthHeaders(),
+    body: JSON.stringify({ model_ids: modelIds }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || "Error al exportar JSON de modelos");
+  }
+  const disposition = res.headers.get("Content-Disposition") || "";
+  const match = disposition.match(/filename="?([^"]+)"?/i);
+  const fallback = modelIds.length > 1 ? "models_json.zip" : "model_output.json";
+  const filename = match ? match[1] : fallback;
+  const blob = await res.blob();
+  return { blob, filename };
+}
