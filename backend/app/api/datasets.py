@@ -68,11 +68,12 @@ def list_datasets(
         .all()
     )
     outgoing_shared_ids = {
-        (s.source_dataset_id or s.dataset_id)
+        s.dataset_id
         for s in db.query(DatasetShare)
         .filter(
             DatasetShare.owner_user_id == current_user.id,
-            DatasetShare.share_mode.in_(["view", "edit", "copy"]),
+            DatasetShare.share_mode.in_(["view", "edit"]),
+            DatasetShare.status.in_(["pending", "accepted"]),
         )
         .all()
     }
@@ -158,6 +159,7 @@ def list_dataset_shares(
             DatasetShare.dataset_id == dataset_id,
             DatasetShare.owner_user_id == current_user.id,
             DatasetShare.share_mode.in_(["view", "edit"]),
+            DatasetShare.status.in_(["pending", "accepted"]),
         )
         .all()
     )

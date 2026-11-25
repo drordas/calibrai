@@ -214,6 +214,7 @@ class ConnectionProfileOut(BaseModel):
     api_key: str
     vram_gb: Optional[float] = None
     is_shared: bool = False
+    is_shared_by_owner: bool = False
     owner_username: Optional[str] = None
     max_vram_gb: Optional[float] = None
     created_at: str
@@ -223,6 +224,7 @@ class ConnectionProfileOut(BaseModel):
 def _serialize_profile(
     row: ConnectionProfile,
     is_shared: bool = False,
+    is_shared_by_owner: bool = False,
     owner_username: Optional[str] = None,
     max_vram_gb: Optional[float] = None,
 ) -> ConnectionProfileOut:
@@ -234,6 +236,7 @@ def _serialize_profile(
         api_key="" if is_shared else (row.api_key or ""),
         vram_gb=max_vram_gb if is_shared else row.vram_gb,
         is_shared=is_shared,
+        is_shared_by_owner=is_shared_by_owner,
         owner_username=owner_username,
         max_vram_gb=max_vram_gb if is_shared else row.vram_gb,
         created_at=row.created_at.isoformat() if row.created_at else "",
@@ -252,8 +255,20 @@ def list_connection_profiles(
         owned_q = owned_q.filter(ConnectionProfile.provider == provider.strip().lower())
     owned_rows = owned_q.order_by(ConnectionProfile.updated_at.desc(), ConnectionProfile.id.desc()).all()
 
+    shared_profile_ids = {
+        row[0]
+        for row in db.query(ConnectionProfileShare.profile_id)
+        .filter(ConnectionProfileShare.owner_user_id == current_user.id)
+        .all()
+    }
+
     result: List[ConnectionProfileOut] = [
-        _serialize_profile(r, is_shared=False, owner_username=current_user.username)
+        _serialize_profile(
+            r,
+            is_shared=False,
+            is_shared_by_owner=(r.id in shared_profile_ids),
+            owner_username=current_user.username,
+        )
         for r in owned_rows
     ]
 

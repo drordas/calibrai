@@ -1007,6 +1007,7 @@ export interface ConnectionProfileItem {
   api_key: string;
   vram_gb?: number | null;
   is_shared?: boolean;
+  is_shared_by_owner?: boolean;
   owner_username?: string | null;
   max_vram_gb?: number | null;
   created_at: string;

@@ -44,6 +44,7 @@ import {
   Trash2,
   Users,
 } from "lucide-react";
+import { SharedAccessModal } from "./SharedAccessModal";
 
 interface DashboardConnectionsModalProps {
   isOpen: boolean;
@@ -79,6 +80,7 @@ export const DashboardConnectionsModal: React.FC<DashboardConnectionsModalProps>
   const [shareMaxVramGb, setShareMaxVramGb] = useState<string>("");
   const [isSharing, setIsSharing] = useState(false);
   const [shareError, setShareError] = useState<string | null>(null);
+  const [sharedAccessTarget, setSharedAccessTarget] = useState<ConnectionProfileItem | null>(null);
 
   const loadProfiles = useCallback(async () => {
     setLoading(true);
@@ -307,7 +309,21 @@ export const DashboardConnectionsModal: React.FC<DashboardConnectionsModalProps>
                       <TableBody>
                         {ownedProfiles.map((p) => (
                           <TableRow key={p.id}>
-                            <TableCell className="text-xs font-semibold">{p.name}</TableCell>
+                            <TableCell className="text-xs font-semibold">
+                              <div className="flex items-center gap-1.5">
+                                {p.is_shared_by_owner && (
+                                  <button
+                                    type="button"
+                                    onClick={() => setSharedAccessTarget(p)}
+                                    title="Ver usuarios con acceso"
+                                    className="text-primary hover:text-primary/80 transition-colors shrink-0"
+                                  >
+                                    <Users className="w-3.5 h-3.5" />
+                                  </button>
+                                )}
+                                <span>{p.name}</span>
+                              </div>
+                            </TableCell>
                             <TableCell>{renderProviderBadge(p.provider)}</TableCell>
                             <TableCell className="text-[11px] font-mono text-muted-foreground max-w-[240px] truncate">
                               {p.provider === "ollama"
@@ -381,7 +397,19 @@ export const DashboardConnectionsModal: React.FC<DashboardConnectionsModalProps>
                       <TableBody>
                         {sharedWithMe.map((p) => (
                           <TableRow key={p.id}>
-                            <TableCell className="text-xs font-semibold">{p.name}</TableCell>
+                            <TableCell className="text-xs font-semibold">
+                              <div className="flex items-center gap-1.5">
+                                <button
+                                  type="button"
+                                  onClick={() => setSharedAccessTarget(p)}
+                                  title="Ver detalles de compartición"
+                                  className="text-primary hover:text-primary/80 transition-colors shrink-0"
+                                >
+                                  <Users className="w-3.5 h-3.5" />
+                                </button>
+                                <span>{p.name}</span>
+                              </div>
+                            </TableCell>
                             <TableCell>{renderProviderBadge(p.provider)}</TableCell>
                             <TableCell className="text-xs font-mono text-primary">
                               @{p.owner_username}
@@ -633,6 +661,34 @@ export const DashboardConnectionsModal: React.FC<DashboardConnectionsModalProps>
           </div>
         </DialogContent>
       </Dialog>
+
+      <SharedAccessModal
+        isOpen={Boolean(sharedAccessTarget)}
+        onClose={() => setSharedAccessTarget(null)}
+        resourceTypeLabel="Perfil de Conexión"
+        resourceName={sharedAccessTarget?.name || ""}
+        isOwner={!sharedAccessTarget?.is_shared}
+        sharedBy={sharedAccessTarget?.owner_username}
+        recipientShareMode="shared"
+        hideModeSelect={true}
+        loadShares={async () => {
+          if (!sharedAccessTarget) return [];
+          const rows = await fetchProfileShares(sharedAccessTarget.id);
+          return rows.map((r) => ({
+            id: r.id,
+            target_user_id: r.target_user_id,
+            target_username: r.target_username,
+            share_mode: "shared",
+            status: "accepted",
+            extraInfo: r.max_vram_gb != null ? `VRAM máx: ${r.max_vram_gb} GB` : null,
+          }));
+        }}
+        onRevokeShare={async (shareId) => {
+          if (!sharedAccessTarget) return;
+          await revokeProfileShare(sharedAccessTarget.id, shareId);
+        }}
+        onChanged={loadProfiles}
+      />
     </>
   );
 };

@@ -103,6 +103,7 @@ def list_saved_prompts(
                 PromptShare.owner_user_id == current_user.id,
                 PromptShare.prompt_id.in_(owned_ids),
                 PromptShare.share_mode.in_(["view", "edit"]),
+                PromptShare.status.in_(["pending", "accepted"]),
             )
             .all()
         }
@@ -261,6 +262,7 @@ def list_prompt_shares(
             PromptShare.prompt_id == prompt_id,
             PromptShare.owner_user_id == current_user.id,
             PromptShare.share_mode.in_(["view", "edit"]),
+            PromptShare.status.in_(["pending", "accepted"]),
         )
         .all()
     )

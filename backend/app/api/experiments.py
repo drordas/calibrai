@@ -78,6 +78,7 @@ def list_experiments(
         .filter(
             ExperimentShare.owner_user_id == current_user.id,
             ExperimentShare.share_mode.in_(["view", "edit"]),
+            ExperimentShare.status.in_(["pending", "accepted"]),
         )
         .all()
     }
@@ -259,6 +260,7 @@ def list_experiment_shares(
             ExperimentShare.experiment_id == experiment_id,
             ExperimentShare.owner_user_id == current_user.id,
             ExperimentShare.share_mode.in_(["view", "edit"]),
+            ExperimentShare.status.in_(["pending", "accepted"]),
         )
         .all()
     )

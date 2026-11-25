@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   Dialog,
   DialogContent,
@@ -23,6 +23,7 @@ export interface SharedAccessEntry {
   target_username: string;
   share_mode: string;
   status: string;
+  extraInfo?: string | null;
 }
 
 export interface SharedAccessModalProps {
@@ -33,6 +34,7 @@ export interface SharedAccessModalProps {
   isOwner: boolean;
   sharedBy?: string | null;
   recipientShareMode?: string | null;
+  hideModeSelect?: boolean;
   loadShares?: () => Promise<SharedAccessEntry[]>;
   onUpdateShareMode?: (shareId: number, newMode: "view" | "edit") => Promise<SharedAccessEntry>;
   onRevokeShare?: (shareId: number) => Promise<void>;
@@ -63,6 +65,7 @@ export const SharedAccessModal: React.FC<SharedAccessModalProps> = ({
   isOwner,
   sharedBy,
   recipientShareMode,
+  hideModeSelect = false,
   loadShares,
   onUpdateShareMode,
   onRevokeShare,
@@ -75,23 +78,26 @@ export const SharedAccessModal: React.FC<SharedAccessModalProps> = ({
   const [savingId, setSavingId] = useState<number | null>(null);
   const [revokingId, setRevokingId] = useState<number | null>(null);
 
+  const loadSharesRef = useRef(loadShares);
+  loadSharesRef.current = loadShares;
+
   useEffect(() => {
     if (!isOpen) {
       setEditingShareId(null);
       setError(null);
       return;
     }
-    if (!isOwner || !loadShares) {
+    if (!isOwner || !loadSharesRef.current) {
       setShares([]);
       return;
     }
     setLoading(true);
     setError(null);
-    loadShares()
+    loadSharesRef.current()
       .then((rows) => setShares(rows))
       .catch((err: any) => setError(err?.message || "Error cargando usuarios compartidos"))
       .finally(() => setLoading(false));
-  }, [isOpen, isOwner, loadShares]);
+  }, [isOpen, isOwner, resourceName]);
 
   const handleModeChange = async (shareId: number, newMode: "view" | "edit") => {
     if (!onUpdateShareMode) return;
@@ -128,6 +134,7 @@ export const SharedAccessModal: React.FC<SharedAccessModalProps> = ({
   const formatModeLabel = (mode?: string | null) => {
     if (mode === "edit") return "Edición";
     if (mode === "copy") return "Copia independiente";
+    if (mode === "shared") return "Acceso compartido";
     return "Visualizar (solo lectura)";
   };
 
@@ -193,7 +200,7 @@ export const SharedAccessModal: React.FC<SharedAccessModalProps> = ({
                     className="flex items-center justify-between gap-2.5 p-2.5 border border-border rounded-sm bg-background"
                   >
                     <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 flex-wrap">
                         <span className="text-xs font-mono font-semibold text-foreground truncate">
                           @{sh.target_username}
                         </span>
@@ -202,43 +209,57 @@ export const SharedAccessModal: React.FC<SharedAccessModalProps> = ({
                             Pendiente
                           </Badge>
                         )}
+                        {sh.status === "accepted" && (
+                          <Badge variant="outline" className="text-[10px] font-mono py-0 text-emerald-600 dark:text-emerald-400 border-emerald-500/40 bg-emerald-500/10">
+                            Aceptado
+                          </Badge>
+                        )}
+                        {sh.extraInfo && (
+                          <span className="text-[10px] font-mono text-muted-foreground">
+                            {sh.extraInfo}
+                          </span>
+                        )}
                       </div>
                     </div>
 
                     <div className="flex items-center gap-1.5 shrink-0">
-                      <Select
-                        value={sh.share_mode === "edit" ? "edit" : "view"}
-                        disabled={!isEditing || isBusy}
-                        onValueChange={(val) => handleModeChange(sh.id, val as "view" | "edit")}
-                      >
-                        <SelectTrigger className="h-7 w-[170px] text-[11px] font-mono bg-card border-border rounded-sm disabled:opacity-75">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent className="bg-card border-border rounded-sm shadow-none">
-                          <SelectItem value="view" className="text-xs">
-                            Visualizar (solo lectura)
-                          </SelectItem>
-                          <SelectItem value="edit" className="text-xs">
-                            Edición
-                          </SelectItem>
-                        </SelectContent>
-                      </Select>
+                      {!hideModeSelect && (
+                        <>
+                          <Select
+                            value={sh.share_mode === "edit" ? "edit" : "view"}
+                            disabled={!isEditing || isBusy}
+                            onValueChange={(val) => handleModeChange(sh.id, val as "view" | "edit")}
+                          >
+                            <SelectTrigger className="h-7 w-[170px] text-[11px] font-mono bg-card border-border rounded-sm disabled:opacity-75">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent className="bg-card border-border rounded-sm shadow-none">
+                              <SelectItem value="view" className="text-xs">
+                                Visualizar (solo lectura)
+                              </SelectItem>
+                              <SelectItem value="edit" className="text-xs">
+                                Edición
+                              </SelectItem>
+                            </SelectContent>
+                          </Select>
 
-                      <Button
-                        type="button"
-                        variant={isEditing ? "secondary" : "ghost"}
-                        size="icon"
-                        disabled={isBusy}
-                        onClick={() => setEditingShareId(isEditing ? null : sh.id)}
-                        className="h-7 w-7 rounded-sm text-muted-foreground hover:text-primary"
-                        title={isEditing ? "Cancelar edición" : "Cambiar modo de compartición"}
-                      >
-                        {savingId === sh.id ? (
-                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                        ) : (
-                          <Pencil className="w-3.5 h-3.5" />
-                        )}
-                      </Button>
+                          <Button
+                            type="button"
+                            variant={isEditing ? "secondary" : "ghost"}
+                            size="icon"
+                            disabled={isBusy}
+                            onClick={() => setEditingShareId(isEditing ? null : sh.id)}
+                            className="h-7 w-7 rounded-sm text-muted-foreground hover:text-primary"
+                            title={isEditing ? "Cancelar edición" : "Cambiar modo de compartición"}
+                          >
+                            {savingId === sh.id ? (
+                              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            ) : (
+                              <Pencil className="w-3.5 h-3.5" />
+                            )}
+                          </Button>
+                        </>
+                      )}
 
                       <Button
                         type="button"
