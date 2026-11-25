@@ -1580,18 +1580,6 @@ export function App() {
 
                 <div className="flex flex-col sm:flex-row items-center justify-end gap-3 pt-2">
                   <div className="flex flex-wrap items-center gap-2 ml-auto">
-                    {pairwiseList.length > 0 && (
-                      <Button
-                        id="btn-continue-matrix"
-                        onClick={() => setResultsTab("matrix")}
-                        variant="secondary"
-                        className="gap-2 h-10 px-4 text-xs font-semibold rounded-sm border border-border"
-                      >
-                        <Grid className="w-4 h-4 text-muted-foreground" />
-                        <span>{t("results.viewMatrix")}</span>
-                      </Button>
-                    )}
-
                     {currentExperimentId && Object.values(summaries).some((s) => !s.is_human_baseline) && (
                       <Button
                         id="btn-export-models-json"
@@ -1608,6 +1596,18 @@ export function App() {
                       >
                         <Download className="w-4 h-4 text-muted-foreground" />
                         <span>Exportar JSON</span>
+                      </Button>
+                    )}
+
+                    {pairwiseList.length > 0 && (
+                      <Button
+                        id="btn-continue-matrix"
+                        onClick={() => setResultsTab("matrix")}
+                        variant="secondary"
+                        className="gap-2 h-10 px-4 text-xs font-semibold rounded-sm border border-border"
+                      >
+                        <Grid className="w-4 h-4 text-muted-foreground" />
+                        <span>{t("results.viewMatrix")}</span>
                       </Button>
                     )}
 
