@@ -133,7 +133,17 @@ export const ValidationMethodologyView: React.FC<ValidationMethodologyViewProps>
     setIsAuditOpen(true);
   };
 
-  const handleOpenPairwiseAudit = (pair: PairwiseComparison) => {
+  const handleOpenPairwiseAudit = (
+    pair: PairwiseComparison,
+    metric?: {
+      key: "kappa" | "alpha" | "raw_agreement" | "baseline_ratio";
+      name: string;
+      value?: number;
+      displayValue?: string;
+      explanation?: string;
+      baselineKappa?: number;
+    }
+  ) => {
     if (!experimentId) return;
     setAuditConfig({
       type: "pairwise",
@@ -142,8 +152,12 @@ export const ValidationMethodologyView: React.FC<ValidationMethodologyViewProps>
       modelB: pair.model_b,
       modelAName: formatName(pair.model_a),
       modelBName: formatName(pair.model_b),
-      metricName: "Cohen's Kappa (κ)",
-      metricValue: pair.cohens_kappa,
+      metricKey: metric?.key ?? "kappa",
+      metricName: metric?.name ?? "Cohen's Kappa (κ)",
+      metricValue: metric?.value ?? pair.cohens_kappa,
+      metricDisplayValue: metric?.displayValue ?? pair.cohens_kappa.toFixed(4),
+      metricExplanation: metric?.explanation,
+      baselineKappa: metric?.baselineKappa ?? humanBaselinePair?.cohens_kappa,
     });
     setIsAuditOpen(true);
   };
@@ -868,8 +882,10 @@ export const ValidationMethodologyView: React.FC<ValidationMethodologyViewProps>
               ))}
             </div>
           </div>
-          <span className="text-[11px] text-muted-foreground font-mono">
-            Haz clic en 👁️ para ver discrepancias
+          <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground font-mono">
+            <span>Haz clic en</span>
+            <Eye className="w-3.5 h-3.5 text-primary inline-block shrink-0" />
+            <span>para ver discrepancias</span>
           </span>
         </div>
 
@@ -984,9 +1000,17 @@ export const ValidationMethodologyView: React.FC<ValidationMethodologyViewProps>
                         {experimentId && (
                           <button
                             type="button"
-                            onClick={() => handleOpenPairwiseAudit(p)}
-                            title="Auditar discrepancias inter-juez fila a fila"
-                            aria-label={`Auditar discrepancias entre ${formatName(llmName)} y ${formatName(humanName)}`}
+                            onClick={() =>
+                              handleOpenPairwiseAudit(p, {
+                                key: "kappa",
+                                name: "Cohen's Kappa (κ)",
+                                value: p.cohens_kappa,
+                                displayValue: p.cohens_kappa.toFixed(4),
+                                explanation: `Acuerdo corregido por azar (κ = (Po − Pe) / (1 − Pe)) con Po = ${p.raw_agreement_rate.toFixed(1)}%.`,
+                              })
+                            }
+                            title="Ver cálculo y discrepancias de Cohen's Kappa (κ)"
+                            aria-label={`Ver detalle de Cohen's Kappa entre ${formatName(llmName)} y ${formatName(humanName)}`}
                             className="p-1 rounded hover:bg-muted/60 text-muted-foreground hover:text-primary transition-colors cursor-pointer"
                           >
                             <Eye className="w-3.5 h-3.5" />
@@ -995,13 +1019,80 @@ export const ValidationMethodologyView: React.FC<ValidationMethodologyViewProps>
                       </div>
                     </TableCell>
                     <TableCell className="text-xs text-center font-mono font-bold text-blue-400">
-                      {(p.krippendorff_alpha ?? p.cohens_kappa).toFixed(4)}
+                      <div className="flex items-center justify-center gap-1.5">
+                        <span>{(p.krippendorff_alpha ?? p.cohens_kappa).toFixed(4)}</span>
+                        {experimentId && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const alpha = p.krippendorff_alpha ?? p.cohens_kappa;
+                              handleOpenPairwiseAudit(p, {
+                                key: "alpha",
+                                name: "Krippendorff's Alpha (α)",
+                                value: alpha,
+                                displayValue: alpha.toFixed(4),
+                                explanation: `Fiabilidad α = 1 − (Do / De) calculada sobre los desacuerdos observados frente al azar.`,
+                              });
+                            }}
+                            title="Ver cálculo y discrepancias de Krippendorff's Alpha (α)"
+                            aria-label={`Ver detalle de Krippendorff's Alpha entre ${formatName(llmName)} y ${formatName(humanName)}`}
+                            className="p-1 rounded hover:bg-muted/60 text-muted-foreground hover:text-primary transition-colors cursor-pointer"
+                          >
+                            <Eye className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
                     </TableCell>
                     <TableCell className="text-xs text-center font-mono text-emerald-400">
-                      {p.raw_agreement_rate.toFixed(1)}%
+                      <div className="flex items-center justify-center gap-1.5">
+                        <span>{p.raw_agreement_rate.toFixed(1)}%</span>
+                        {experimentId && (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              handleOpenPairwiseAudit(p, {
+                                key: "raw_agreement",
+                                name: "Concordancia Bruta",
+                                value: p.raw_agreement_rate,
+                                displayValue: `${p.raw_agreement_rate.toFixed(1)}%`,
+                                explanation: "Porcentaje exacto de evaluaciones coincidentes (Po = Acuerdos / Total evaluaciones × 100%).",
+                              })
+                            }
+                            title="Ver cálculo y discrepancias de Concordancia Bruta"
+                            aria-label={`Ver detalle de Concordancia Bruta entre ${formatName(llmName)} y ${formatName(humanName)}`}
+                            className="p-1 rounded hover:bg-muted/60 text-muted-foreground hover:text-primary transition-colors cursor-pointer"
+                          >
+                            <Eye className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
                     </TableCell>
                     <TableCell className="text-xs text-center font-mono font-bold text-purple-400">
-                      {ratio !== undefined ? `${(ratio * 100).toFixed(1)}%` : "N/D"}
+                      <div className="flex items-center justify-center gap-1.5">
+                        <span>{ratio !== undefined ? `${(ratio * 100).toFixed(1)}%` : "N/D"}</span>
+                        {experimentId && ratio !== undefined && (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              handleOpenPairwiseAudit(p, {
+                                key: "baseline_ratio",
+                                name: "Ratio vs Línea Base Humana",
+                                value: ratio * 100,
+                                displayValue: `${(ratio * 100).toFixed(1)}%`,
+                                baselineKappa: humanBaselinePair?.cohens_kappa,
+                                explanation: humanBaselinePair
+                                  ? `Ratio = κ(${p.cohens_kappa.toFixed(4)}) / κ_humana(${humanBaselinePair.cohens_kappa.toFixed(4)}) × 100%.`
+                                  : "Proporción del acuerdo inter-humano alcanzada por el modelo.",
+                              })
+                            }
+                            title="Ver cálculo y discrepancias de Ratio vs Línea Base Humana"
+                            aria-label={`Ver detalle de Ratio vs Línea Base Humana entre ${formatName(llmName)} y ${formatName(humanName)}`}
+                            className="p-1 rounded hover:bg-muted/60 text-muted-foreground hover:text-primary transition-colors cursor-pointer"
+                          >
+                            <Eye className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
                     </TableCell>
                     <TableCell className="text-xs text-center">
                       <Badge variant="outline" className={`font-mono text-[10px] ${badgeColor}`}>

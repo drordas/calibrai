@@ -274,6 +274,41 @@ def list_experiment_shares(
     ]
 
 
+@router.patch("/{experiment_id}/shares/{share_id}", response_model=ExperimentShareEntryOut)
+def update_experiment_share_mode(
+    experiment_id: str,
+    share_id: int,
+    req: dict,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    new_mode = str(req.get("share_mode") or "").strip()
+    if new_mode not in ("view", "edit"):
+        raise HTTPException(status_code=400, detail="Modo de compartición inválido")
+    share = (
+        db.query(ExperimentShare)
+        .filter(
+            ExperimentShare.id == share_id,
+            ExperimentShare.experiment_id == experiment_id,
+            ExperimentShare.owner_user_id == current_user.id,
+        )
+        .first()
+    )
+    if not share:
+        raise HTTPException(status_code=404, detail="Compartición no encontrada")
+    share.share_mode = new_mode
+    db.commit()
+    db.refresh(share)
+    target_user = db.query(User).filter(User.id == share.target_user_id).first()
+    return ExperimentShareEntryOut(
+        id=share.id,
+        target_user_id=share.target_user_id,
+        target_username=target_user.username if target_user else "",
+        share_mode=share.share_mode,
+        status=share.status,
+    )
+
+
 @router.delete("/{experiment_id}/shares/{share_id}")
 def revoke_experiment_share(
     experiment_id: str,
@@ -913,6 +948,11 @@ def audit_pairwise_discrepancies(
     agreements_count = 0
     total_evals = 0
     evaluated_fields = set()
+    labels_a: List[str] = []
+    labels_b: List[str] = []
+    dim_stats: Dict[str, Dict[str, int]] = {}
+    from collections import Counter
+    confusion_counts: Counter = Counter()
 
     for idx in range(min_len):
         ra = results_a[idx]
@@ -937,10 +977,19 @@ def audit_pairwise_discrepancies(
                 pol_a = str(item_a.get("polaridad") or item_a.get("sentiment") or "blank").lower()
                 pol_b = str(item_b.get("polaridad") or item_b.get("sentiment") or "blank").lower()
 
+                labels_a.append(pol_a)
+                labels_b.append(pol_b)
+                if dk not in dim_stats:
+                    dim_stats[dk] = {"agreements": 0, "disagreements": 0, "total": 0}
+                dim_stats[dk]["total"] += 1
+
                 total_evals += 1
                 if pol_a == pol_b:
                     agreements_count += 1
+                    dim_stats[dk]["agreements"] += 1
                 else:
+                    dim_stats[dk]["disagreements"] += 1
+                    confusion_counts[(pol_a, pol_b)] += 1
                     typed_a = _build_typed_quotes(item_a, source_text)
                     typed_b = _build_typed_quotes(item_b, source_text)
                     sample_diffs.append({
@@ -966,11 +1015,16 @@ def audit_pairwise_discrepancies(
             target_field = "resultado_calculo"
             va = pa.get(target_field) if target_field in pa else pa.get("polaridad_global")
             vb = pb.get(target_field) if target_field in pb else pb.get("polaridad_global")
+            pol_a = str(va).lower() if va is not None else "blank"
+            pol_b = str(vb).lower() if vb is not None else "blank"
+            labels_a.append(pol_a)
+            labels_b.append(pol_b)
             evaluated_fields.add(target_field)
             total_evals += 1
             if va == vb:
                 agreements_count += 1
             else:
+                confusion_counts[(pol_a, pol_b)] += 1
                 discrepancies.append({
                     "sample_index": ra.get("sample_index", idx),
                     "sample_id": resolved_sample_id,
@@ -987,6 +1041,24 @@ def audit_pairwise_discrepancies(
                     }]
                 })
 
+    n_labels = len(labels_a)
+    po = (agreements_count / n_labels) if n_labels > 0 else 0.0
+    categories = sorted(list(set(labels_a) | set(labels_b)))
+    pe = 0.0
+    if n_labels > 0:
+        for cat in categories:
+            pa_cat = sum(1 for a in labels_a if a == cat) / n_labels
+            pb_cat = sum(1 for b in labels_b if b == cat) / n_labels
+            pe += pa_cat * pb_cat
+    kappa_val = 1.0 if (1.0 - pe) == 0 and po == 1.0 else (0.0 if (1.0 - pe) == 0 else round((po - pe) / (1.0 - pe), 4))
+
+    do_val = (sum(1 for a, b in zip(labels_a, labels_b) if a != b) / n_labels) if n_labels > 0 else 0.0
+    label_counts = Counter(labels_a + labels_b)
+    total_2n = 2 * n_labels
+    sum_nc_sq = sum(c ** 2 for c in label_counts.values())
+    de_val = ((total_2n ** 2 - sum_nc_sq) / (total_2n * (total_2n - 1))) if total_2n > 1 else 0.0
+    alpha_val = 1.0 if de_val == 0 and do_val == 0 else (0.0 if de_val == 0 else round(1.0 - (do_val / de_val), 4))
+
     return {
         "experiment_id": experiment_id,
         "model_a": model_a,
@@ -998,5 +1070,28 @@ def audit_pairwise_discrepancies(
         "agreements_count": agreements_count,
         "disagreements_count": total_evals - agreements_count,
         "samples_with_discrepancy": len(discrepancies),
+        "calculation_breakdown": {
+            "po": round(po, 4),
+            "pe": round(pe, 4),
+            "kappa": kappa_val,
+            "do": round(do_val, 4),
+            "de": round(de_val, 4),
+            "alpha": alpha_val,
+            "raw_agreement_rate": round(po * 100.0, 1),
+            "dimension_breakdown": [
+                {
+                    "dimension": dk,
+                    "agreements": st["agreements"],
+                    "disagreements": st["disagreements"],
+                    "total": st["total"],
+                    "agreement_pct": round((st["agreements"] / st["total"]) * 100.0, 1) if st["total"] > 0 else 0.0,
+                }
+                for dk, st in sorted(dim_stats.items())
+            ],
+            "top_confusions": [
+                {"model_a_val": k[0], "model_b_val": k[1], "count": c}
+                for k, c in confusion_counts.most_common(6)
+            ],
+        },
         "discrepancies": discrepancies
     }

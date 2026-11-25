@@ -3,6 +3,7 @@ import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, UploadFile, File, Form, HTTPException, Query, Response
+from pydantic import BaseModel
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 from backend.app.api.auth import get_current_user, get_optional_current_user
@@ -21,6 +22,10 @@ from backend.app.schemas.dataset import (
 )
 
 router = APIRouter(prefix="/api/datasets", tags=["datasets"])
+
+
+class UpdateShareModeRequest(BaseModel):
+    share_mode: str
 
 def _ensure_dataset_ownership(datasets: List[DatasetSummary], db: Session) -> Dict[str, DatasetRecord]:
     records = {r.dataset_id: r for r in db.query(DatasetRecord).all()}
@@ -170,6 +175,40 @@ def list_dataset_shares(
         )
         for s in shares
     ]
+
+
+@router.patch("/{dataset_id}/shares/{share_id}", response_model=DatasetShareEntryOut)
+def update_dataset_share_mode(
+    dataset_id: str,
+    share_id: int,
+    req: UpdateShareModeRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    if req.share_mode not in ("view", "edit"):
+        raise HTTPException(status_code=400, detail="Modo de compartición inválido")
+    share = (
+        db.query(DatasetShare)
+        .filter(
+            DatasetShare.id == share_id,
+            DatasetShare.dataset_id == dataset_id,
+            DatasetShare.owner_user_id == current_user.id,
+        )
+        .first()
+    )
+    if not share:
+        raise HTTPException(status_code=404, detail="Compartición no encontrada")
+    share.share_mode = req.share_mode
+    db.commit()
+    db.refresh(share)
+    target_user = db.query(User).filter(User.id == share.target_user_id).first()
+    return DatasetShareEntryOut(
+        id=share.id,
+        target_user_id=share.target_user_id,
+        target_username=target_user.username if target_user else "",
+        share_mode=share.share_mode,
+        status=share.status,
+    )
 
 
 @router.delete("/{dataset_id}/shares/{share_id}")

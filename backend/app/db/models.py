@@ -175,6 +175,18 @@ class SavedPrompt(Base):
     user = relationship("User", back_populates="saved_prompts")
 
 
+class PromptShare(Base):
+    __tablename__ = "prompt_shares"
+
+    id = Column(Integer, primary_key=True, index=True)
+    prompt_id = Column(Integer, ForeignKey("saved_prompts.id", ondelete="CASCADE"), nullable=False, index=True)
+    owner_user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    target_user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    share_mode = Column(String(20), default="view", nullable=False)  # "view" | "edit" | "copy"
+    status = Column(String(20), default="accepted", nullable=False)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+
+
 class ConnectionProfile(Base):
     __tablename__ = "connection_profiles"
 

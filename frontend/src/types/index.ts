@@ -357,6 +357,27 @@ export interface PairwiseAuditResponse {
   agreements_count: number;
   disagreements_count: number;
   samples_with_discrepancy: number;
+  calculation_breakdown?: {
+    po: number;
+    pe: number;
+    kappa: number;
+    do: number;
+    de: number;
+    alpha: number;
+    raw_agreement_rate: number;
+    dimension_breakdown: {
+      dimension: string;
+      agreements: number;
+      disagreements: number;
+      total: number;
+      agreement_pct: number;
+    }[];
+    top_confusions: {
+      model_a_val: string;
+      model_b_val: string;
+      count: number;
+    }[];
+  };
   discrepancies: {
     sample_index: number;
     sample_id?: string;

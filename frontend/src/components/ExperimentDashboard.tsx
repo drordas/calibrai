@@ -17,6 +17,7 @@ import {
   fetchShareableUsers,
   fetchExperimentShares,
   revokeExperimentShare,
+  updateExperimentShareMode,
   shareExperimentWithUser,
   respondToExperimentShare,
 } from "../services/api";
@@ -58,6 +59,7 @@ import {
 } from "lucide-react";
 import { DashboardDatasetsModal } from "./DashboardDatasetsModal";
 import { DashboardConnectionsModal } from "./DashboardConnectionsModal";
+import { SharedAccessModal } from "./SharedAccessModal";
 import { Label } from "@/components/ui/label";
 import {
   Select,
@@ -66,6 +68,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import {
   Card,
   CardHeader,
@@ -121,6 +129,7 @@ export const ExperimentDashboard: React.FC<ExperimentDashboardProps> = ({
 
   // Share Experiment state
   const [shareExpTarget, setShareExpTarget] = useState<ExperimentSummary | null>(null);
+  const [accessModalExp, setAccessModalExp] = useState<ExperimentSummary | null>(null);
   const [shareExpMode, setShareExpMode] = useState<"view" | "edit" | "copy">("view");
   const [shareUsers, setShareUsers] = useState<ShareUser[]>([]);
   const [activeExpShares, setActiveExpShares] = useState<ShareEntry[]>([]);
@@ -135,10 +144,10 @@ export const ExperimentDashboard: React.FC<ExperimentDashboardProps> = ({
     }
   }, [openDatasetsSignal]);
 
-  // Load experiments on mount and on poll
+  // Load all experiments on mount and on poll so tab & dropdown counts stay accurate
   const loadExperimentsList = async () => {
     try {
-      const data = await fetchExperiments(statusFilter === "all" ? undefined : statusFilter);
+      const data = await fetchExperiments();
       setExperiments(data);
     } catch (err) {
       console.error("Error loading experiments:", err);
@@ -152,7 +161,7 @@ export const ExperimentDashboard: React.FC<ExperimentDashboardProps> = ({
     // Poll every 3 seconds to keep progress and queue state live
     const interval = setInterval(loadExperimentsList, 3000);
     return () => clearInterval(interval);
-  }, [statusFilter]);
+  }, []);
 
   // Handle Pause
   const handlePause = async (id: string, e: React.MouseEvent) => {
@@ -509,30 +518,126 @@ export const ExperimentDashboard: React.FC<ExperimentDashboardProps> = ({
       )}
 
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-        <div className="flex items-center gap-1 p-1 bg-card rounded-sm border border-border flex-wrap">
-          {[
-            { id: "all", label: t("common.all"), count: experiments.length },
-            { id: "draft", label: t("templates.tabLabel"), count: draftCount },
-            { id: "running", label: t("dashboard.kpiRunning"), count: runningCount },
-            { id: "queued", label: t("dashboard.statusQueued"), count: queuedCount },
-            { id: "paused", label: t("dashboard.statusPaused"), count: pausedCount },
-            { id: "completed", label: t("dashboard.statusCompleted"), count: completedCount },
-          ].map((tab) => (
-            <button
-              key={tab.id}
-              type="button"
-              onClick={() => setStatusFilter(tab.id)}
-              className={`px-3 py-1 rounded-sm text-xs font-serif transition-colors cursor-pointer ${
-                statusFilter === tab.id
-                  ? "bg-primary text-primary-foreground font-bold"
-                  : "text-foreground/80 hover:text-foreground hover:bg-muted/60 font-medium"
-              }`}
-            >
-              <span>{tab.label}</span>
-              <span className="ml-1.5 text-[10px] opacity-80 font-mono">({tab.count})</span>
-            </button>
-          ))}
-        </div>
+        {(() => {
+          const nonDraftCount = experiments.filter((e) => e.status !== "draft").length;
+          const isExpFilterActive = ["experiments_all", "completed", "running", "queued", "paused"].includes(statusFilter);
+          const expSubLabel =
+            statusFilter === "completed"
+              ? "Finalizados"
+              : statusFilter === "running"
+              ? t("dashboard.kpiRunning")
+              : statusFilter === "queued"
+              ? t("dashboard.statusQueued")
+              : statusFilter === "paused"
+              ? t("dashboard.statusPaused")
+              : null;
+          const expSubCount =
+            statusFilter === "completed"
+              ? completedCount
+              : statusFilter === "running"
+              ? runningCount
+              : statusFilter === "queued"
+              ? queuedCount
+              : statusFilter === "paused"
+              ? pausedCount
+              : nonDraftCount;
+
+          return (
+            <div className="flex items-center gap-1 p-1 bg-card rounded-sm border border-border flex-wrap">
+              <button
+                type="button"
+                onClick={() => setStatusFilter("all")}
+                className={`px-3 py-1 rounded-sm text-xs font-serif transition-colors cursor-pointer ${
+                  statusFilter === "all"
+                    ? "bg-primary text-primary-foreground font-bold"
+                    : "text-foreground/80 hover:text-foreground hover:bg-muted/60 font-medium"
+                }`}
+              >
+                <span>{t("common.all")}</span>
+                <span className="ml-1.5 text-[10px] opacity-80 font-mono">({experiments.length})</span>
+              </button>
+
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button
+                    type="button"
+                    className={`inline-flex items-center px-3 py-1 rounded-sm text-xs font-serif transition-colors cursor-pointer ${
+                      isExpFilterActive
+                        ? "bg-primary text-primary-foreground font-bold"
+                        : "text-foreground/80 hover:text-foreground hover:bg-muted/60 font-medium"
+                    }`}
+                  >
+                    <span>
+                      Experimentos{expSubLabel ? `: ${expSubLabel}` : ""}
+                    </span>
+                    <span className="ml-1.5 text-[10px] opacity-80 font-mono">({expSubCount})</span>
+                    <ChevronDown className="w-3 h-3 ml-1 opacity-80" />
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start" className="w-52 bg-card border-border rounded-sm shadow-md">
+                  <DropdownMenuItem
+                    onClick={() => setStatusFilter("experiments_all")}
+                    className={`text-xs font-serif justify-between cursor-pointer ${
+                      statusFilter === "experiments_all" ? "bg-primary/10 text-primary font-semibold" : ""
+                    }`}
+                  >
+                    <span>Todos los experimentos</span>
+                    <span className="font-mono text-[11px] text-muted-foreground">({nonDraftCount})</span>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onClick={() => setStatusFilter("completed")}
+                    className={`text-xs font-serif justify-between cursor-pointer ${
+                      statusFilter === "completed" ? "bg-primary/10 text-primary font-semibold" : ""
+                    }`}
+                  >
+                    <span>Finalizados</span>
+                    <span className="font-mono text-[11px] text-muted-foreground">({completedCount})</span>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onClick={() => setStatusFilter("running")}
+                    className={`text-xs font-serif justify-between cursor-pointer ${
+                      statusFilter === "running" ? "bg-primary/10 text-primary font-semibold" : ""
+                    }`}
+                  >
+                    <span>{t("dashboard.kpiRunning")}</span>
+                    <span className="font-mono text-[11px] text-muted-foreground">({runningCount})</span>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onClick={() => setStatusFilter("queued")}
+                    className={`text-xs font-serif justify-between cursor-pointer ${
+                      statusFilter === "queued" ? "bg-primary/10 text-primary font-semibold" : ""
+                    }`}
+                  >
+                    <span>{t("dashboard.statusQueued")}</span>
+                    <span className="font-mono text-[11px] text-muted-foreground">({queuedCount})</span>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onClick={() => setStatusFilter("paused")}
+                    className={`text-xs font-serif justify-between cursor-pointer ${
+                      statusFilter === "paused" ? "bg-primary/10 text-primary font-semibold" : ""
+                    }`}
+                  >
+                    <span>{t("dashboard.statusPaused")}</span>
+                    <span className="font-mono text-[11px] text-muted-foreground">({pausedCount})</span>
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+
+              <button
+                type="button"
+                onClick={() => setStatusFilter("draft")}
+                className={`px-3 py-1 rounded-sm text-xs font-serif transition-colors cursor-pointer ${
+                  statusFilter === "draft"
+                    ? "bg-primary text-primary-foreground font-bold"
+                    : "text-foreground/80 hover:text-foreground hover:bg-muted/60 font-medium"
+                }`}
+              >
+                <span>{t("templates.tabLabel")}</span>
+                <span className="ml-1.5 text-[10px] opacity-80 font-mono">({draftCount})</span>
+              </button>
+            </div>
+          );
+        })()}
 
         <Button
           type="button"
@@ -584,17 +689,8 @@ export const ExperimentDashboard: React.FC<ExperimentDashboardProps> = ({
             </Button>
           ) : null}
         </Card>
-      ) : (
-        <div className="space-y-4">
-          <div className="px-1">
-            <h2 className="font-serif text-base font-bold text-foreground">
-              <span className="text-primary mr-1.5">Registro I.</span>
-              <span>{t("dashboard.catalogTitle")}</span>
-            </h2>
-          </div>
-
-          <div className="border-t-2 border-b-2 border-foreground divide-y divide-border bg-card border-x border-x-border">
-          {experiments.map((exp) => {
+      ) : (() => {
+        const renderExperimentRow = (exp: ExperimentSummary) => {
             const isProcessing = exp.status === "running";
             const isPaused = exp.status === "paused";
             const isQueued = exp.status === "queued";
@@ -610,6 +706,23 @@ export const ExperimentDashboard: React.FC<ExperimentDashboardProps> = ({
                   {/* Left Column: Title & Info */}
                   <div className="space-y-2 flex-1">
                     <div className="flex flex-wrap items-center gap-2.5">
+                      {(exp.is_shared || exp.is_shared_by_owner) && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setAccessModalExp(exp);
+                          }}
+                          title={
+                            exp.shared_by
+                              ? t("dashboardDatasets.sharedBy", { username: exp.shared_by })
+                              : "Ver y gestionar accesos compartidos"
+                          }
+                          className="inline-flex items-center justify-center p-1 -ml-1 rounded-sm text-primary hover:bg-primary/10 transition-colors cursor-pointer shrink-0"
+                        >
+                          <Users className="w-3.5 h-3.5" />
+                        </button>
+                      )}
                       <h3 className="font-serif font-bold text-base text-foreground group-hover:text-primary transition-colors">
                         {exp.name}
                       </h3>
@@ -914,23 +1027,6 @@ export const ExperimentDashboard: React.FC<ExperimentDashboardProps> = ({
                       )
                     )}
 
-                    {/* Shared Badge / Icon */}
-                    {(exp.is_shared || exp.is_shared_by_owner) && (
-                      <Badge
-                        variant="outline"
-                        className="h-7 px-2 text-[10px] font-mono rounded-md border-primary/40 text-primary bg-primary/5 gap-1"
-                        title={
-                          exp.shared_by
-                            ? t("dashboardDatasets.sharedBy", { username: exp.shared_by })
-                            : t("dashboardDatasets.sharedBadge")
-                        }
-                      >
-                        <Users className="w-3 h-3" />
-                        <span>{t("dashboardDatasets.sharedBadge")}</span>
-                        {exp.share_mode ? <span>· {getExpModeLabel(exp.share_mode)}</span> : null}
-                      </Badge>
-                    )}
-
                     {/* Delete Button */}
                     <Button
                       type="button"
@@ -947,10 +1043,61 @@ export const ExperimentDashboard: React.FC<ExperimentDashboardProps> = ({
                 </div>
               </div>
             );
-          })}
+        };
+
+        const nonDraftExperiments =
+          statusFilter === "all" || statusFilter === "experiments_all"
+            ? experiments.filter((e) => e.status !== "draft")
+            : statusFilter === "draft"
+            ? []
+            : experiments.filter((e) => e.status === statusFilter);
+        const templateExperiments =
+          statusFilter === "all" || statusFilter === "draft"
+            ? experiments.filter((e) => e.status === "draft")
+            : [];
+
+        if (nonDraftExperiments.length === 0 && templateExperiments.length === 0) {
+          return (
+            <Card className="p-10 text-center bg-card border border-border rounded-sm">
+              <p className="text-xs text-muted-foreground font-mono">
+                No hay elementos que coincidan con este filtro.
+              </p>
+            </Card>
+          );
+        }
+
+        return (
+          <div className="space-y-6">
+            {nonDraftExperiments.length > 0 && (
+              <div className="space-y-4">
+                <div className="px-1">
+                  <h2 className="font-serif text-base font-bold text-foreground">
+                    <span className="text-primary mr-1.5">Registro I.</span>
+                    <span>{t("dashboard.catalogTitle")}</span>
+                  </h2>
+                </div>
+                <div className="border-t-2 border-b-2 border-foreground divide-y divide-border bg-card border-x border-x-border">
+                  {nonDraftExperiments.map(renderExperimentRow)}
+                </div>
+              </div>
+            )}
+
+            {templateExperiments.length > 0 && (
+              <div className="space-y-4">
+                <div className="px-1">
+                  <h2 className="font-serif text-base font-bold text-foreground">
+                    <span className="text-primary mr-1.5">Registro II.</span>
+                    <span>Catálogo de Plantillas</span>
+                  </h2>
+                </div>
+                <div className="border-t-2 border-b-2 border-foreground divide-y divide-border bg-card border-x border-x-border">
+                  {templateExperiments.map(renderExperimentRow)}
+                </div>
+              </div>
+            )}
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* Detail / Live Monitor Modal */}
       {showDetailModal && activeExpDetail && (
@@ -1260,6 +1407,28 @@ export const ExperimentDashboard: React.FC<ExperimentDashboardProps> = ({
           </div>
         </DialogContent>
       </Dialog>
+
+      <SharedAccessModal
+        isOpen={Boolean(accessModalExp)}
+        onClose={() => setAccessModalExp(null)}
+        resourceTypeLabel="Experimento"
+        resourceName={accessModalExp?.name || ""}
+        isOwner={Boolean(accessModalExp && !accessModalExp.is_shared)}
+        sharedBy={accessModalExp?.shared_by}
+        recipientShareMode={accessModalExp?.share_mode}
+        loadShares={accessModalExp ? () => fetchExperimentShares(accessModalExp.id) : undefined}
+        onUpdateShareMode={
+          accessModalExp
+            ? (shareId, mode) => updateExperimentShareMode(accessModalExp.id, shareId, mode)
+            : undefined
+        }
+        onRevokeShare={
+          accessModalExp
+            ? (shareId) => revokeExperimentShare(accessModalExp.id, shareId)
+            : undefined
+        }
+        onChanged={loadExperimentsList}
+      />
     </div>
   );
 };

@@ -3,6 +3,7 @@ import { ColumnDef, tableFeatures } from "@tanstack/react-table";
 import { DataTable } from "@/components/ui/data-table";
 import { DatasetSummary, PaginatedRowsResponse, ShareEntry, ShareUser } from "../types";
 import { DashboardPromptsModal } from "./DashboardPromptsModal";
+import { SharedAccessModal } from "./SharedAccessModal";
 import {
   copyDataset,
   deleteDataset,
@@ -16,6 +17,7 @@ import {
   respondToDatasetShare,
   revokeDatasetShare,
   shareDatasetWithUser,
+  updateDatasetShareMode,
   uploadDataset,
 } from "../services/api";
 import { useTranslation } from "../i18n";
@@ -104,6 +106,7 @@ export const DashboardDatasetsModal: React.FC<DashboardDatasetsModalProps> = ({
 
   // Share state
   const [shareTarget, setShareTarget] = useState<DatasetSummary | null>(null);
+  const [accessModalDs, setAccessModalDs] = useState<DatasetSummary | null>(null);
   const [shareMode, setShareMode] = useState<"view" | "edit" | "copy">("view");
   const [shareUsers, setShareUsers] = useState<ShareUser[]>([]);
   const [activeShares, setActiveShares] = useState<ShareEntry[]>([]);
@@ -448,16 +451,18 @@ export const DashboardDatasetsModal: React.FC<DashboardDatasetsModalProps> = ({
                     ) : (
                       <div className="flex items-center gap-1.5 min-w-0">
                         {isSharedAny && (
-                          <span
+                          <button
+                            type="button"
+                            onClick={() => setAccessModalDs(ds)}
                             title={
                               ds.shared_by
                                 ? t("dashboardDatasets.sharedBy", { username: ds.shared_by })
-                                : t("dashboardDatasets.sharedBadge")
+                                : "Ver y gestionar accesos compartidos"
                             }
-                            className="inline-flex items-center text-primary shrink-0"
+                            className="inline-flex items-center justify-center p-0.5 rounded-sm text-primary hover:bg-primary/10 transition-colors cursor-pointer shrink-0"
                           >
                             <Users className="w-3.5 h-3.5" />
-                          </span>
+                          </button>
                         )}
                         {isCopy && (
                           <span
@@ -1054,6 +1059,26 @@ export const DashboardDatasetsModal: React.FC<DashboardDatasetsModalProps> = ({
           setPromptsModalDatasetId(null);
           loadDatasets();
         }}
+      />
+
+      <SharedAccessModal
+        isOpen={Boolean(accessModalDs)}
+        onClose={() => setAccessModalDs(null)}
+        resourceTypeLabel="Dataset"
+        resourceName={accessModalDs?.name || ""}
+        isOwner={Boolean(accessModalDs && !accessModalDs.is_shared)}
+        sharedBy={accessModalDs?.shared_by}
+        recipientShareMode={accessModalDs?.share_mode}
+        loadShares={accessModalDs ? () => fetchDatasetShares(accessModalDs.id) : undefined}
+        onUpdateShareMode={
+          accessModalDs
+            ? (shareId, mode) => updateDatasetShareMode(accessModalDs.id, shareId, mode)
+            : undefined
+        }
+        onRevokeShare={
+          accessModalDs ? (shareId) => revokeDatasetShare(accessModalDs.id, shareId) : undefined
+        }
+        onChanged={loadDatasets}
       />
     </>
   );

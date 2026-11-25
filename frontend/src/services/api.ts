@@ -249,6 +249,23 @@ export async function fetchDatasetShares(datasetId: string): Promise<Array<{ id:
   return res.json();
 }
 
+export async function updateDatasetShareMode(
+  datasetId: string,
+  shareId: number,
+  shareMode: "view" | "edit"
+): Promise<{ id: number; target_user_id: number; target_username: string; share_mode: string; status: string }> {
+  const res = await fetch(`${API_BASE}/datasets/${encodeURIComponent(datasetId)}/shares/${shareId}`, {
+    method: "PATCH",
+    headers: getAuthHeaders(),
+    body: JSON.stringify({ share_mode: shareMode }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: "Error actualizando modo de compartición" }));
+    throw new Error(err.detail || "Error actualizando modo de compartición");
+  }
+  return res.json();
+}
+
 export async function revokeDatasetShare(datasetId: string, shareId: number): Promise<void> {
   const res = await fetch(`${API_BASE}/datasets/${datasetId}/shares/${shareId}`, {
     method: "DELETE",
@@ -382,6 +399,86 @@ export interface SavedPromptItem {
   model_prompt: string;
   created_at: string;
   updated_at: string;
+  is_shared?: boolean;
+  is_shared_by_owner?: boolean;
+  shared_by?: string | null;
+  share_mode?: string | null;
+  share_id?: number | null;
+}
+
+export interface PromptShareEntry {
+  id: number;
+  target_user_id: number;
+  target_username: string;
+  share_mode: string;
+  status: string;
+}
+
+export interface SharePromptResult {
+  status: string;
+  requires_dataset_share?: boolean;
+  dataset_id?: string;
+  dataset_name?: string;
+  target_user_id?: number;
+  target_username?: string;
+  prompt_id?: number;
+  share_mode?: string;
+}
+
+export async function fetchPromptShares(promptId: number): Promise<PromptShareEntry[]> {
+  const res = await fetch(`${API_BASE}/prompts/saved/${promptId}/shares`, {
+    headers: getAuthHeaders(),
+  });
+  if (!res.ok) throw new Error("Error cargando comparticiones del prompt");
+  return res.json();
+}
+
+export async function shareSavedPrompt(
+  promptId: number,
+  payload: {
+    target_user_id: number;
+    share_mode: "view" | "edit" | "copy";
+    dataset_share_mode?: "view" | "edit" | "copy";
+  }
+): Promise<SharePromptResult> {
+  const res = await fetch(`${API_BASE}/prompts/saved/${promptId}/share`, {
+    method: "POST",
+    headers: getAuthHeaders(),
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: "Error compartiendo prompt" }));
+    throw new Error(err.detail || "Error compartiendo prompt");
+  }
+  return res.json();
+}
+
+export async function updatePromptShareMode(
+  promptId: number,
+  shareId: number,
+  shareMode: "view" | "edit"
+): Promise<PromptShareEntry> {
+  const res = await fetch(`${API_BASE}/prompts/saved/${promptId}/shares/${shareId}`, {
+    method: "PATCH",
+    headers: getAuthHeaders(),
+    body: JSON.stringify({ share_mode: shareMode }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: "Error actualizando modo de compartición" }));
+    throw new Error(err.detail || "Error actualizando modo de compartición");
+  }
+  return res.json();
+}
+
+export async function revokePromptShare(promptId: number, shareId: number): Promise<void> {
+  const res = await fetch(`${API_BASE}/prompts/saved/${promptId}/shares/${shareId}`, {
+    method: "DELETE",
+    headers: getAuthHeaders(),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: "Error al descompartir prompt" }));
+    throw new Error(err.detail || "Error al descompartir prompt");
+  }
 }
 
 export async function fetchSavedPrompts(datasetId?: string): Promise<SavedPromptItem[]> {
@@ -705,6 +802,23 @@ export async function fetchExperimentShares(experimentId: string): Promise<Array
     headers: getAuthHeaders(),
   });
   if (!res.ok) throw new Error("Error cargando comparticiones");
+  return res.json();
+}
+
+export async function updateExperimentShareMode(
+  experimentId: string,
+  shareId: number,
+  shareMode: "view" | "edit"
+): Promise<{ id: number; target_user_id: number; target_username: string; share_mode: string; status: string }> {
+  const res = await fetch(`${API_BASE}/experiments/${encodeURIComponent(experimentId)}/shares/${shareId}`, {
+    method: "PATCH",
+    headers: getAuthHeaders(),
+    body: JSON.stringify({ share_mode: shareMode }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: "Error actualizando modo de compartición" }));
+    throw new Error(err.detail || "Error actualizando modo de compartición");
+  }
   return res.json();
 }
 

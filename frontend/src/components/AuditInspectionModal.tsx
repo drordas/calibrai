@@ -46,8 +46,12 @@ export type AuditModalConfig =
       modelB: string;
       modelAName?: string;
       modelBName?: string;
+      metricKey?: "kappa" | "alpha" | "raw_agreement" | "baseline_ratio";
       metricName?: string;
       metricValue?: number;
+      metricDisplayValue?: string;
+      metricExplanation?: string;
+      baselineKappa?: number;
     }
   | null;
 
@@ -317,6 +321,14 @@ export const AuditInspectionModal: React.FC<AuditInspectionModalProps> = ({
   if (!config) return null;
 
   const isModelMode = config.type === "model";
+  const pairwiseDimensions = pairwiseAudit
+    ? Array.from(new Set(pairwiseAudit.discrepancies.flatMap((d) => d.differences.map((diff) => diff.dimension))))
+    : [];
+  const visibleDiscrepancySamples = pairwiseAudit
+    ? selectedDimension === "all"
+      ? pairwiseAudit.discrepancies.length
+      : pairwiseAudit.discrepancies.filter((d) => d.differences.some((diff) => diff.dimension === selectedDimension)).length
+    : 0;
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
@@ -434,6 +446,129 @@ export const AuditInspectionModal: React.FC<AuditInspectionModalProps> = ({
             </div>
           )}
 
+          {!isModelMode && config.metricName && (
+            <div className="px-3 py-2.5 rounded-md bg-primary/5 border border-primary/20 text-xs space-y-2">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <Badge variant="outline" className="font-mono text-[11px] bg-primary/10 text-primary border-primary/30 font-semibold">
+                    {config.metricName}: {config.metricDisplayValue ?? (config.metricValue !== undefined ? config.metricValue.toFixed(4) : "N/D")}
+                  </Badge>
+                  {config.metricExplanation && (
+                    <span className="text-[11px] text-muted-foreground">{config.metricExplanation}</span>
+                  )}
+                </div>
+                {pairwiseAudit && (
+                  <span className="text-[11px] font-mono text-muted-foreground">
+                    {pairwiseAudit.agreements_count} acuerdos / {pairwiseAudit.total_aspect_evaluations} evals ({pairwiseAudit.total_compared} muestras)
+                  </span>
+                )}
+              </div>
+
+              {pairwiseAudit?.calculation_breakdown && (() => {
+                const bd = pairwiseAudit.calculation_breakdown;
+                const key = config.metricKey || "kappa";
+                return (
+                  <div className="pt-2 border-t border-primary/15 space-y-2">
+                    {/* Exact formula with real numbers for the selected metric */}
+                    <div className="p-2 rounded bg-background/80 border border-border/70 font-mono text-[11px] text-foreground flex flex-wrap items-center gap-x-3 gap-y-1">
+                      {key === "kappa" && (
+                        <>
+                          <span>
+                            <strong className="text-primary">Po</strong> (obs.) = {pairwiseAudit.agreements_count}/{pairwiseAudit.total_aspect_evaluations} = <strong>{bd.po.toFixed(4)}</strong>
+                          </span>
+                          <span>
+                            <strong className="text-amber-500">Pe</strong> (azar) = <strong>{bd.pe.toFixed(4)}</strong>
+                          </span>
+                          <span>
+                            <strong>κ</strong> = ({bd.po.toFixed(4)} − {bd.pe.toFixed(4)}) / (1 − {bd.pe.toFixed(4)}) = <strong className="text-primary">{bd.kappa.toFixed(4)}</strong>
+                          </span>
+                        </>
+                      )}
+                      {key === "alpha" && (
+                        <>
+                          <span>
+                            <strong className="text-destructive">Do</strong> (desacuerdo obs.) = {pairwiseAudit.disagreements_count}/{pairwiseAudit.total_aspect_evaluations} = <strong>{bd.do.toFixed(4)}</strong>
+                          </span>
+                          <span>
+                            <strong className="text-amber-500">De</strong> (desacuerdo esp.) = <strong>{bd.de.toFixed(4)}</strong>
+                          </span>
+                          <span>
+                            <strong>α</strong> = 1 − ({bd.do.toFixed(4)} / {bd.de.toFixed(4)}) = <strong className="text-blue-400">{bd.alpha.toFixed(4)}</strong>
+                          </span>
+                        </>
+                      )}
+                      {key === "raw_agreement" && (
+                        <span>
+                          <strong>Po</strong> = {pairwiseAudit.agreements_count} acuerdos / {pairwiseAudit.total_aspect_evaluations} evaluaciones × 100% = <strong className="text-emerald-500">{bd.raw_agreement_rate.toFixed(1)}%</strong>
+                        </span>
+                      )}
+                      {key === "baseline_ratio" && (
+                        <>
+                          <span>
+                            <strong>κ(modelo)</strong> = {bd.kappa.toFixed(4)}
+                          </span>
+                          {config.baselineKappa !== undefined && (
+                            <span>
+                              <strong>κ(línea base humana)</strong> = {config.baselineKappa.toFixed(4)}
+                            </span>
+                          )}
+                          <span>
+                            <strong>Ratio</strong> = <strong className="text-purple-400">{config.metricDisplayValue}</strong>
+                          </span>
+                        </>
+                      )}
+                    </div>
+
+                    {/* Per-dimension agreement + top confusion patterns */}
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      {bd.dimension_breakdown.length > 0 && (
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className="text-[10px] font-semibold text-muted-foreground uppercase">Por variable:</span>
+                          {bd.dimension_breakdown.map((dim) => {
+                            const isSelected = selectedDimension === dim.dimension;
+                            const pctColor =
+                              dim.agreement_pct >= 80
+                                ? "border-emerald-500/30 text-emerald-600 dark:text-emerald-400 bg-emerald-500/10"
+                                : dim.agreement_pct >= 60
+                                ? "border-amber-500/30 text-amber-600 dark:text-amber-400 bg-amber-500/10"
+                                : "border-destructive/30 text-destructive bg-destructive/10";
+                            return (
+                              <button
+                                key={dim.dimension}
+                                type="button"
+                                onClick={() => setSelectedDimension(isSelected ? "all" : dim.dimension)}
+                                title="Clic para filtrar discrepancias de esta variable"
+                                className={`px-1.5 py-0.5 rounded border text-[10px] font-mono transition-all cursor-pointer ${pctColor} ${
+                                  isSelected ? "ring-1 ring-primary font-bold" : "opacity-90 hover:opacity-100"
+                                }`}
+                              >
+                                {dim.dimension.replace(/_/g, " ")}: {dim.agreements}/{dim.total} ({dim.agreement_pct.toFixed(0)}%)
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
+
+                      {bd.top_confusions.length > 0 && (
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className="text-[10px] font-semibold text-muted-foreground uppercase">Confusiones frecuentes:</span>
+                          {bd.top_confusions.slice(0, 3).map((c, idx) => (
+                            <span
+                              key={idx}
+                              className="px-1.5 py-0.5 rounded bg-muted/50 border border-border text-[10px] font-mono text-foreground"
+                            >
+                              {c.model_a_val} vs {c.model_b_val} (×{c.count})
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })()}
+            </div>
+          )}
+
           {!isModelMode && pairwiseAudit && (
             <div className="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-border/60">
               <div className="flex items-center gap-2">
@@ -443,12 +578,8 @@ export const AuditInspectionModal: React.FC<AuditInspectionModalProps> = ({
                   onChange={(e) => setSelectedDimension(e.target.value)}
                   className="h-7 text-xs rounded-md border border-border bg-card px-2 text-foreground font-mono focus:outline-none focus:ring-1 focus:ring-ring"
                 >
-                  <option value="all">Todas las variables ({pairwiseAudit.discrepancies.length})</option>
-                  {Array.from(
-                    new Set(
-                      pairwiseAudit.discrepancies.flatMap((d) => d.differences.map((diff) => diff.dimension))
-                    )
-                  ).map((dim) => (
+                  <option value="all">Todas las variables ({pairwiseDimensions.length})</option>
+                  {pairwiseDimensions.map((dim) => (
                     <option key={dim} value={dim}>
                       {dim.replace(/_/g, " ").toUpperCase()}
                     </option>
@@ -456,16 +587,21 @@ export const AuditInspectionModal: React.FC<AuditInspectionModalProps> = ({
                 </select>
               </div>
 
-              <div className="flex items-center gap-3 text-xs font-mono">
-                <span className="text-emerald-700 dark:text-emerald-400 font-semibold">
-                  Acuerdos: {pairwiseAudit.agreements_count}
+              <div className="flex flex-col items-end gap-0.5 text-xs font-mono">
+                <span className="text-[11px] text-muted-foreground">
+                  Total muestras: {visibleDiscrepancySamples}
                 </span>
-                <span className="text-destructive font-semibold">
-                  Desacuerdos: {pairwiseAudit.disagreements_count}
-                </span>
-                <span className="text-muted-foreground">
-                  ({((pairwiseAudit.agreements_count / (pairwiseAudit.total_aspect_evaluations || 1)) * 100).toFixed(1)}% consenso)
-                </span>
+                <div className="flex items-center gap-3">
+                  <span className="text-emerald-700 dark:text-emerald-400 font-semibold">
+                    Acuerdos: {pairwiseAudit.agreements_count}
+                  </span>
+                  <span className="text-destructive font-semibold">
+                    Desacuerdos: {pairwiseAudit.disagreements_count}
+                  </span>
+                  <span className="text-muted-foreground">
+                    ({((pairwiseAudit.agreements_count / (pairwiseAudit.total_aspect_evaluations || 1)) * 100).toFixed(1)}% consenso)
+                  </span>
+                </div>
               </div>
             </div>
           )}
