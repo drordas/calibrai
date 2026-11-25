@@ -619,7 +619,7 @@ export function App() {
     <div className="min-h-screen bg-background text-foreground flex flex-col font-sans relative overflow-x-hidden">
       {/* Monograph Double-Ruled Editorial Masthead */}
       <header className="sticky top-0 z-30 bg-background/95 backdrop-blur-sm border-t-[3px] border-t-foreground border-b border-b-foreground/85">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 min-h-16 py-2.5 flex flex-wrap items-center justify-between gap-3">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 min-h-16 py-2.5 flex flex-wrap lg:flex-nowrap items-center justify-between gap-2 lg:gap-3">
           {/* Left Editorial Masthead & Active Dataset Telemetry */}
           <button
             type="button"
@@ -647,11 +647,11 @@ export function App() {
           </button>
 
           {/* Center Monograph Section Navigation (Responsive on both mobile and desktop) */}
-          <nav aria-label="Secciones principales" className="order-3 lg:order-2 w-full lg:w-auto flex items-center justify-between lg:justify-start gap-1 border border-border bg-card/80 p-1 rounded-sm">
+          <nav aria-label="Secciones principales" className="order-3 lg:order-2 w-full lg:w-auto flex items-center justify-between lg:justify-start gap-1 border border-border bg-card/80 p-1 rounded-sm shrink-0">
             <button
               type="button"
               onClick={() => setCurrentMode("dashboard")}
-              className={`flex-1 lg:flex-initial flex items-center justify-center gap-1.5 px-2.5 sm:px-3.5 py-1.5 text-xs font-serif transition-colors cursor-pointer rounded-sm ${
+              className={`flex-1 lg:flex-initial flex items-center justify-center gap-1.5 px-2.5 xl:px-3.5 py-1.5 text-xs font-serif whitespace-nowrap transition-colors cursor-pointer rounded-sm ${
                 currentMode === "dashboard"
                   ? "bg-primary text-primary-foreground font-bold"
                   : "text-foreground/80 hover:text-foreground hover:bg-muted/60 font-medium"
@@ -674,7 +674,7 @@ export function App() {
                   ? t("nav.tooltipNewBenchmark")
                   : undefined
               }
-              className={`flex-1 lg:flex-initial flex items-center justify-center gap-1.5 px-2.5 sm:px-3.5 py-1.5 text-xs font-serif transition-colors rounded-sm ${
+              className={`flex-1 lg:flex-initial flex items-center justify-center gap-1.5 px-2.5 xl:px-3.5 py-1.5 text-xs font-serif whitespace-nowrap transition-colors rounded-sm ${
                 !selectedDataset && currentMode !== "wizard"
                   ? "opacity-40 cursor-not-allowed text-muted-foreground"
                   : currentMode === "wizard"
@@ -707,7 +707,7 @@ export function App() {
                   ? t("nav.tooltipResultsNoData")
                   : undefined
               }
-              className={`flex-1 lg:flex-initial flex items-center justify-center gap-1.5 px-2.5 sm:px-3.5 py-1.5 text-xs font-serif transition-colors rounded-sm ${
+              className={`flex-1 lg:flex-initial flex items-center justify-center gap-1.5 px-2.5 xl:px-3.5 py-1.5 text-xs font-serif whitespace-nowrap transition-colors rounded-sm ${
                 !selectedDataset || !hasBenchmarkResults
                   ? "opacity-40 cursor-not-allowed text-muted-foreground"
                   : currentMode === "results"
