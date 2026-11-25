@@ -35,9 +35,29 @@ import {
   FolderOpen,
   Share2,
   Lock,
+  Plug,
   Users,
   X,
 } from "lucide-react";
+
+const PlugOffIcon: React.FC<{ className?: string; title?: string }> = ({
+  className = "w-3.5 h-3.5",
+  title,
+}) => (
+  <span className={`relative inline-flex items-center justify-center ${className}`} title={title}>
+    <Plug className="w-full h-full" />
+    <svg
+      viewBox="0 0 24 24"
+      className="absolute inset-0 w-full h-full pointer-events-none"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.4"
+      strokeLinecap="round"
+    >
+      <line x1="3" y1="3" x2="21" y2="21" />
+    </svg>
+  </span>
+);
 import {
   discoverLocalModels,
   discoverRemoteModels,
@@ -206,11 +226,6 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
     fetchConnectionProfiles()
       .then((rows) => {
         setConnectionProfiles(rows);
-        const savedOllamaPid = apiKeys["ollama_profile_id"];
-        if (savedOllamaPid) {
-          const match = rows.find((r) => String(r.id) === String(savedOllamaPid) && r.provider === "ollama");
-          if (match) setActiveLocalProfile(match);
-        }
       })
       .catch(() => {});
   }, []);
@@ -581,9 +596,9 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
     }
   }, []);
 
-  // Cloud API discovery states
+  // Cloud API discovery states (never auto-load saved connections; user loads profile manually)
   const [selectedCloudProvider, setSelectedCloudProvider] = useState<"openai" | "gemini" | "anthropic" | "groq">("openai");
-  const [currentKeyInput, setCurrentKeyInput] = useState<string>(apiKeys["openai"] || "");
+  const [currentKeyInput, setCurrentKeyInput] = useState<string>("");
   const [showKeyText, setShowKeyText] = useState<boolean>(false);
   const [discoveringRemote, setDiscoveringRemote] = useState<boolean>(false);
   const [remoteDiscoveredModels, setRemoteDiscoveredModels] = useState<ModelCatalogItem[]>([]);
@@ -598,10 +613,11 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
     }
   }, [selectedModelIds, setSelectedModelIds]);
 
-  // When switching cloud provider, sync the current key input with the stored key for that provider
+  // When switching cloud provider, clear key input unless user explicitly loads a profile
   const handleSelectCloudProvider = (provider: "openai" | "gemini" | "anthropic" | "groq") => {
     setSelectedCloudProvider(provider);
-    setCurrentKeyInput(apiKeys[provider] || "");
+    const loadedProfile = activeCloudProfiles[provider];
+    setCurrentKeyInput(loadedProfile && !loadedProfile.is_shared ? loadedProfile.api_key || "" : "");
     setRemoteError(null);
     setRemoteSuccessMsg(null);
     setRemoteDiscoveredModels([]);
@@ -1848,7 +1864,9 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
                   { id: "groq", name: "Groq LPU", desc: "Llama 3.3, Mixtral" },
                 ].map((prov) => {
                   const isSelected = selectedCloudProvider === prov.id;
-                  const hasSavedKey = Boolean(apiKeys[prov.id]);
+                  const matchingCount = connectionProfiles.filter(
+                    (p) => p.provider.toLowerCase() === prov.id
+                  ).length;
                   return (
                     <button
                       key={prov.id}
@@ -1860,10 +1878,20 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
                           : "bg-muted/20 border-border/70 hover:bg-muted/40"
                       }`}
                     >
-                      <div className="flex items-center justify-between">
+                      <div className="flex items-center justify-between gap-2">
                         <span className="font-bold text-xs text-foreground">{prov.name}</span>
-                        {hasSavedKey && (
-                          <span className="w-2 h-2 rounded-full bg-emerald-400" title={t("models.savedKeyTooltip")} />
+                        {matchingCount > 0 ? (
+                          <span
+                            title={`${matchingCount} perfil(es) de conexión asociado(s)`}
+                            className="inline-flex items-center text-primary shrink-0"
+                          >
+                            <Plug className="w-3.5 h-3.5" />
+                          </span>
+                        ) : (
+                          <PlugOffIcon
+                            className="w-3.5 h-3.5 text-muted-foreground/60 shrink-0"
+                            title="Sin perfiles de conexión asociados"
+                          />
                         )}
                       </div>
                       <div className="text-[10px] text-muted-foreground">{prov.desc}</div>

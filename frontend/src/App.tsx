@@ -76,6 +76,7 @@ import {
   Bell,
   Check,
   CheckCheck,
+  Upload,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -1749,9 +1750,9 @@ export function App() {
                         >
                           <div className="min-w-0 space-y-1">
                             <div className="flex items-center gap-2">
-                              <Badge variant="outline" className="text-[10px] border-primary/40 bg-primary/10 text-primary">
-                                {t("templates.badgeLabel")}
-                              </Badge>
+                              <span title={t("templates.badgeLabel")} className="inline-flex items-center text-primary shrink-0">
+                                <FileCode className="w-4 h-4" />
+                              </span>
                               <span className="text-xs font-semibold text-foreground truncate">{tpl.name}</span>
                             </div>
                             <div className="text-[11px] text-muted-foreground font-mono flex flex-wrap gap-x-3 gap-y-0.5">
@@ -1763,14 +1764,17 @@ export function App() {
                           <div className="flex items-center gap-1.5 shrink-0">
                             <Button
                               type="button"
-                              size="sm"
+                              variant="ghost"
+                              size="icon"
                               disabled={loadingTemplateId === tpl.id}
-                              className="h-7 px-3 text-xs bg-primary text-primary-foreground hover:bg-primary/90"
+                              title={t("templates.loadBtn")}
+                              aria-label={t("templates.loadBtn")}
+                              className="h-7 w-7 text-muted-foreground hover:text-primary"
                             >
                               {loadingTemplateId === tpl.id ? (
-                                <Loader2 className="w-3 h-3 animate-spin" />
+                                <Loader2 className="w-3.5 h-3.5 animate-spin" />
                               ) : (
-                                t("templates.loadBtn")
+                                <Upload className="w-3.5 h-3.5" />
                               )}
                             </Button>
                             <Button

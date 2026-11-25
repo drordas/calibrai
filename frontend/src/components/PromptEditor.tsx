@@ -1,4 +1,6 @@
 import React, { useState, useEffect, useLayoutEffect, useRef, useMemo } from "react";
+import CodeMirror, { EditorView } from "@uiw/react-codemirror";
+import { json as jsonLang } from "@codemirror/lang-json";
 import { DatasetSummary, PromptValidationResponse, MetricCatalogItem, ComputedSpec } from "../types";
 import {
   generatePromptTemplate,
@@ -15,6 +17,7 @@ import { useTranslation } from "../i18n";
 const MetricFormulaModal = React.lazy(() => import("./MetricFormulaModal"));
 import {
   Wand2,
+  WandSparkles,
   AlertCircle,
   CheckCircle2,
   AlertTriangle,
@@ -47,7 +50,7 @@ import {
   Save,
   FolderOpen,
   Loader2,
-  FileDown,
+  Upload,
   ArrowLeft,
   ChevronDown,
   ChevronRight,
@@ -514,6 +517,7 @@ export const PromptEditor: React.FC<PromptEditorProps> = ({
   const [selectedGroundTruth, setSelectedGroundTruth] = useState<string>("none");
   const [isAutodetecting, setIsAutodetecting] = useState<boolean>(false);
   const [autodetectSuccess, setAutodetectSuccess] = useState<boolean>(false);
+  const [lastGeneratedGtJson, setLastGeneratedGtJson] = useState<string | null>(null);
 
   // Metric Catalog & Formula Modal states
   const [selectedMetricModal, setSelectedMetricModal] = useState<MetricCatalogItem | null>(null);
@@ -1139,41 +1143,92 @@ export const PromptEditor: React.FC<PromptEditorProps> = ({
     }
   }, [outputSchemaText]);
 
+const SENTINEL_LABELS = new Set(["blank", "none", "null", "n/a", "na", "empty"]);
+
+function extractCategoriesFromSchemaValue(val: unknown): string[] {
+  if (typeof val !== "string") return [];
+  const match = val.match(/\(([^)]+)\)/);
+  if (!match || !match[1].includes("|")) return [];
+  return match[1]
+    .split("|")
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0 && !SENTINEL_LABELS.has(s.toLowerCase()));
+}
+
+function extractCategoriesFromPromptLine(line: string): string[] {
+  const match = line.match(/<([^>]+)>/);
+  if (!match || !match[1].includes("|")) return [];
+  return match[1]
+    .split("|")
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0 && !SENTINEL_LABELS.has(s.toLowerCase()));
+}
+
+const calibraiJsonEditorTheme = EditorView.theme({
+  "&": {
+    backgroundColor: "transparent !important",
+    fontSize: "12px",
+    height: "100%",
+  },
+  ".cm-gutters": {
+    backgroundColor: "transparent !important",
+    border: "none",
+  },
+  ".cm-scroller": {
+    fontFamily: "var(--font-mono, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace)",
+    lineHeight: "1.625",
+    overflow: "auto",
+  },
+  ".cm-content": {
+    padding: "12px",
+    caretColor: "currentColor",
+  },
+  "&.cm-focused": {
+    outline: "none",
+  },
+  ".cm-line": {
+    padding: "0",
+  },
+});
+
   const jsonPromptCoherence = useMemo(() => {
+    const emptyResult = {
+      hasSchema: false,
+      invalidJson: false,
+      isCoherent: true,
+      objectStatuses: [] as Array<{ key: string; covered: boolean; missingSubfields: string[]; colorIdx: number }>,
+      missingKeys: [] as string[],
+      missingInJsonKeys: [] as string[],
+      labelMismatches: [] as Array<{
+        path: string;
+        missingInPrompt: string[];
+        extraInPrompt: string[];
+        expectedCats: string[];
+      }>,
+    };
+
     const trimmed = (outputSchemaText || "").trim();
     if (!trimmed) {
-      return {
-        hasSchema: false,
-        invalidJson: false,
-        isCoherent: true,
-        objectStatuses: [] as Array<{ key: string; covered: boolean; missingSubfields: string[]; colorIdx: number }>,
-        missingKeys: [] as string[],
-      };
+      return emptyResult;
     }
     if (!parsedOutputSchema) {
       return {
+        ...emptyResult,
         hasSchema: true,
         invalidJson: true,
         isCoherent: false,
-        objectStatuses: [] as Array<{ key: string; covered: boolean; missingSubfields: string[]; colorIdx: number }>,
         missingKeys: ["JSON inválido"],
       };
     }
     const topKeys = Object.keys(parsedOutputSchema);
     if (topKeys.length === 0) {
-      return {
-        hasSchema: false,
-        invalidJson: false,
-        isCoherent: true,
-        objectStatuses: [] as Array<{ key: string; covered: boolean; missingSubfields: string[]; colorIdx: number }>,
-        missingKeys: [] as string[],
-      };
+      return emptyResult;
     }
 
     if (useJsonOutput) {
       return {
+        ...emptyResult,
         hasSchema: true,
-        invalidJson: false,
         isCoherent: true,
         objectStatuses: topKeys.map((k, idx) => ({
           key: k,
@@ -1181,12 +1236,10 @@ export const PromptEditor: React.FC<PromptEditorProps> = ({
           missingSubfields: [],
           colorIdx: idx % JSON_OBJECT_PALETTE.length,
         })),
-        missingKeys: [] as string[],
       };
     }
 
-    // Slice prompt into sections per top-level key so subfields are verified inside their own parent block
-    // Validate against (iv) Prompt de Salida if present; fall back to Instructions only when neither Examples nor Output Prompt are used
+    // Slice prompt into sections per top-level key so subfields & category sets are verified inside their own parent block
     const targetPromptForJson = outputPromptText.trim()
       ? outputPromptText
       : examplesText.trim()
@@ -1204,10 +1257,12 @@ export const PromptEditor: React.FC<PromptEditorProps> = ({
       headerMatches.push({ keyLower: hm[1].toLowerCase(), index: hm.index });
     }
     const sectionTokensByTopKey = new Map<string, Set<string>>();
+    const sectionSlicesByTopKey = new Map<string, string>();
     for (let i = 0; i < headerMatches.length; i++) {
       const start = headerMatches[i].index;
       const end = i + 1 < headerMatches.length ? headerMatches[i + 1].index : cleanPromptForSections.length;
       const slice = cleanPromptForSections.slice(start, end);
+      sectionSlicesByTopKey.set(headerMatches[i].keyLower, (sectionSlicesByTopKey.get(headerMatches[i].keyLower) || "") + "\n" + slice);
       const tokensInSlice = (slice.match(/[a-zA-Z0-9_]+/g) || []).map((tok) => tok.toLowerCase());
       const existingSet = sectionTokensByTopKey.get(headerMatches[i].keyLower) || new Set<string>();
       for (const tok of tokensInSlice) existingSet.add(tok);
@@ -1215,20 +1270,54 @@ export const PromptEditor: React.FC<PromptEditorProps> = ({
     }
 
     const missingKeys: string[] = [];
+    const labelMismatches: Array<{
+      path: string;
+      missingInPrompt: string[];
+      extraInPrompt: string[];
+      expectedCats: string[];
+    }> = [];
+
+    const checkLineCategories = (sliceText: string, fieldKey: string, val: unknown, fullPath: string) => {
+      const expectedCats = extractCategoriesFromSchemaValue(val);
+      if (expectedCats.length < 2) return;
+      const escField = fieldKey.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const lineMatch = sliceText.match(new RegExp(`^[ \\t]*${escField}\\b[^\\n]*`, "im"));
+      if (!lineMatch) return;
+      const promptCats = extractCategoriesFromPromptLine(lineMatch[0]);
+      if (promptCats.length === 0) return;
+      const expectedSet = new Set(expectedCats.map((c) => c.toLowerCase()));
+      const promptSet = new Set(promptCats.map((c) => c.toLowerCase()));
+      const missingInPrompt = expectedCats.filter((c) => !promptSet.has(c.toLowerCase()));
+      const extraInPrompt = promptCats.filter((c) => !expectedSet.has(c.toLowerCase()));
+      if (missingInPrompt.length > 0 || extraInPrompt.length > 0) {
+        labelMismatches.push({
+          path: fullPath,
+          missingInPrompt,
+          extraInPrompt,
+          expectedCats,
+        });
+      }
+    };
+
     const objectStatuses = topKeys.map((topKey, idx) => {
       const keyLower = topKey.toLowerCase();
       const sectionTokens = sectionTokensByTopKey.get(keyLower);
+      const sliceText = sectionSlicesByTopKey.get(keyLower) || "";
       const topFound = Boolean(sectionTokens);
       if (!topFound) missingKeys.push(topKey);
       const val = parsedOutputSchema[topKey];
       const missingSubfields: string[] = [];
       if (topFound && sectionTokens && val && typeof val === "object" && !Array.isArray(val)) {
-        for (const subKey of Object.keys(val)) {
+        for (const [subKey, subVal] of Object.entries(val)) {
           if (!sectionTokens.has(subKey.toLowerCase())) {
             missingSubfields.push(subKey);
             missingKeys.push(`${topKey}.${subKey}`);
+          } else {
+            checkLineCategories(sliceText, subKey, subVal, `${topKey}.${subKey}`);
           }
         }
+      } else if (topFound) {
+        checkLineCategories(sliceText, topKey, val, topKey);
       }
       return {
         key: topKey,
@@ -1238,21 +1327,81 @@ export const PromptEditor: React.FC<PromptEditorProps> = ({
       };
     });
 
+    // Prompt -> JSON bidirectional check: detect sections/subkeys defined in Output Prompt that are missing from JSON
+    const missingInJsonKeys: string[] = [];
+    const topKeysLowerSet = new Set(topKeys.map((k) => k.toLowerCase()));
+    const promptLines = cleanPromptForSections
+      .replace(/```[\s\S]*?```/g, "")
+      .split("\n")
+      .map((l) => l.trim())
+      .filter((l) => l.length > 0 && !/^[=\-_─]{4,}$/.test(l));
+
+    const promptSections = new Map<string, string[]>();
+    let curSec: string | null = null;
+    for (const rawL of promptLines) {
+      const cleanL = rawL.replace(/^#{1,6}\s*/, "").replace(/^[-*•]\s*/, "").trim();
+      const kv = cleanL.match(/^([A-Za-z][A-Za-z0-9_ ]{0,40}):\s*(.*)$/);
+      if (kv) {
+        const kNorm = kv[1].trim().toLowerCase().replace(/\s+/g, "_");
+        if (curSec) {
+          const arr = promptSections.get(curSec) || [];
+          arr.push(kNorm);
+          promptSections.set(curSec, arr);
+        }
+      } else if (/^[A-Za-z][A-Za-z0-9_]{1,50}$/.test(cleanL)) {
+        const secNorm = cleanL.toLowerCase();
+        curSec = secNorm;
+        if (!promptSections.has(secNorm)) {
+          promptSections.set(secNorm, []);
+        }
+      }
+    }
+
+    for (const [secKey, subKeys] of promptSections.entries()) {
+      if (subKeys.length === 0) continue; // Ignore prose lines that aren't section headers with fields
+      if (!topKeysLowerSet.has(secKey)) {
+        missingInJsonKeys.push(secKey);
+        objectStatuses.push({
+          key: secKey,
+          covered: false,
+          missingSubfields: [],
+          colorIdx: objectStatuses.length % JSON_OBJECT_PALETTE.length,
+        });
+      } else {
+        const jsonVal = parsedOutputSchema[
+          topKeys.find((k) => k.toLowerCase() === secKey) || secKey
+        ];
+        if (jsonVal && typeof jsonVal === "object" && !Array.isArray(jsonVal)) {
+          const jsonSubSet = new Set(Object.keys(jsonVal).map((sk) => sk.toLowerCase()));
+          for (const sk of subKeys) {
+            if (!jsonSubSet.has(sk)) {
+              missingInJsonKeys.push(`${secKey}.${sk}`);
+            }
+          }
+        }
+      }
+    }
+
     return {
       hasSchema: true,
       invalidJson: false,
-      isCoherent: missingKeys.length === 0,
+      isCoherent: missingKeys.length === 0 && missingInJsonKeys.length === 0 && labelMismatches.length === 0,
       objectStatuses,
       missingKeys,
+      missingInJsonKeys,
+      labelMismatches,
     };
   }, [outputSchemaText, parsedOutputSchema, outputPromptText, examplesText, instructionsText, useJsonOutput]);
 
   useEffect(() => {
     onValidationStateChange?.(
-      Boolean(validation?.is_valid) && jsonPromptCoherence.isCoherent,
+      Boolean(validation?.is_valid) &&
+        isSchemaJsonValid &&
+        !jsonPromptCoherence.invalidJson &&
+        jsonPromptCoherence.isCoherent,
       isValidating
     );
-  }, [validation, isValidating, jsonPromptCoherence.isCoherent, onValidationStateChange]);
+  }, [validation, isValidating, isSchemaJsonValid, jsonPromptCoherence.invalidJson, jsonPromptCoherence.isCoherent, onValidationStateChange]);
 
   const missingVarsList = validation?.missing_variables || [];
   const instructionsHasVarError = missingVarsList.some((mv) =>
@@ -1471,13 +1620,18 @@ export const PromptEditor: React.FC<PromptEditorProps> = ({
       const lines: string[] = [topKey.toUpperCase()];
       if (val && typeof val === "object" && !Array.isArray(val)) {
         for (const [subKey, subVal] of Object.entries(val)) {
+          const cats = extractCategoriesFromSchemaValue(subVal);
           const hint = Array.isArray(subVal)
             ? "<verbatim fragments separated by || — or blank>"
+            : cats.length >= 2
+            ? `<${cats.join("|")}|blank>`
             : `<${String(subVal || "value")}>`;
           lines.push(`${subKey.toUpperCase()}: ${hint}`);
         }
       } else {
-        lines.push(`${topKey.toUpperCase()}: <${String(val || "value")}>`);
+        const cats = extractCategoriesFromSchemaValue(val);
+        const hint = cats.length >= 2 ? `<${cats.join("|")}|blank>` : `<${String(val || "value")}>`;
+        lines.push(`${topKey.toUpperCase()}: ${hint}`);
       }
       blocks.push(lines.join("\n"));
     }
@@ -1487,6 +1641,294 @@ export const PromptEditor: React.FC<PromptEditorProps> = ({
     const composed = composePromptSections(instructionsText, examplesText, generated, useJsonOutput);
     setPromptRealText(composed);
     syncAndValidate(composed, outputSchemaText, computedSpecs);
+  };
+
+  const handleAutoRepairOutputPrompt = () => {
+    if (!parsedOutputSchema) return;
+    if (!outputPromptText.trim()) {
+      handleGenerateOutputPromptFromSchema();
+      return;
+    }
+
+    let repaired = outputPromptText;
+    const formatFieldHint = (val: unknown) => {
+      if (Array.isArray(val)) return "<verbatim fragments separated by || — or blank>";
+      const cats = extractCategoriesFromSchemaValue(val);
+      if (cats.length >= 2) return `<${cats.join("|")}|blank>`;
+      return `<${String(val || "value")}>`;
+    };
+
+    const topKeys = Object.keys(parsedOutputSchema);
+    const escapedTopKeys = topKeys
+      .slice()
+      .sort((a, b) => b.length - a.length)
+      .map((k) => k.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+
+    for (const [topKey, val] of Object.entries(parsedOutputSchema)) {
+      const escTop = topKey.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const topHeaderRegex = new RegExp(`^[ \\t]*${escTop}\\b`, "im");
+      if (!topHeaderRegex.test(repaired)) {
+        const lines: string[] = [topKey.toUpperCase()];
+        if (val && typeof val === "object" && !Array.isArray(val)) {
+          for (const [subKey, subVal] of Object.entries(val)) {
+            lines.push(`${subKey.toUpperCase()}: ${formatFieldHint(subVal)}`);
+          }
+        } else {
+          lines.push(`${topKey.toUpperCase()}: ${formatFieldHint(val)}`);
+        }
+        repaired = `${repaired.trimEnd()}\n\n${lines.join("\n")}`;
+        continue;
+      }
+
+      // Find section slice for this topKey to patch missing subfields or mismatched categories
+      const allHeadersRegex = new RegExp(`^[ \\t]*(${escapedTopKeys.join("|")})\\b`, "gim");
+      const matches: Array<{ keyLower: string; index: number }> = [];
+      let m: RegExpExecArray | null;
+      while ((m = allHeadersRegex.exec(repaired)) !== null) {
+        matches.push({ keyLower: m[1].toLowerCase(), index: m.index });
+      }
+      const idxInMatches = matches.findIndex((x) => x.keyLower === topKey.toLowerCase());
+      if (idxInMatches === -1) continue;
+
+      const secStart = matches[idxInMatches].index;
+      const secEnd = idxInMatches + 1 < matches.length ? matches[idxInMatches + 1].index : repaired.length;
+      let slice = repaired.slice(secStart, secEnd);
+
+      const entries: Array<[string, unknown]> =
+        val && typeof val === "object" && !Array.isArray(val)
+          ? Object.entries(val)
+          : [[topKey, val]];
+
+      for (const [subKey, subVal] of entries) {
+        const escSub = subKey.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        const subLineRegex = new RegExp(`^([ \\t]*${escSub}\\b[^\\n]*)$`, "im");
+        const subMatch = slice.match(subLineRegex);
+        if (!subMatch) {
+          slice = `${slice.trimEnd()}\n${subKey.toUpperCase()}: ${formatFieldHint(subVal)}\n`;
+        } else {
+          const cats = extractCategoriesFromSchemaValue(subVal);
+          if (cats.length >= 2) {
+            const line = subMatch[1];
+            const hasBlank = /\bblank\b/i.test(line);
+            const newBracket = `<${cats.join("|")}${hasBlank ? "|blank" : ""}>`;
+            const updatedLine = /<[^>]+>/.test(line)
+              ? line.replace(/<[^>]+>/, newBracket)
+              : `${line.trimEnd()} ${newBracket}`;
+            slice = slice.replace(subLineRegex, updatedLine);
+          }
+        }
+      }
+
+      repaired = repaired.slice(0, secStart) + slice + repaired.slice(secEnd);
+    }
+
+    // Remove orphan sections/subfields that exist in Output Prompt but are absent from JSON
+    for (const orphan of jsonPromptCoherence.missingInJsonKeys) {
+      if (!orphan.includes(".")) {
+        const escOrphan = orphan.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        const blockRegex = new RegExp(
+          `(?:^|\\n)[ \\t]*(?:#{1,6}\\s*)?${escOrphan}\\b[^\\n]*(?:\\n[ \\t]*(?:[-*•]\\s*)?[A-Za-z0-9_ ]+:[^\\n]*)*`,
+          "gi"
+        );
+        repaired = repaired.replace(blockRegex, "");
+      } else {
+        const [parentKey, subKey] = orphan.split(".");
+        const escParent = parentKey.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        const escSub = subKey.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        const parentRegex = new RegExp(`^[ \\t]*${escParent}\\b`, "im");
+        const pMatch = parentRegex.exec(repaired);
+        if (pMatch) {
+          const secStart = pMatch.index;
+          const rest = repaired.slice(secStart + pMatch[0].length);
+          const nextSecMatch = rest.match(/\n[ \t]*(?:#{1,6}\s*)?[A-Za-z][A-Za-z0-9_]{1,50}[ \t]*\n/);
+          const secEnd = nextSecMatch && nextSecMatch.index !== undefined
+            ? secStart + pMatch[0].length + nextSecMatch.index
+            : repaired.length;
+          const slice = repaired.slice(secStart, secEnd).replace(
+            new RegExp(`(?:^|\\n)[ \\t]*(?:[-*•]\\s*)?${escSub}\\b[^\\n]*`, "gi"),
+            ""
+          );
+          repaired = repaired.slice(0, secStart) + slice + repaired.slice(secEnd);
+        }
+      }
+    }
+
+    const cleaned = repaired.replace(/\n{3,}/g, "\n\n").trim();
+    setOutputPromptText(cleaned);
+    setOpenOutputSection(true);
+    const composed = composePromptSections(instructionsText, examplesText, cleaned, useJsonOutput);
+    setPromptRealText(composed);
+    syncAndValidate(composed, outputSchemaText, computedSpecs);
+  };
+
+  type VisualFieldType = "string" | "categories" | "array" | "number" | "object";
+  interface VisualField {
+    id: string;
+    name: string;
+    type: VisualFieldType;
+    categories: string;
+    subfields: VisualField[];
+  }
+
+  const [showVisualJsonModal, setShowVisualJsonModal] = useState(false);
+  const [isManualJsonEdit, setIsManualJsonEdit] = useState(false);
+  const [visualFields, setVisualFields] = useState<VisualField[]>([]);
+  const [promptParseError, setPromptParseError] = useState<string | null>(null);
+
+  const handleOpenVisualJsonBuilder = () => {
+    const mkId = () => Math.random().toString(36).slice(2, 9);
+    const parseEntries = (obj: Record<string, any>): VisualField[] =>
+      Object.entries(obj).map(([key, val]) => {
+        if (val && typeof val === "object" && !Array.isArray(val)) {
+          return {
+            id: mkId(),
+            name: key,
+            type: "object",
+            categories: "",
+            subfields: parseEntries(val),
+          };
+        }
+        if (Array.isArray(val)) {
+          return { id: mkId(), name: key, type: "array", categories: "", subfields: [] };
+        }
+        if (typeof val === "number") {
+          return { id: mkId(), name: key, type: "number", categories: "", subfields: [] };
+        }
+        const cats = extractCategoriesFromSchemaValue(val);
+        if (cats.length >= 2) {
+          return { id: mkId(), name: key, type: "categories", categories: cats.join(" | "), subfields: [] };
+        }
+        return { id: mkId(), name: key, type: "string", categories: "", subfields: [] };
+      });
+
+    if (parsedOutputSchema && Object.keys(parsedOutputSchema).length > 0) {
+      setVisualFields(parseEntries(parsedOutputSchema));
+    } else {
+      setVisualFields([
+        {
+          id: mkId(),
+          name: "sentiment",
+          type: "categories",
+          categories: "Positive | Negative | Neutral",
+          subfields: [],
+        },
+      ]);
+    }
+    setShowVisualJsonModal(true);
+  };
+
+  const handleApplyVisualJsonBuilder = () => {
+    const buildNodeValue = (f: VisualField): any => {
+      if (f.type === "object") {
+        const subObj: Record<string, any> = {};
+        for (const sf of f.subfields) {
+          const cleanSub = sf.name.trim();
+          if (!cleanSub) continue;
+          subObj[cleanSub] = buildNodeValue(sf);
+        }
+        return subObj;
+      }
+      if (f.type === "array") return ["string"];
+      if (f.type === "number") return 0.0;
+      if (f.type === "categories") {
+        const opts = f.categories
+          .split(/[|,;]+/)
+          .map((s) => s.trim())
+          .filter(Boolean);
+        return opts.length > 0 ? `string (${opts.join(" | ")})` : "string";
+      }
+      return "string";
+    };
+
+    const schemaObj: Record<string, any> = {};
+    for (const f of visualFields) {
+      const cleanName = f.name.trim();
+      if (!cleanName) continue;
+      schemaObj[cleanName] = buildNodeValue(f);
+    }
+
+    const formatted = JSON.stringify(schemaObj, null, 2);
+    setOutputSchemaText(formatted);
+    syncAndValidate(promptRealText, formatted, computedSpecs);
+    setShowVisualJsonModal(false);
+  };
+
+  const handleDetectJsonFromOutputPrompt = () => {
+    setPromptParseError(null);
+    const sourceText = (outputPromptText.trim() ? outputPromptText : instructionsText).trim();
+    if (!sourceText) {
+      setPromptParseError("Escribe primero el bloque de Prompt de Salida para poder detectar su estructura.");
+      return;
+    }
+
+    const lines = sourceText
+      .replace(/```[\s\S]*?```/g, "")
+      .split("\n")
+      .map((l) => l.trim())
+      .filter((l) => l.length > 0 && !/^[=\-_─]{4,}$/.test(l));
+
+    const inferValueFromHint = (hint: string): any => {
+      const clean = hint.trim();
+      if (/\|\||separated by|list|array|verbatim|citas|frases/i.test(clean)) {
+        return ["string"];
+      }
+      const bracketMatch = clean.match(/<([^>]+)>/);
+      if (bracketMatch && bracketMatch[1].includes("|")) {
+        const opts = bracketMatch[1]
+          .split("|")
+          .map((s) => s.trim())
+          .filter((s) => s.length > 0 && !SENTINEL_LABELS.has(s.toLowerCase()));
+        if (opts.length >= 2) {
+          return `string (${opts.join(" | ")})`;
+        }
+      }
+      if (/^(number|float|int|integer|score|numeric)$/i.test(clean.replace(/[<>]/g, ""))) {
+        return 0.0;
+      }
+      return "string";
+    };
+
+    const result: Record<string, any> = {};
+    let currentSection: string | null = null;
+
+    for (const line of lines) {
+      const cleanLine = line.replace(/^#{1,6}\s*/, "").replace(/^[-*•]\s*/, "").trim();
+      const kvMatch = cleanLine.match(/^([A-Za-z][A-Za-z0-9_ ]{0,40}):\s*(.*)$/);
+      if (kvMatch) {
+        const rawKey = kvMatch[1].trim().toLowerCase().replace(/\s+/g, "_");
+        const val = inferValueFromHint(kvMatch[2] || "");
+        if (currentSection) {
+          if (typeof result[currentSection] !== "object" || Array.isArray(result[currentSection])) {
+            result[currentSection] = {};
+          }
+          result[currentSection][rawKey] = val;
+        } else {
+          result[rawKey] = val;
+        }
+      } else if (/^[A-Za-z][A-Za-z0-9_ -]{1,50}$/.test(cleanLine)) {
+        const secKey = cleanLine.trim().toLowerCase().replace(/[\s-]+/g, "_");
+        currentSection = secKey;
+        if (!result[secKey]) {
+          result[secKey] = {};
+        }
+      }
+    }
+
+    // Remove empty section objects if no subkeys were parsed
+    for (const k of Object.keys(result)) {
+      if (result[k] && typeof result[k] === "object" && !Array.isArray(result[k]) && Object.keys(result[k]).length === 0) {
+        delete result[k];
+      }
+    }
+
+    if (Object.keys(result).length === 0) {
+      setPromptParseError("No se detectaron secciones o campos 'CLAVE: <valor>' en el Prompt de Salida.");
+      return;
+    }
+
+    const formatted = JSON.stringify(result, null, 2);
+    setOutputSchemaText(formatted);
+    syncAndValidate(promptRealText, formatted, computedSpecs);
   };
 
   const handlePromptKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -1720,6 +2162,7 @@ export const PromptEditor: React.FC<PromptEditorProps> = ({
 
         const formattedJson = JSON.stringify(detectedOutput, null, 2);
         setOutputSchemaText(formattedJson);
+        setLastGeneratedGtJson(formattedJson);
         syncAndValidate(promptRealText, formattedJson, computedSpecs);
         setAutodetectSuccess(true);
         setTimeout(() => setAutodetectSuccess(false), 2500);
@@ -1740,6 +2183,7 @@ export const PromptEditor: React.FC<PromptEditorProps> = ({
         }
         const formattedJson = JSON.stringify(fallbackOutput, null, 2);
         setOutputSchemaText(formattedJson);
+        setLastGeneratedGtJson(formattedJson);
         syncAndValidate(promptRealText, formattedJson, computedSpecs);
         setAutodetectSuccess(true);
         setTimeout(() => setAutodetectSuccess(false), 2500);
@@ -2398,9 +2842,9 @@ export const PromptEditor: React.FC<PromptEditorProps> = ({
                     size="sm"
                     onMouseDown={(e) => e.preventDefault()}
                     onClick={() => insertVariable(col)}
-                    className={`h-7 px-2.5 text-xs font-mono gap-1.5 rounded-sm transition-all cursor-pointer ${
+                    className={`h-7 px-2.5 text-xs font-mono gap-1.5 rounded-sm border transition-all cursor-pointer ${
                       isUsed
-                        ? "bg-primary/15 text-primary border-primary/40 font-semibold"
+                        ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-500/40 hover:bg-emerald-500/20 font-semibold"
                         : "text-muted-foreground hover:text-foreground"
                     }`}
                     title={`Insertar {${col}} en la posición del cursor (${role})`}
@@ -2577,11 +3021,11 @@ export const PromptEditor: React.FC<PromptEditorProps> = ({
                         )}
                         <span>(i) {t("prompt.systemPromptLabel")}</span>
                       </span>
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 shrink-0 ml-auto">
                         <span className="text-[11px] text-muted-foreground hidden sm:inline">
                           {t("prompt.systemPromptHelp")}
                         </span>
-                        <Badge variant="outline" className="text-[10px] font-mono py-0 px-1.5 bg-background/80 text-muted-foreground border-border">
+                        <Badge variant="outline" className="text-[10px] font-mono py-0 px-1.5 bg-background/80 text-muted-foreground border-border shrink-0">
                           {(systemPrompt || "").length} chars
                         </Badge>
                       </div>
@@ -2765,65 +3209,53 @@ export const PromptEditor: React.FC<PromptEditorProps> = ({
                       outputPromptHasError ? "border-destructive ring-1 ring-destructive/30" : "border-border/80"
                     }`}
                   >
-                    <div className="px-3 py-2 flex items-center justify-between gap-2 flex-wrap bg-muted/20">
-                      <button
-                        type="button"
-                        onClick={() => setOpenOutputSection((prev) => !prev)}
-                        className="flex items-center gap-1.5 text-xs font-semibold text-foreground text-left cursor-pointer"
-                      >
-                        {openOutputSection ? (
-                          <ChevronDown className="w-3.5 h-3.5 text-muted-foreground" />
-                        ) : (
-                          <ChevronRight className="w-3.5 h-3.5 text-muted-foreground" />
-                        )}
-                        <span>(iv) Prompt de Salida</span>
-                      </button>
+                    <div className="px-3 py-2 space-y-1.5 bg-muted/20">
+                      <div className="flex items-center justify-between gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setOpenOutputSection((prev) => !prev)}
+                          className="flex items-center gap-1.5 text-xs font-semibold text-foreground text-left cursor-pointer"
+                        >
+                          {openOutputSection ? (
+                            <ChevronDown className="w-3.5 h-3.5 text-muted-foreground" />
+                          ) : (
+                            <ChevronRight className="w-3.5 h-3.5 text-muted-foreground" />
+                          )}
+                          <span>(iv) Prompt de Salida</span>
+                        </button>
 
-                      <div className="flex items-center gap-1.5 flex-wrap">
-                        {jsonPromptCoherence.hasSchema && jsonPromptCoherence.objectStatuses.length > 0 && (
-                          <div className="flex flex-wrap items-center gap-1">
-                            {jsonPromptCoherence.objectStatuses.map((obj) => {
-                              const palette = JSON_OBJECT_PALETTE[obj.colorIdx];
-                              const isSelected = selectedJsonBlockPreview?.key === obj.key;
-                              return (
-                                <button
-                                  key={obj.key}
-                                  type="button"
-                                  onClick={() => handleSelectJsonObjectBlock(obj.key, obj.colorIdx)}
-                                  className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-sm border text-[10px] font-mono cursor-pointer transition-all ${
-                                    palette.badge
-                                  } ${isSelected ? "ring-2 ring-offset-1 ring-current font-bold" : "hover:opacity-85"}`}
-                                  title={
-                                    obj.covered
-                                      ? `Clic para resaltar el bloque ${obj.key} en el Prompt de Salida`
-                                      : `${obj.key}: faltan claves en Prompt de Salida`
-                                  }
-                                >
-                                  <span className={`w-1.5 h-1.5 rounded-full ${palette.dot}`} />
-                                  <span>{obj.key}</span>
-                                  <span>{obj.covered ? "✓" : "✗"}</span>
-                                </button>
-                              );
-                            })}
-                          </div>
-                        )}
-                        {parsedOutputSchema && Object.keys(parsedOutputSchema).length > 0 && (
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            onClick={handleGenerateOutputPromptFromSchema}
-                            className="h-6 px-2 text-[10px] font-semibold rounded-sm border-primary/40 text-primary hover:bg-primary/10 gap-1"
-                            title="Generar el bloque de salida automáticamente desde el JSON de 2. Estructura de Salida"
-                          >
-                            <Wand2 className="w-3 h-3" />
-                            <span>Generar desde JSON</span>
-                          </Button>
-                        )}
-                        <Badge variant="outline" className="text-[10px] font-mono py-0 px-1.5 bg-background/80 text-muted-foreground border-border">
+                        <Badge variant="outline" className="text-[10px] font-mono py-0 px-1.5 bg-background/80 text-muted-foreground border-border shrink-0 ml-auto">
                           {outputPromptText.length} chars
                         </Badge>
                       </div>
+
+                      {jsonPromptCoherence.hasSchema && jsonPromptCoherence.objectStatuses.length > 0 && (
+                        <div className="flex flex-wrap items-center gap-1 pl-5">
+                          {jsonPromptCoherence.objectStatuses.map((obj) => {
+                            const palette = JSON_OBJECT_PALETTE[obj.colorIdx];
+                            const isSelected = selectedJsonBlockPreview?.key === obj.key;
+                            return (
+                              <button
+                                key={obj.key}
+                                type="button"
+                                onClick={() => handleSelectJsonObjectBlock(obj.key, obj.colorIdx)}
+                                className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-sm border text-[10px] font-mono cursor-pointer transition-all ${
+                                  palette.badge
+                                } ${isSelected ? "ring-2 ring-offset-1 ring-current font-bold" : "hover:opacity-85"}`}
+                                title={
+                                  obj.covered
+                                    ? `Clic para resaltar el bloque ${obj.key} en el Prompt de Salida`
+                                    : `${obj.key}: faltan claves en Prompt de Salida`
+                                }
+                              >
+                                <span className={`w-1.5 h-1.5 rounded-full ${palette.dot}`} />
+                                <span>{obj.key}</span>
+                                <span>{obj.covered ? "✓" : "✗"}</span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
                     </div>
                     {openOutputSection && (
                       <div className="p-2.5 border-t border-border/60 space-y-2">
@@ -2934,96 +3366,177 @@ export const PromptEditor: React.FC<PromptEditorProps> = ({
                       <Label htmlFor="output-json-schema" className="text-xs font-bold text-foreground cursor-pointer">
                         {t("prompt.part2Title")}
                       </Label>
+                      <Badge variant="outline" className="text-[10px] font-mono py-0 px-1.5 bg-background/80 text-muted-foreground border-border">
+                        {outputSchemaText.length} chars
+                      </Badge>
                     </div>
                     <p className="text-[11px] text-muted-foreground">
                       {t("prompt.part2Desc")}
                     </p>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <Button
-                      id="btn-autodetect-gt"
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      onClick={handleAutodetectFromGroundTruth}
-                      disabled={isAutodetecting}
-                      className={`h-7 px-2.5 text-[11px] font-semibold gap-1.5 transition-all shadow-none ${
-                        autodetectSuccess
-                          ? "text-emerald-400 border-emerald-500/40 bg-emerald-500/10"
-                          : "text-primary border-primary/30 hover:bg-primary/10 hover:border-primary/50"
-                      }`}
-                      title={t("prompt.autodetectGtTooltip")}
-                    >
-                      {autodetectSuccess ? (
-                        <Check className="w-3.5 h-3.5 text-emerald-400" />
-                      ) : (
-                        <BrainCog className={`w-3.5 h-3.5 text-primary ${isAutodetecting ? "animate-spin" : ""}`} />
-                      )}
-                      <span>
-                        {autodetectSuccess ? t("prompt.autodetectGtApplied") : t("prompt.autodetectGtButton")}
-                      </span>
-                    </Button>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    {(() => {
+                      const hasGroundTruth = Boolean(
+                        (groundTruthDatasetId && groundTruthDatasetId !== "none") ||
+                          (groundTruthDatasetIds && groundTruthDatasetIds.length > 0) ||
+                          (groundTruthSchema && groundTruthSchema.dimensions && groundTruthSchema.dimensions.length > 0)
+                      );
+                      const gtSameAsGenerated =
+                        lastGeneratedGtJson !== null &&
+                        (outputSchemaText.trim() === lastGeneratedGtJson.trim() || !outputSchemaText.trim());
 
-                    {isSchemaJsonValid ? (
-                      <Badge variant="outline" className="text-[10px] font-semibold text-emerald-400 bg-emerald-500/10 border-emerald-500/30 gap-1">
-                        <CheckCircle2 className="w-3 h-3" />
-                        {t("prompt.part2ValidJson")}
-                      </Badge>
-                    ) : (
-                      <Badge variant="outline" className="text-[10px] font-semibold text-destructive bg-destructive/10 border-destructive/30 gap-1">
-                        <AlertCircle className="w-3 h-3" />
-                        {t("prompt.part2InvalidJson")}
-                      </Badge>
+                      return (
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button
+                              id="btn-autodetect-gt"
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              disabled={isAutodetecting}
+                              className={`h-7 px-2.5 text-[11px] font-semibold gap-1.5 transition-all shadow-none ${
+                                autodetectSuccess
+                                  ? "text-emerald-400 border-emerald-500/40 bg-emerald-500/10"
+                                  : "text-primary border-primary/30 hover:bg-primary/10 hover:border-primary/50"
+                              }`}
+                            >
+                              {autodetectSuccess ? (
+                                <Check className="w-3.5 h-3.5 text-emerald-400" />
+                              ) : (
+                                <PencilSparkles className={`w-3.5 h-3.5 text-primary ${isAutodetecting ? "animate-spin" : ""}`} />
+                              )}
+                              <span>{autodetectSuccess ? t("prompt.autodetectGtApplied") : "Generar JSON"}</span>
+                              <ChevronDown className="w-3 h-3 opacity-70" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end" className="w-64 bg-card border-border">
+                            {hasGroundTruth && (
+                              <>
+                                <DropdownMenuItem
+                                  disabled={isAutodetecting || gtSameAsGenerated}
+                                  onClick={handleAutodetectFromGroundTruth}
+                                  className="text-xs gap-2 cursor-pointer"
+                                >
+                                  <WandSparkles className="w-3.5 h-3.5 text-primary shrink-0" />
+                                  <div className="flex flex-col">
+                                    <span className="font-semibold">Desde Ground Truth</span>
+                                    <span className="text-[10px] text-muted-foreground">
+                                      {gtSameAsGenerated ? "Ya coincide con el GT" : "Recomendado"}
+                                    </span>
+                                  </div>
+                                </DropdownMenuItem>
+                                <DropdownMenuSeparator />
+                              </>
+                            )}
+                            <DropdownMenuItem
+                              onClick={handleOpenVisualJsonBuilder}
+                              className="text-xs gap-2 cursor-pointer"
+                            >
+                              <Sliders className="w-3.5 h-3.5 text-primary shrink-0" />
+                              <div className="flex flex-col">
+                                <span className="font-medium">Constructor Visual (No-Code)</span>
+                                <span className="text-[10px] text-muted-foreground">Crea campos sin escribir JSON</span>
+                              </div>
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                              onClick={() => {
+                                setIsManualJsonEdit(false);
+                                handleDetectJsonFromOutputPrompt();
+                              }}
+                              className="text-xs gap-2 cursor-pointer"
+                            >
+                              <FileCode className="w-3.5 h-3.5 text-primary shrink-0" />
+                              <div className="flex flex-col">
+                                <span className="font-medium">Detectar desde Prompt de Salida</span>
+                                <span className="text-[10px] text-muted-foreground">Infiere el JSON desde el texto</span>
+                              </div>
+                            </DropdownMenuItem>
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem
+                              onClick={() => {
+                                setIsManualJsonEdit(true);
+                                setTimeout(() => schemaTextareaRef.current?.focus(), 50);
+                              }}
+                              className="text-xs gap-2 cursor-pointer"
+                            >
+                              <Pencil className="w-3.5 h-3.5 text-primary shrink-0" />
+                              <div className="flex flex-col">
+                                <span className="font-medium">Manualmente</span>
+                                <span className="text-[10px] text-muted-foreground">Editar el JSON directamente</span>
+                              </div>
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      );
+                    })()}
+
+                    {isManualJsonEdit && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setIsManualJsonEdit(false)}
+                        className="h-7 px-2.5 text-[11px] font-semibold gap-1 border-emerald-500/40 text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 hover:bg-emerald-500/20"
+                        title="Finalizar edición manual y volver a modo solo lectura"
+                      >
+                        <Check className="w-3.5 h-3.5" />
+                        <span>Listo</span>
+                      </Button>
                     )}
+
+                    {jsonPromptCoherence.hasSchema && !jsonPromptCoherence.invalidJson && !jsonPromptCoherence.isCoherent && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={handleAutoRepairOutputPrompt}
+                        className="h-7 px-2.5 text-[11px] font-semibold gap-1.5 border-amber-500/40 text-amber-600 dark:text-amber-400 bg-amber-500/10 hover:bg-amber-500/20"
+                        title="Alinear el Prompt de Salida con las claves y categorías del JSON"
+                      >
+                        <BrainCog className="w-3.5 h-3.5" />
+                        <span>Auto-reparar</span>
+                      </Button>
+                    )}
+
                   </div>
                 </CardHeader>
                 <CardContent className="p-3 space-y-2">
-                  {jsonKeyAutocomplete && filteredJsonKeySuggestions.length > 0 && (
-                    <div className="p-2 rounded-sm bg-card border border-primary/40 shadow-sm space-y-1.5">
-                      <div className="flex items-center justify-between text-[10px] font-mono text-muted-foreground">
-                        <span className="font-semibold text-foreground">
-                          Sugerencias del diccionario del prompt:
-                        </span>
-                        <span>↑↓ elegir &middot; Enter/Tab o clic insertar &middot; Esc cerrar</span>
-                      </div>
-                      <div className="flex flex-wrap gap-1.5">
-                        {filteredJsonKeySuggestions.map((item, idx) => {
-                          const isActive = idx === jsonKeyAutocomplete.activeIndex;
-                          return (
-                            <button
-                              key={item.key}
-                              type="button"
-                              onMouseDown={(e) => e.preventDefault()}
-                              onClick={() => insertJsonKeySuggestion(item.key)}
-                              className={`px-2 py-0.5 rounded-sm text-xs font-mono border transition-colors cursor-pointer ${
-                                isActive
-                                  ? "bg-primary text-primary-foreground border-primary font-bold"
-                                  : "bg-background text-foreground border-border hover:border-primary/40 hover:bg-muted"
-                              }`}
-                            >
-                              {item.key}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  )}
-
-                  <Textarea
-                    ref={schemaTextareaRef}
-                    id="output-json-schema"
-                    value={outputSchemaText}
-                    onChange={handleOutputSchemaChange}
-                    onKeyDown={handleOutputSchemaKeyDown}
-                    rows={5}
-                    aria-label={t("prompt.part2Title")}
-                    className={`w-full p-3 text-xs font-mono bg-background/80 resize-y leading-relaxed ${
-                      !isSchemaJsonValid
-                        ? "border-destructive focus-visible:ring-destructive/30"
-                        : "border-border/80 focus:ring-amber-500/20"
+                  <div
+                    className={`w-full min-h-[160px] h-48 max-h-[560px] resize-y overflow-hidden rounded-sm border bg-background/80 transition-colors ${
+                      isManualJsonEdit
+                        ? !isSchemaJsonValid
+                          ? "border-destructive"
+                          : "border-primary/50"
+                        : !isSchemaJsonValid
+                        ? "border-destructive/60"
+                        : "border-border/80"
                     }`}
-                    placeholder={t("prompt.part2SchemaPlaceholder")}
-                  />
+                  >
+                    <CodeMirror
+                      value={outputSchemaText}
+                      height="100%"
+                      className="h-full"
+                      editable={isManualJsonEdit}
+                      extensions={[jsonLang(), calibraiJsonEditorTheme, EditorView.lineWrapping]}
+                      placeholder={
+                        isManualJsonEdit
+                          ? t("prompt.part2SchemaPlaceholder")
+                          : 'Sin estructura JSON definida. Pulsa "Generar JSON" para crearla o editarla manualmente.'
+                      }
+                      basicSetup={{
+                        lineNumbers: false,
+                        foldGutter: false,
+                        highlightActiveLine: isManualJsonEdit,
+                        highlightActiveLineGutter: false,
+                        dropCursor: isManualJsonEdit,
+                      }}
+                      onChange={(val) => {
+                        if (!isManualJsonEdit) return;
+                        setOutputSchemaText(val);
+                        syncAndValidate(promptRealText, val, computedSpecs);
+                      }}
+                    />
+                  </div>
                 </CardContent>
               </Card>
 
@@ -4020,53 +4533,121 @@ export const PromptEditor: React.FC<PromptEditorProps> = ({
                 )}
               </div>
 
-              {/* Elemento 3: Coherencia JSON vs Prompt */}
+              {/* Elemento 3: Validez del JSON */}
+              <div className="space-y-2 pt-2 border-t border-border/40">
+                <div className="text-[11px] font-semibold text-foreground/90 flex items-center gap-1.5">
+                  <span className={`w-1.5 h-1.5 rounded-full ${jsonPromptCoherence.invalidJson ? "bg-destructive" : "bg-emerald-500"}`} />
+                  <span>3. Validez del JSON</span>
+                </div>
+
+                {!outputSchemaText.trim() ? (
+                  <div className="flex items-center gap-2 px-3 py-2 rounded-lg border border-border/50 bg-muted/40 text-xs text-muted-foreground">
+                    <Info className="w-4 h-4 shrink-0" />
+                    <span className="font-medium">Sin esquema JSON configurado</span>
+                  </div>
+                ) : jsonPromptCoherence.invalidJson ? (
+                  <div className="flex items-start gap-2.5 px-3 py-2.5 rounded-lg border border-destructive/50 bg-destructive/5 text-destructive text-xs">
+                    <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                    <div className="space-y-0.5">
+                      <div className="font-semibold leading-snug">
+                        El JSON de salida no tiene una sintaxis válida.
+                      </div>
+                      <div className="text-[11px] opacity-85">
+                        Revisa comillas, comas o llaves en el bloque de Estructura de Salida.
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-2 px-3 py-2 rounded-lg border border-emerald-500/25 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-xs">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
+                    <span className="font-bold">Sintaxis JSON válida</span>
+                  </div>
+                )}
+              </div>
+
+              {/* Elemento 4: Coherencia JSON vs Prompt */}
               <div className="space-y-2 pt-2 border-t border-border/40">
                 <div className="text-[11px] font-semibold text-foreground/90 flex items-center gap-1.5">
                   <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
-                  <span>3. Coherencia JSON vs Prompt</span>
+                  <span>4. Coherencia JSON vs Prompt</span>
                 </div>
 
-                {!jsonPromptCoherence.hasSchema ? (
-                  <Alert className="py-2 text-xs bg-muted/40 border-border/50 text-muted-foreground">
-                    <Info className="w-4 h-4 text-muted-foreground" />
-                    <AlertTitle className="text-xs font-medium ml-2">
-                      Sin esquema JSON estructurado (modo texto/numérico)
-                    </AlertTitle>
-                  </Alert>
-                ) : jsonPromptCoherence.invalidJson ? (
-                  <Alert variant="destructive" className="py-2 text-xs">
-                    <AlertCircle className="w-4 h-4" />
-                    <AlertTitle className="text-xs font-medium ml-2">
-                      El JSON de salida no tiene una sintaxis válida.
-                    </AlertTitle>
-                  </Alert>
+                {!jsonPromptCoherence.hasSchema || jsonPromptCoherence.invalidJson ? (
+                  <div className="flex items-center gap-2 px-3 py-2 rounded-lg border border-border/50 bg-muted/40 text-xs text-muted-foreground">
+                    <Info className="w-4 h-4 shrink-0" />
+                    <span className="font-medium">
+                      {jsonPromptCoherence.invalidJson
+                        ? "Corrige la sintaxis del JSON para verificar su coherencia con el prompt."
+                        : "Sin esquema JSON estructurado (modo texto/numérico)"}
+                    </span>
+                  </div>
                 ) : !jsonPromptCoherence.isCoherent ? (
-                  <Alert variant="destructive" className="py-2 text-xs">
-                    <AlertCircle className="w-4 h-4" />
-                    <AlertTitle className="text-xs font-semibold ml-2">
-                      Claves del JSON no representadas en el prompt
-                    </AlertTitle>
-                    <AlertDescription className="text-[11px] opacity-90 mt-1 ml-2 font-mono">
-                      Faltan: {jsonPromptCoherence.missingKeys.join(", ")}
-                    </AlertDescription>
-                  </Alert>
+                  <div className="space-y-2">
+                    {jsonPromptCoherence.missingKeys.length > 0 && (
+                      <div className="flex items-start gap-2.5 px-3 py-2.5 rounded-lg border border-destructive/50 bg-destructive/5 text-destructive text-xs">
+                        <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                        <div className="space-y-0.5">
+                          <div className="font-semibold leading-snug">
+                            Claves del JSON ausentes en el Prompt
+                          </div>
+                          <div className="text-[11px] opacity-90 font-mono">
+                            Faltan en el prompt: {jsonPromptCoherence.missingKeys.join(", ")}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                    {jsonPromptCoherence.missingInJsonKeys.length > 0 && (
+                      <div className="flex items-start gap-2.5 px-3 py-2.5 rounded-lg border border-destructive/50 bg-destructive/5 text-destructive text-xs">
+                        <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                        <div className="space-y-0.5">
+                          <div className="font-semibold leading-snug">
+                            Claves del Prompt ausentes en el JSON
+                          </div>
+                          <div className="text-[11px] opacity-90 font-mono">
+                            Faltan en el JSON: {jsonPromptCoherence.missingInJsonKeys.join(", ")}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                    {jsonPromptCoherence.labelMismatches.length > 0 && (
+                      <div className="flex items-start gap-2.5 px-3 py-2.5 rounded-lg border border-amber-500/50 bg-amber-500/10 text-amber-700 dark:text-amber-300 text-xs">
+                        <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+                        <div className="space-y-1">
+                          <div className="font-semibold leading-snug">
+                            Etiquetas desalineadas con el JSON
+                          </div>
+                          {jsonPromptCoherence.labelMismatches.map((lm) => (
+                            <div key={lm.path} className="text-[11px] font-mono opacity-90">
+                              <strong>{lm.path}</strong>
+                              {lm.missingInPrompt.length > 0 ? ` · Faltan: ${lm.missingInPrompt.join(", ")}` : ""}
+                              {lm.extraInPrompt.length > 0 ? ` · Sobran: ${lm.extraInPrompt.join(", ")}` : ""}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 ) : (validation?.issues || []).some((i) => i.message.startsWith("Incoherencia JSON")) ? (
-                  <>
+                  <div className="space-y-2">
                     {(validation?.issues || [])
                       .filter((i) => i.message.startsWith("Incoherencia JSON"))
                       .map((issue, idx) => (
-                        <Alert key={`json-issue-${idx}`} variant="destructive" className="py-2 text-xs">
-                          <AlertCircle className="w-4 h-4" />
-                          <AlertTitle className="text-xs font-medium ml-2">{issue.message}</AlertTitle>
-                          {issue.suggestion && (
-                            <AlertDescription className="text-[11px] opacity-80 mt-1 italic font-mono ml-2">
-                              {issue.suggestion}
-                            </AlertDescription>
-                          )}
-                        </Alert>
+                        <div
+                          key={`json-issue-${idx}`}
+                          className="flex items-start gap-2.5 px-3 py-2.5 rounded-lg border border-destructive/50 bg-destructive/5 text-destructive text-xs"
+                        >
+                          <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                          <div className="space-y-0.5">
+                            <div className="font-medium leading-snug">{issue.message}</div>
+                            {issue.suggestion && (
+                              <div className="text-[11px] opacity-80 italic font-mono">
+                                {issue.suggestion}
+                              </div>
+                            )}
+                          </div>
+                        </div>
                       ))}
-                  </>
+                  </div>
                 ) : (
                   <Alert className="bg-emerald-500/10 border-emerald-500/25 text-emerald-600 dark:text-emerald-400 text-xs py-2.5">
                     <CheckCircle2 className="w-4 h-4 text-emerald-500" />
@@ -4230,7 +4811,7 @@ export const PromptEditor: React.FC<PromptEditorProps> = ({
                     onClick={() => handleApplySavedPrompt(previewSavedPrompt)}
                     className="h-8 text-xs rounded-sm bg-primary text-primary-foreground hover:bg-primary/90 gap-1.5"
                   >
-                    <FileDown className="w-3.5 h-3.5" />
+                    <Upload className="w-3.5 h-3.5" />
                     <span>{t("prompt.loadPromptApply")}</span>
                   </Button>
                 </div>
@@ -4274,7 +4855,7 @@ export const PromptEditor: React.FC<PromptEditorProps> = ({
                           className="h-7 w-7 rounded-sm text-muted-foreground hover:text-primary hover:bg-primary/10"
                           title={t("prompt.loadPromptApply")}
                         >
-                          <FileDown className="w-3.5 h-3.5" />
+                          <Upload className="w-3.5 h-3.5" />
                         </Button>
                         <Button
                           type="button"
@@ -4304,6 +4885,212 @@ export const PromptEditor: React.FC<PromptEditorProps> = ({
                 </div>
               </>
             )}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Visual No-Code JSON Builder Modal */}
+      <Dialog open={showVisualJsonModal} onOpenChange={setShowVisualJsonModal}>
+        <DialogContent className="sm:max-w-2xl max-h-[85vh] flex flex-col bg-card border-border rounded-sm shadow-none">
+          <DialogHeader className="border-b border-border pb-3">
+            <DialogTitle className="font-serif text-base font-bold text-foreground flex items-center gap-2">
+              <Sliders className="w-4 h-4 text-primary" />
+              <span>Constructor Visual de Estructura JSON</span>
+            </DialogTitle>
+            <DialogDescription className="text-xs text-muted-foreground">
+              Define los campos de salida sin preocuparte por llaves, comillas ni comas.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="flex-1 overflow-y-auto space-y-3 py-2 pr-1">
+            {(() => {
+              const mkId = () => Math.random().toString(36).slice(2, 9);
+
+              const renderFieldNodes = (
+                nodes: VisualField[],
+                onChangeNodes: (updater: (prev: VisualField[]) => VisualField[]) => void,
+                depth = 0
+              ): React.ReactNode => (
+                <div className={depth === 0 ? "space-y-3" : "pl-4 border-l-2 border-primary/30 space-y-2"}>
+                  {nodes.map((field, idx) => (
+                    <div
+                      key={field.id}
+                      className={
+                        depth === 0
+                          ? "p-3 rounded-sm border border-border bg-background space-y-2"
+                          : "space-y-2"
+                      }
+                    >
+                      <div className="grid grid-cols-[minmax(0,1fr)_180px_28px] items-center gap-2">
+                        <Input
+                          value={field.name}
+                          onChange={(e) =>
+                            onChangeNodes((prev) =>
+                              prev.map((f, i) => (i === idx ? { ...f, name: e.target.value } : f))
+                            )
+                          }
+                          placeholder={depth === 0 ? "nombre_del_campo" : "subcampo"}
+                          className="h-8 text-xs font-mono"
+                        />
+                        <Select
+                          value={field.type}
+                          onValueChange={(val) =>
+                            onChangeNodes((prev) =>
+                              prev.map((f, i) =>
+                                i === idx
+                                  ? {
+                                      ...f,
+                                      type: val as VisualFieldType,
+                                      subfields:
+                                        val === "object" && f.subfields.length === 0
+                                          ? [
+                                              {
+                                                id: mkId(),
+                                                name: "sentiment",
+                                                type: "categories",
+                                                categories: "Positive | Negative | Neutral",
+                                                subfields: [],
+                                              },
+                                            ]
+                                          : f.subfields,
+                                    }
+                                  : f
+                              )
+                            )
+                          }
+                        >
+                          <SelectTrigger className="h-8 w-[180px] text-xs">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="string" className="text-xs">Textual</SelectItem>
+                            <SelectItem value="categories" className="text-xs">Categórico</SelectItem>
+                            <SelectItem value="number" className="text-xs">Numérico</SelectItem>
+                            <SelectItem value="array" className="text-xs">Lista</SelectItem>
+                            <SelectItem value="object" className="text-xs">Grupo de Subcampos</SelectItem>
+                          </SelectContent>
+                        </Select>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => onChangeNodes((prev) => prev.filter((_, i) => i !== idx))}
+                          className="h-8 w-7 text-muted-foreground hover:text-destructive"
+                          title="Eliminar campo"
+                        >
+                          {depth === 0 ? <Trash2 className="w-3.5 h-3.5" /> : <X className="w-3.5 h-3.5" />}
+                        </Button>
+
+                        {field.type === "categories" && (
+                          <Input
+                            value={field.categories}
+                            onChange={(e) =>
+                              onChangeNodes((prev) =>
+                                prev.map((f, i) => (i === idx ? { ...f, categories: e.target.value } : f))
+                              )
+                            }
+                            placeholder="Positive | Negative | Neutral | Mixed"
+                            className="col-span-2 h-7 text-xs font-mono bg-muted/30"
+                          />
+                        )}
+                      </div>
+
+                      {field.type === "object" && (
+                        <div className="space-y-2">
+                          {renderFieldNodes(
+                            field.subfields,
+                            (subUpdater) =>
+                              onChangeNodes((prev) =>
+                                prev.map((f, i) =>
+                                  i === idx ? { ...f, subfields: subUpdater(f.subfields) } : f
+                                )
+                              ),
+                            depth + 1
+                          )}
+                          <div className="pl-4">
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              onClick={() =>
+                                onChangeNodes((prev) =>
+                                  prev.map((f, i) =>
+                                    i === idx
+                                      ? {
+                                          ...f,
+                                          subfields: [
+                                            ...f.subfields,
+                                            {
+                                              id: mkId(),
+                                              name: "",
+                                              type: "string",
+                                              categories: "",
+                                              subfields: [],
+                                            },
+                                          ],
+                                        }
+                                      : f
+                                  )
+                                )
+                              }
+                              className="h-6 px-2 text-[11px] text-primary gap-1"
+                            >
+                              <Plus className="w-3 h-3" />
+                              <span>Añadir subcampo</span>
+                            </Button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              );
+
+              return renderFieldNodes(visualFields, setVisualFields, 0);
+            })()}
+
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() =>
+                setVisualFields((prev) => [
+                  ...prev,
+                  {
+                    id: Math.random().toString(36).slice(2, 9),
+                    name: "",
+                    type: "string",
+                    categories: "",
+                    subfields: [],
+                  },
+                ])
+              }
+              className="w-full h-8 text-xs border-dashed gap-1.5"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span>Añadir campo</span>
+            </Button>
+          </div>
+
+          <div className="flex items-center justify-end gap-2 pt-3 border-t border-border">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setShowVisualJsonModal(false)}
+              className="h-8 text-xs rounded-sm"
+            >
+              Cancelar
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              onClick={handleApplyVisualJsonBuilder}
+              className="h-8 text-xs rounded-sm gap-1.5"
+            >
+              <Check className="w-3.5 h-3.5" />
+              <span>Aplicar JSON</span>
+            </Button>
           </div>
         </DialogContent>
       </Dialog>

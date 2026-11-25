@@ -880,7 +880,15 @@
     "savedSuccess": "Profile updated successfully.",
     "saving": "Saving...",
     "allowDatasetSharingLabel": "Allow receiving & sharing datasets",
-    "allowDatasetSharingHint": "When disabled, you will not appear in other users' dataset sharing list."
+    "allowDatasetSharingHint": "When disabled, you will not appear in other users' dataset sharing list.",
+    "deleteButton": "Delete profile",
+    "deleteConfirmTitle": "Delete user profile",
+    "deleteConfirmWarning": "This action is irreversible. Your account, all your experiments, and all your own datasets will be deleted. Datasets shared by other users will never be deleted for their owner.",
+    "deletePasswordLabel": "Password to confirm",
+    "deletePasswordPlaceholder": "Enter your password",
+    "deletePasswordRequired": "You must enter your password to delete your profile.",
+    "deleteConfirmAction": "Confirm and delete profile",
+    "deleting": "Deleting profile..."
   },
   "dashboardDatasets": {
     "newExperimentOption": "New Experiment",
