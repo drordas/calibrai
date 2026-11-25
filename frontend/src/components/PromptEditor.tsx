@@ -47,7 +47,7 @@ import {
   Save,
   FolderOpen,
   Loader2,
-  Download,
+  FileDown,
   ArrowLeft,
   ChevronDown,
   ChevronRight,
@@ -4230,7 +4230,7 @@ export const PromptEditor: React.FC<PromptEditorProps> = ({
                     onClick={() => handleApplySavedPrompt(previewSavedPrompt)}
                     className="h-8 text-xs rounded-sm bg-primary text-primary-foreground hover:bg-primary/90 gap-1.5"
                   >
-                    <Download className="w-3.5 h-3.5" />
+                    <FileDown className="w-3.5 h-3.5" />
                     <span>{t("prompt.loadPromptApply")}</span>
                   </Button>
                 </div>
@@ -4274,7 +4274,7 @@ export const PromptEditor: React.FC<PromptEditorProps> = ({
                           className="h-7 w-7 rounded-sm text-muted-foreground hover:text-primary hover:bg-primary/10"
                           title={t("prompt.loadPromptApply")}
                         >
-                          <Download className="w-3.5 h-3.5" />
+                          <FileDown className="w-3.5 h-3.5" />
                         </Button>
                         <Button
                           type="button"
