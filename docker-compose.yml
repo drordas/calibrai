@@ -47,6 +47,7 @@ services:
       - ./backend/app:/app/backend/app
       - ./dataset:/app/dataset:ro
       - backend_uploads:/app/uploads
+      - /etc/hosts:/app/host_etc_hosts:ro
 
   # 3. React + Tailwind + Nginx Frontend
   frontend:

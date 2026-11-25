@@ -209,27 +209,25 @@ class LLMManager:
                 pass
 
         # 2. Remote Ollama: check /api/ps for active models with VRAM allocation
-        try:
-            clean_url = target_url.rstrip("/")
-            if not clean_url.startswith(("http://", "https://")):
-                clean_url = f"http://{clean_url}"
-            async with httpx.AsyncClient(timeout=2.5) as client:
-                res = await client.get(f"{clean_url}/api/ps")
-                if res.status_code == 200:
-                    models = res.json().get("models", [])
-                    for m in models:
-                        size_vram = m.get("size_vram", 0)
-                        if size_vram and size_vram > 0:
-                            vram_gb = round(size_vram / (1024 ** 3), 1)
-                            return {
-                                "detected": True,
-                                "is_local": False,
-                                "gpu_name": f"Ollama VRAM en uso ({m.get('name')})",
-                                "vram_gb": vram_gb,
-                                "recommended_options": recommended_options
-                            }
-        except Exception:
-            pass
+        for candidate_url in self._expand_ollama_urls(target_url):
+            try:
+                async with httpx.AsyncClient(timeout=2.5) as client:
+                    res = await client.get(f"{candidate_url}/api/ps")
+                    if res.status_code == 200:
+                        models = res.json().get("models", [])
+                        for m in models:
+                            size_vram = m.get("size_vram", 0)
+                            if size_vram and size_vram > 0:
+                                vram_gb = round(size_vram / (1024 ** 3), 1)
+                                return {
+                                    "detected": True,
+                                    "is_local": False,
+                                    "gpu_name": f"Ollama VRAM en uso ({m.get('name')})",
+                                    "vram_gb": vram_gb,
+                                    "recommended_options": recommended_options
+                                }
+            except Exception:
+                continue
 
         return {
             "detected": False,
@@ -338,20 +336,66 @@ class LLMManager:
             "explanation": explanation
         }
 
+    def _expand_ollama_urls(self, url: str) -> List[str]:
+        """Return candidate Ollama URLs, resolving hostnames via /app/host_etc_hosts and Docker host gateway."""
+        from pathlib import Path
+        from urllib.parse import urlparse, urlunparse
+
+        clean = (url or "").strip()
+        if not clean:
+            clean = "http://localhost:11434"
+        if not clean.startswith(("http://", "https://")):
+            clean = f"http://{clean}"
+        clean = clean.rstrip("/")
+
+        candidates: List[str] = [clean]
+        try:
+            parsed = urlparse(clean)
+            host = (parsed.hostname or "").strip()
+            if host in ("localhost", "127.0.0.1"):
+                netloc = parsed.netloc.replace(host, "host.docker.internal", 1)
+                candidates.append(urlunparse(parsed._replace(netloc=netloc)).rstrip("/"))
+            elif host and host != "host.docker.internal":
+                for hosts_path in (Path("/app/host_etc_hosts"), Path("/etc/hosts")):
+                    if not hosts_path.exists():
+                        continue
+                    try:
+                        for raw_line in hosts_path.read_text(encoding="utf-8", errors="ignore").splitlines():
+                            line = raw_line.split("#", 1)[0].strip()
+                            if not line:
+                                continue
+                            parts = line.split()
+                            if len(parts) < 2:
+                                continue
+                            ip, aliases = parts[0], [a.lower() for a in parts[1:]]
+                            if host.lower() in aliases:
+                                mapped_host = "host.docker.internal" if ip in ("127.0.0.1", "127.0.1.1", "::1") else ip
+                                netloc = f"{mapped_host}:{parsed.port}" if parsed.port else mapped_host
+                                candidates.append(urlunparse(parsed._replace(netloc=netloc)).rstrip("/"))
+                                break
+                    except Exception:
+                        continue
+        except Exception:
+            pass
+
+        # Deduplicate preserving order
+        seen = set()
+        unique: List[str] = []
+        for c in candidates:
+            if c not in seen:
+                seen.add(c)
+                unique.append(c)
+        return unique
+
     async def check_ollama_status(self, custom_url: Optional[str] = None) -> tuple[bool, List[str]]:
-        urls_to_try = []
+        urls_to_try: List[str] = []
         if custom_url:
-            clean = custom_url.strip()
-            if not clean.startswith(("http://", "https://")):
-                clean = f"http://{clean}"
-            urls_to_try.append(clean.rstrip("/"))
-            if "localhost" in clean:
-                urls_to_try.append(clean.replace("localhost", "host.docker.internal").rstrip("/"))
-        urls_to_try.append(self.ollama_base_url.rstrip("/"))
+            urls_to_try.extend(self._expand_ollama_urls(custom_url))
+        urls_to_try.extend(self._expand_ollama_urls(self.ollama_base_url))
         if "host.docker.internal" in self.ollama_base_url:
             urls_to_try.append(self.ollama_base_url.replace("host.docker.internal", "localhost").rstrip("/"))
 
-        for u in urls_to_try:
+        for u in dict.fromkeys(urls_to_try):
             try:
                 async with httpx.AsyncClient(timeout=2.5) as client:
                     res = await client.get(f"{u}/api/tags")
@@ -365,15 +409,7 @@ class LLMManager:
 
     async def discover_local_models(self, url: str = "http://localhost:11434") -> tuple[bool, str, List[ModelCatalogItem], int, Optional[str]]:
         """Connect to local Ollama instance and fetch ONLY the actual installed local models on-demand."""
-        clean_url = (url or "").strip()
-        if not clean_url:
-            clean_url = "http://localhost:11434"
-        if not clean_url.startswith(("http://", "https://")):
-            clean_url = f"http://{clean_url}"
-
-        urls_to_try = [clean_url.rstrip("/")]
-        if "localhost" in clean_url:
-            urls_to_try.append(clean_url.replace("localhost", "host.docker.internal").rstrip("/"))
+        urls_to_try = self._expand_ollama_urls(url or "http://localhost:11434")
 
         for candidate_url in urls_to_try:
             try:
@@ -774,7 +810,9 @@ class LLMManager:
             return True
 
         clean_model = model_id.split("/")[-1]
-        target_url = (custom_url or self.ollama_base_url or "http://localhost:11434").rstrip("/")
+        raw_url = custom_url or self.ollama_base_url or "http://localhost:11434"
+        candidates = self._expand_ollama_urls(raw_url)
+        target_url = candidates[-1] if len(candidates) > 1 else candidates[0]
         
         load_payload: Dict[str, Any] = {
             "model": clean_model,
