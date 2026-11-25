@@ -12,7 +12,6 @@ import {
   fetchDatasetShares,
   fetchPaginatedRows,
   fetchSavedPrompts,
-  fetchShareableUsers,
   renameDataset,
   respondToDatasetShare,
   revokeDatasetShare,
@@ -20,6 +19,7 @@ import {
   updateDatasetShareMode,
   uploadDataset,
 } from "../services/api";
+import { ShareableUserItem, ShareUserPicker } from "./ShareUserPicker";
 import { useTranslation } from "../i18n";
 import {
   Dialog,
@@ -106,11 +106,10 @@ export const DashboardDatasetsModal: React.FC<DashboardDatasetsModalProps> = ({
 
   // Share state
   const [shareTarget, setShareTarget] = useState<DatasetSummary | null>(null);
+  const [selectedShareUser, setSelectedShareUser] = useState<ShareableUserItem | null>(null);
   const [accessModalDs, setAccessModalDs] = useState<DatasetSummary | null>(null);
   const [shareMode, setShareMode] = useState<"view" | "edit" | "copy">("view");
-  const [shareUsers, setShareUsers] = useState<ShareUser[]>([]);
   const [activeShares, setActiveShares] = useState<ShareEntry[]>([]);
-  const [shareUsersLoading, setShareUsersLoading] = useState(false);
   const [sharingUserId, setSharingUserId] = useState<number | null>(null);
   const [revokingShareId, setRevokingShareId] = useState<number | null>(null);
 
@@ -223,22 +222,14 @@ export const DashboardDatasetsModal: React.FC<DashboardDatasetsModalProps> = ({
   const handleOpenShare = async (ds: DatasetSummary) => {
     setShareTarget(ds);
     setShareMode("view");
-    setShareUsers([]);
     setActiveShares([]);
-    setShareUsersLoading(true);
     setError(null);
     try {
-      const [users, shares] = await Promise.all([
-        fetchShareableUsers(),
-        fetchDatasetShares(ds.id).catch(() => []),
-      ]);
-      setShareUsers(users);
+      const shares = await fetchDatasetShares(ds.id).catch(() => []);
       setActiveShares(shares);
     } catch (err: any) {
       setError(err?.message || t("common.error"));
       setShareTarget(null);
-    } finally {
-      setShareUsersLoading(false);
     }
   };
 
@@ -848,19 +839,53 @@ export const DashboardDatasetsModal: React.FC<DashboardDatasetsModalProps> = ({
           <div className="space-y-3 py-2">
             <div className="space-y-1.5">
               <Label className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground">
-                {t("dashboardDatasets.shareModeLabel")}
+                Usuario destinatario
               </Label>
-              <Select value={shareMode} onValueChange={(v) => setShareMode(v as "view" | "edit" | "copy")}>
-                <SelectTrigger className="h-9 text-xs bg-background border-border rounded-sm">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent className="bg-card border-border rounded-sm shadow-none">
-                  <SelectItem value="view" className="text-xs">{t("dashboardDatasets.modeView")}</SelectItem>
-                  <SelectItem value="edit" className="text-xs">{t("dashboardDatasets.modeEdit")}</SelectItem>
-                  <SelectItem value="copy" className="text-xs">{t("dashboardDatasets.modeCopy")}</SelectItem>
-                </SelectContent>
-              </Select>
+              <ShareUserPicker
+                excludedUserIds={activeShares.map((sh) => sh.target_user_id)}
+                selectedUserId={selectedShareUser?.id ?? ""}
+                onSelectUser={(u) => setSelectedShareUser(u)}
+              />
             </div>
+
+            {selectedShareUser && (
+              <div className="p-2.5 border border-primary/30 rounded-sm bg-primary/5 space-y-2.5">
+                <div className="flex items-center justify-between gap-2">
+                  <Label className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground">
+                    {t("dashboardDatasets.shareModeLabel")} · <strong className="text-foreground">@{selectedShareUser.username}</strong>
+                  </Label>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Select value={shareMode} onValueChange={(v) => setShareMode(v as "view" | "edit" | "copy")}>
+                    <SelectTrigger className="h-9 text-xs bg-background border-border rounded-sm flex-1">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent className="bg-card border-border rounded-sm shadow-none">
+                      <SelectItem value="view" className="text-xs">{t("dashboardDatasets.modeView")}</SelectItem>
+                      <SelectItem value="edit" className="text-xs">{t("dashboardDatasets.modeEdit")}</SelectItem>
+                      <SelectItem value="copy" className="text-xs">{t("dashboardDatasets.modeCopy")}</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <Button
+                    type="button"
+                    size="sm"
+                    disabled={sharingUserId === selectedShareUser.id}
+                    onClick={async () => {
+                      const target = selectedShareUser;
+                      await handleShareWithUser(target);
+                      setSelectedShareUser(null);
+                    }}
+                    className="h-9 px-4 text-xs rounded-sm bg-primary text-primary-foreground hover:bg-primary/90 shrink-0"
+                  >
+                    {sharingUserId === selectedShareUser.id ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      t("dashboardDatasets.shareBtn")
+                    )}
+                  </Button>
+                </div>
+              </div>
+            )}
 
             {activeShares.length > 0 && (
               <div className="space-y-1.5 border-t border-border pt-3">
@@ -895,56 +920,6 @@ export const DashboardDatasetsModal: React.FC<DashboardDatasetsModalProps> = ({
                 </div>
               </div>
             )}
-
-            <div className="max-h-[35vh] overflow-y-auto space-y-2 border-t border-border pt-3">
-              {shareUsersLoading ? (
-                <div className="py-6 flex items-center justify-center gap-2 text-xs text-muted-foreground">
-                  <Loader2 className="w-4 h-4 animate-spin text-primary" />
-                  <span>{t("common.loading")}</span>
-                </div>
-              ) : (() => {
-                const availableShareUsers = shareUsers.filter(
-                  (u) => !activeShares.some((sh) => sh.target_user_id === u.id)
-                );
-                if (availableShareUsers.length === 0) {
-                  return (
-                    <div className="py-6 text-center text-xs text-muted-foreground">
-                      {t("dashboardDatasets.shareNoUsers")}
-                    </div>
-                  );
-                }
-                return availableShareUsers.map((u) => (
-                  <div
-                    key={u.id}
-                    className="flex items-center justify-between gap-3 p-2.5 border border-border rounded-sm bg-background"
-                  >
-                    <div className="min-w-0">
-                      <div className="text-xs font-mono font-medium text-foreground truncate">
-                        @{u.username}
-                      </div>
-                      {u.full_name && (
-                        <div className="text-[11px] text-muted-foreground truncate">
-                          {u.full_name}
-                        </div>
-                      )}
-                    </div>
-                    <Button
-                      type="button"
-                      size="sm"
-                      disabled={sharingUserId === u.id}
-                      onClick={() => handleShareWithUser(u)}
-                      className="h-7 px-3 text-xs rounded-sm bg-primary text-primary-foreground hover:bg-primary/90 shrink-0"
-                    >
-                      {sharingUserId === u.id ? (
-                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                      ) : (
-                        t("dashboardDatasets.shareBtn")
-                      )}
-                    </Button>
-                  </div>
-                ));
-              })()}
-            </div>
           </div>
 
           <div className="flex justify-end pt-2 border-t border-border">

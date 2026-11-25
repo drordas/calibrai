@@ -217,8 +217,12 @@ export async function copyDataset(datasetId: string): Promise<DatasetSummary> {
   return res.json();
 }
 
-export async function fetchShareableUsers(): Promise<Array<{ id: number; username: string; full_name?: string | null }>> {
-  const res = await fetch(`${API_BASE}/datasets/share/users`, {
+export async function fetchShareableUsers(
+  q?: string
+): Promise<Array<{ id: number; username: string; full_name?: string | null; share_count?: number }>> {
+  const clean = (q || "").trim().replace(/^@+/, "").trim();
+  const query = clean ? `?q=${encodeURIComponent(clean)}` : "";
+  const res = await fetch(`${API_BASE}/datasets/share/users${query}`, {
     headers: getAuthHeaders(),
   });
   if (!res.ok) throw new Error("Error fetching users");

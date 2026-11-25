@@ -1,5 +1,6 @@
 import shutil
 import uuid
+from collections import Counter
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, UploadFile, File, Form, HTTPException, Query, Response
@@ -9,7 +10,15 @@ from sqlalchemy.orm import Session
 from backend.app.api.auth import get_current_user, get_optional_current_user
 from backend.app.core.config import settings
 from backend.app.core.dataset_engine import dataset_engine
-from backend.app.db.models import DatasetRecord, DatasetShare, Experiment, User
+from backend.app.db.models import (
+    ConnectionProfileShare,
+    DatasetRecord,
+    DatasetShare,
+    Experiment,
+    ExperimentShare,
+    PromptShare,
+    User,
+)
 from backend.app.db.session import get_db
 from backend.app.schemas.dataset import (
     DatasetRenameRequest,
@@ -128,21 +137,55 @@ def list_datasets(
 
 @router.get("/share/users", response_model=List[ShareUserOut])
 def list_shareable_users(
+    q: Optional[str] = Query(None),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    users = (
-        db.query(User)
-        .filter(
-            User.is_active == True,
-            User.id != current_user.id,
-            User.allow_dataset_sharing == True,
+    share_counts: Counter[int] = Counter()
+    for model in (DatasetShare, ExperimentShare, PromptShare, ConnectionProfileShare):
+        rows = (
+            db.query(model.target_user_id)
+            .filter(model.owner_user_id == current_user.id)
+            .all()
         )
-        .order_by(User.username.asc())
-        .all()
+        for (target_id,) in rows:
+            if target_id and target_id != current_user.id:
+                share_counts[target_id] += 1
+
+    clean_q = (q or "").strip().lstrip("@").strip()
+    base_query = db.query(User).filter(
+        User.is_active == True,
+        User.id != current_user.id,
+        User.allow_dataset_sharing == True,
     )
+
+    if clean_q:
+        pattern = f"%{clean_q}%"
+        users = (
+            base_query.filter(
+                or_(
+                    User.username.ilike(pattern),
+                    User.full_name.ilike(pattern),
+                )
+            )
+            .all()
+        )
+        users.sort(key=lambda u: (-share_counts.get(u.id, 0), (u.username or "").lower()))
+        users = users[:20]
+    else:
+        if not share_counts:
+            return []
+        users = base_query.filter(User.id.in_(list(share_counts.keys()))).all()
+        users.sort(key=lambda u: (-share_counts.get(u.id, 0), (u.username or "").lower()))
+        users = users[:10]
+
     return [
-        ShareUserOut(id=u.id, username=u.username, full_name=u.full_name)
+        ShareUserOut(
+            id=u.id,
+            username=u.username,
+            full_name=u.full_name,
+            share_count=share_counts.get(u.id, 0),
+        )
         for u in users
     ]
 

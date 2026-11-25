@@ -70,10 +70,10 @@ import {
   fetchProfileShares,
   shareConnectionProfile,
   revokeProfileShare,
-  fetchShareableUsers,
   ConnectionProfileItem,
   ConnectionProfileShareItem,
 } from "../services/api";
+import { ShareUserPicker } from "./ShareUserPicker";
 import {
   Card,
   CardHeader,
@@ -215,7 +215,6 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
 
   // Share Connection Profile Modal states
   const [shareProfileTarget, setShareProfileTarget] = useState<ConnectionProfileItem | null>(null);
-  const [shareableUsers, setShareableUsers] = useState<Array<{ id: number; username: string; full_name?: string | null }>>([]);
   const [profileShares, setProfileShares] = useState<ConnectionProfileShareItem[]>([]);
   const [shareTargetUserId, setShareTargetUserId] = useState<number | "">("");
   const [shareMaxVramGb, setShareMaxVramGb] = useState<string>("");
@@ -284,11 +283,7 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
     setShareMaxVramGb(profile.provider === "ollama" && profile.vram_gb ? String(profile.vram_gb) : "");
     setShareError(null);
     try {
-      const [users, shares] = await Promise.all([
-        fetchShareableUsers(),
-        fetchProfileShares(profile.id),
-      ]);
-      setShareableUsers(users);
+      const shares = await fetchProfileShares(profile.id);
       setProfileShares(shares);
     } catch (err: any) {
       setShareError(err.message || "Error al cargar usuarios o comparticiones.");
@@ -2385,23 +2380,15 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
 
           <form onSubmit={handleConfirmShareProfile} className="space-y-3">
             <div className="space-y-1.5">
-              <Label htmlFor="share-profile-user" className="text-xs font-semibold flex items-center gap-1.5">
+              <Label className="text-xs font-semibold flex items-center gap-1.5">
                 <Users className="w-3.5 h-3.5 text-muted-foreground" />
                 <span>Usuario destinatario</span>
               </Label>
-              <select
-                id="share-profile-user"
-                value={shareTargetUserId}
-                onChange={(e) => setShareTargetUserId(e.target.value ? Number(e.target.value) : "")}
-                className="w-full h-9 rounded-md border border-border bg-background px-3 text-xs"
-              >
-                <option value="">Selecciona un usuario...</option>
-                {shareableUsers.map((u) => (
-                  <option key={u.id} value={u.id}>
-                    @{u.username} {u.full_name ? `(${u.full_name})` : ""}
-                  </option>
-                ))}
-              </select>
+              <ShareUserPicker
+                excludedUserIds={profileShares.map((s) => s.target_user_id)}
+                selectedUserId={shareTargetUserId}
+                onSelectUser={(u) => setShareTargetUserId(u.id)}
+              />
             </div>
 
             {shareProfileTarget?.provider === "ollama" && (

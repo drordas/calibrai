@@ -1771,9 +1771,68 @@ const calibraiJsonEditorTheme = EditorView.theme({
   }
 
   const [showVisualJsonModal, setShowVisualJsonModal] = useState(false);
+  const [activeVisualSuggestId, setActiveVisualSuggestId] = useState<string | null>(null);
   const [isManualJsonEdit, setIsManualJsonEdit] = useState(false);
   const [visualFields, setVisualFields] = useState<VisualField[]>([]);
   const [promptParseError, setPromptParseError] = useState<string | null>(null);
+
+  const outputPromptVarCatalog = useMemo(() => {
+    const sourceText = (outputPromptText.trim() ? outputPromptText : instructionsText).trim();
+    const topKeys: string[] = [];
+    const topSeen = new Set<string>();
+    const subKeysBySection: Record<string, string[]> = {};
+    const allSubKeys: string[] = [];
+    const allSubSeen = new Set<string>();
+
+    if (!sourceText) {
+      return { topKeys, subKeysBySection, allSubKeys };
+    }
+
+    const lines = sourceText
+      .replace(/```[\s\S]*?```/g, "")
+      .replace(/\{[a-zA-Z0-9_.-]+\}/g, "")
+      .split("\n")
+      .map((l) => l.trim())
+      .filter((l) => l.length > 0 && !/^[=\-_─]{4,}$/.test(l));
+
+    let currentSection: string | null = null;
+    for (const line of lines) {
+      const headerMatch = line.match(/^([A-Za-z][A-Za-z0-9_]{1,63})\s*$/);
+      if (headerMatch) {
+        const keyLower = headerMatch[1].toLowerCase();
+        currentSection = keyLower;
+        if (!topSeen.has(keyLower)) {
+          topSeen.add(keyLower);
+          topKeys.push(keyLower);
+        }
+        if (!subKeysBySection[keyLower]) {
+          subKeysBySection[keyLower] = [];
+        }
+        continue;
+      }
+
+      const kvMatch = line.match(/^([A-Za-z][A-Za-z0-9_]{0,63})\s*[:=]\s*(.*)$/);
+      if (kvMatch) {
+        const keyLower = kvMatch[1].toLowerCase();
+        if (currentSection) {
+          if (!subKeysBySection[currentSection].includes(keyLower)) {
+            subKeysBySection[currentSection].push(keyLower);
+          }
+          if (!allSubSeen.has(keyLower)) {
+            allSubSeen.add(keyLower);
+            allSubKeys.push(keyLower);
+          }
+        } else {
+          if (!topSeen.has(keyLower)) {
+            topSeen.add(keyLower);
+            topKeys.push(keyLower);
+          }
+        }
+      }
+    }
+
+    return { topKeys, subKeysBySection, allSubKeys };
+  }, [outputPromptText, instructionsText]);
 
   const handleOpenVisualJsonBuilder = () => {
     const mkId = () => Math.random().toString(36).slice(2, 9);
@@ -4890,12 +4949,18 @@ const calibraiJsonEditorTheme = EditorView.theme({
       </Dialog>
 
       {/* Visual No-Code JSON Builder Modal */}
-      <Dialog open={showVisualJsonModal} onOpenChange={setShowVisualJsonModal}>
+      <Dialog
+        open={showVisualJsonModal}
+        onOpenChange={(open) => {
+          setShowVisualJsonModal(open);
+          if (!open) setActiveVisualSuggestId(null);
+        }}
+      >
         <DialogContent className="sm:max-w-2xl max-h-[85vh] flex flex-col bg-card border-border rounded-sm shadow-none">
           <DialogHeader className="border-b border-border pb-3">
             <DialogTitle className="font-serif text-base font-bold text-foreground flex items-center gap-2">
               <Sliders className="w-4 h-4 text-primary" />
-              <span>Constructor Visual de Estructura JSON</span>
+              <span>Constructor Visual de JSON</span>
             </DialogTitle>
             <DialogDescription className="text-xs text-muted-foreground">
               Define los campos de salida sin preocuparte por llaves, comillas ni comas.
@@ -4905,14 +4970,53 @@ const calibraiJsonEditorTheme = EditorView.theme({
           <div className="flex-1 overflow-y-auto space-y-3 py-2 pr-1">
             {(() => {
               const mkId = () => Math.random().toString(36).slice(2, 9);
+              const hasPromptVars = outputPromptVarCatalog.topKeys.length > 0;
+
+              const getAllowedNames = (depth: number, parentName?: string): string[] => {
+                if (!hasPromptVars) return [];
+                if (depth === 0) return outputPromptVarCatalog.topKeys;
+                const parentLower = (parentName || "").trim().toLowerCase();
+                const sectionSubs = outputPromptVarCatalog.subKeysBySection[parentLower];
+                if (sectionSubs && sectionSubs.length > 0) return sectionSubs;
+                return outputPromptVarCatalog.allSubKeys.length > 0
+                  ? outputPromptVarCatalog.allSubKeys
+                  : outputPromptVarCatalog.topKeys;
+              };
+
+              const isNameValid = (name: string, depth: number, parentName?: string): boolean => {
+                const clean = name.trim().toLowerCase();
+                if (!clean || !hasPromptVars) return true;
+                return getAllowedNames(depth, parentName).includes(clean);
+              };
 
               const renderFieldNodes = (
                 nodes: VisualField[],
                 onChangeNodes: (updater: (prev: VisualField[]) => VisualField[]) => void,
-                depth = 0
+                depth = 0,
+                parentName?: string
               ): React.ReactNode => (
                 <div className={depth === 0 ? "space-y-3" : "pl-4 border-l-2 border-primary/30 space-y-2"}>
-                  {nodes.map((field, idx) => (
+                  {nodes.map((field, idx) => {
+                    const allowedNames = getAllowedNames(depth, parentName);
+                    const queryLower = field.name.trim().toLowerCase();
+                    const siblingNames = new Set(
+                      nodes
+                        .filter((_, i) => i !== idx)
+                        .map((f) => f.name.trim().toLowerCase())
+                        .filter(Boolean)
+                    );
+                    const validName = isNameValid(field.name, depth, parentName);
+                    const isDuplicate = Boolean(queryLower && siblingNames.has(queryLower));
+                    const hasFieldError = !validName || isDuplicate;
+                    const suggestions = allowedNames.filter(
+                      (n) =>
+                        !siblingNames.has(n.toLowerCase()) &&
+                        (!queryLower ? true : n.toLowerCase().includes(queryLower))
+                    );
+                    const showSuggestions =
+                      activeVisualSuggestId === field.id && hasPromptVars && suggestions.length > 0;
+
+                    return (
                     <div
                       key={field.id}
                       className={
@@ -4921,17 +5025,57 @@ const calibraiJsonEditorTheme = EditorView.theme({
                           : "space-y-2"
                       }
                     >
-                      <div className="grid grid-cols-[minmax(0,1fr)_180px_28px] items-center gap-2">
-                        <Input
-                          value={field.name}
-                          onChange={(e) =>
-                            onChangeNodes((prev) =>
-                              prev.map((f, i) => (i === idx ? { ...f, name: e.target.value } : f))
-                            )
-                          }
-                          placeholder={depth === 0 ? "nombre_del_campo" : "subcampo"}
-                          className="h-8 text-xs font-mono"
-                        />
+                      <div className="grid grid-cols-[minmax(0,1fr)_180px_28px] items-start gap-2">
+                        <div className="relative space-y-1">
+                          <Input
+                            value={field.name}
+                            onFocus={() => setActiveVisualSuggestId(field.id)}
+                            onBlur={() => {
+                              setTimeout(() => {
+                                setActiveVisualSuggestId((curr) => (curr === field.id ? null : curr));
+                              }, 150);
+                            }}
+                            onChange={(e) => {
+                              setActiveVisualSuggestId(field.id);
+                              onChangeNodes((prev) =>
+                                prev.map((f, i) => (i === idx ? { ...f, name: e.target.value } : f))
+                              );
+                            }}
+                            placeholder={depth === 0 ? "nombre_del_campo" : "subcampo"}
+                            className={`h-8 text-xs font-mono ${
+                              hasFieldError ? "border-destructive focus-visible:ring-destructive" : ""
+                            }`}
+                          />
+                          {showSuggestions && (
+                            <div className="absolute z-30 left-0 right-0 top-8 mt-0.5 max-h-36 overflow-y-auto rounded-sm border border-border bg-card shadow-md py-1">
+                              {suggestions.map((sug) => (
+                                <button
+                                  key={sug}
+                                  type="button"
+                                  onMouseDown={(e) => {
+                                    e.preventDefault();
+                                    onChangeNodes((prev) =>
+                                      prev.map((f, i) => (i === idx ? { ...f, name: sug } : f))
+                                    );
+                                    setActiveVisualSuggestId(null);
+                                  }}
+                                  className="w-full text-left px-2.5 py-1 text-xs font-mono hover:bg-primary/10 hover:text-primary transition-colors"
+                                >
+                                  {sug}
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                          {!validName ? (
+                            <p className="text-[10px] text-destructive font-medium">
+                              No existe en el Prompt de Salida
+                            </p>
+                          ) : isDuplicate ? (
+                            <p className="text-[10px] text-destructive font-medium">
+                              Nombre duplicado en este nivel
+                            </p>
+                          ) : null}
+                        </div>
                         <Select
                           value={field.type}
                           onValueChange={(val) =>
@@ -5005,7 +5149,8 @@ const calibraiJsonEditorTheme = EditorView.theme({
                                   i === idx ? { ...f, subfields: subUpdater(f.subfields) } : f
                                 )
                               ),
-                            depth + 1
+                            depth + 1,
+                            field.name
                           )}
                           <div className="pl-4">
                             <Button
@@ -5042,7 +5187,8 @@ const calibraiJsonEditorTheme = EditorView.theme({
                         </div>
                       )}
                     </div>
-                  ))}
+                  );
+                  })}
                 </div>
               );
 
@@ -5073,24 +5219,54 @@ const calibraiJsonEditorTheme = EditorView.theme({
           </div>
 
           <div className="flex items-center justify-end gap-2 pt-3 border-t border-border">
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() => setShowVisualJsonModal(false)}
-              className="h-8 text-xs rounded-sm"
-            >
-              Cancelar
-            </Button>
-            <Button
-              type="button"
-              size="sm"
-              onClick={handleApplyVisualJsonBuilder}
-              className="h-8 text-xs rounded-sm gap-1.5"
-            >
-              <Check className="w-3.5 h-3.5" />
-              <span>Aplicar JSON</span>
-            </Button>
+            {(() => {
+              const hasPromptVars = outputPromptVarCatalog.topKeys.length > 0;
+              const checkInvalid = (nodes: VisualField[], depth = 0, parentName?: string): boolean => {
+                const seen = new Set<string>();
+                const allowed =
+                  depth === 0
+                    ? outputPromptVarCatalog.topKeys
+                    : outputPromptVarCatalog.subKeysBySection[(parentName || "").trim().toLowerCase()] ||
+                      (outputPromptVarCatalog.allSubKeys.length > 0
+                        ? outputPromptVarCatalog.allSubKeys
+                        : outputPromptVarCatalog.topKeys);
+                return nodes.some((f) => {
+                  const clean = f.name.trim().toLowerCase();
+                  if (clean) {
+                    if (seen.has(clean)) return true;
+                    seen.add(clean);
+                    if (hasPromptVars && !allowed.includes(clean)) return true;
+                  }
+                  if (f.type === "object" && checkInvalid(f.subfields, depth + 1, f.name)) return true;
+                  return false;
+                });
+              };
+              const isInvalid = checkInvalid(visualFields);
+              return (
+                <>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setShowVisualJsonModal(false)}
+                    className="h-8 text-xs rounded-sm"
+                  >
+                    Cancelar
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    disabled={isInvalid}
+                    onClick={handleApplyVisualJsonBuilder}
+                    className="h-8 text-xs rounded-sm gap-1.5"
+                    title={isInvalid ? "Corrige las variables que no existen en el Prompt de Salida" : undefined}
+                  >
+                    <Check className="w-3.5 h-3.5" />
+                    <span>Aplicar JSON</span>
+                  </Button>
+                </>
+              );
+            })()}
           </div>
         </DialogContent>
       </Dialog>

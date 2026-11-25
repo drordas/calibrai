@@ -34,6 +34,7 @@ class ShareUserOut(BaseModel):
     id: int
     username: str
     full_name: Optional[str] = None
+    share_count: int = 0
 
 
 class DatasetShareRequest(BaseModel):

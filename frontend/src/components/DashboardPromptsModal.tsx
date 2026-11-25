@@ -5,7 +5,6 @@ import {
   fetchDatasets,
   fetchPromptShares,
   fetchSavedPrompts,
-  fetchShareableUsers,
   PromptShareEntry,
   revokePromptShare,
   SavedPromptItem,
@@ -14,6 +13,7 @@ import {
   updateSavedPrompt,
 } from "../services/api";
 import { SharedAccessModal } from "./SharedAccessModal";
+import { ShareableUserItem, ShareUserPicker } from "./ShareUserPicker";
 import {
   Dialog,
   DialogContent,
@@ -194,10 +194,9 @@ export const DashboardPromptsModal: React.FC<DashboardPromptsModalProps> = ({
 
   // Share prompt state
   const [shareTarget, setShareTarget] = useState<SavedPromptItem | null>(null);
+  const [selectedShareUser, setSelectedShareUser] = useState<ShareableUserItem | null>(null);
   const [shareMode, setShareMode] = useState<"view" | "edit" | "copy">("view");
-  const [shareUsers, setShareUsers] = useState<ShareUser[]>([]);
   const [activePromptShares, setActivePromptShares] = useState<PromptShareEntry[]>([]);
-  const [shareUsersLoading, setShareUsersLoading] = useState(false);
   const [sharingUserId, setSharingUserId] = useState<number | null>(null);
   const [accessModalPrompt, setAccessModalPrompt] = useState<SavedPromptItem | null>(null);
 
@@ -216,19 +215,12 @@ export const DashboardPromptsModal: React.FC<DashboardPromptsModalProps> = ({
   const handleOpenSharePrompt = async (item: SavedPromptItem) => {
     setShareTarget(item);
     setShareMode("view");
-    setShareUsersLoading(true);
     setError(null);
     try {
-      const [users, shares] = await Promise.all([
-        fetchShareableUsers(),
-        fetchPromptShares(item.id),
-      ]);
-      setShareUsers(users);
+      const shares = await fetchPromptShares(item.id);
       setActivePromptShares(shares);
     } catch (err: any) {
       setError(err?.message || "Error cargando usuarios para compartir");
-    } finally {
-      setShareUsersLoading(false);
     }
   };
 
@@ -882,59 +874,47 @@ export const DashboardPromptsModal: React.FC<DashboardPromptsModalProps> = ({
           <div className="space-y-3 py-2">
             <div className="space-y-1.5">
               <Label className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground">
-                Modo de compartición del prompt
+                Usuario destinatario
               </Label>
-              <Select value={shareMode} onValueChange={(v) => setShareMode(v as "view" | "edit" | "copy")}>
-                <SelectTrigger className="h-9 text-xs bg-background border-border rounded-sm">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent className="bg-card border-border rounded-sm shadow-none">
-                  <SelectItem value="view" className="text-xs">Visualizar (solo lectura)</SelectItem>
-                  <SelectItem value="edit" className="text-xs">Edición</SelectItem>
-                  <SelectItem value="copy" className="text-xs">Copia independiente</SelectItem>
-                </SelectContent>
-              </Select>
+              <ShareUserPicker
+                excludedUserIds={activePromptShares.map((sh) => sh.target_user_id)}
+                selectedUserId={selectedShareUser?.id ?? ""}
+                onSelectUser={(u) => setSelectedShareUser(u)}
+              />
             </div>
 
-            <div className="max-h-[35vh] overflow-y-auto space-y-2 border-t border-border pt-3">
-              {shareUsersLoading ? (
-                <div className="py-6 flex items-center justify-center gap-2 text-xs text-muted-foreground">
-                  <Loader2 className="w-4 h-4 animate-spin text-primary" />
-                  <span>Cargando usuarios...</span>
-                </div>
-              ) : (() => {
-                const available = shareUsers.filter(
-                  (u) => !activePromptShares.some((sh) => sh.target_user_id === u.id)
-                );
-                if (available.length === 0) {
-                  return (
-                    <div className="py-6 text-center text-xs text-muted-foreground">
-                      No hay más usuarios disponibles para compartir.
-                    </div>
-                  );
-                }
-                return available.map((u) => (
-                  <div
-                    key={u.id}
-                    className="flex items-center justify-between gap-3 p-2.5 border border-border rounded-sm bg-background"
+            {selectedShareUser && (
+              <div className="p-2.5 border border-primary/30 rounded-sm bg-primary/5 space-y-2.5">
+                <Label className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground">
+                  Modo de compartición del prompt · <strong className="text-foreground">@{selectedShareUser.username}</strong>
+                </Label>
+                <div className="flex items-center gap-2">
+                  <Select value={shareMode} onValueChange={(v) => setShareMode(v as "view" | "edit" | "copy")}>
+                    <SelectTrigger className="h-9 text-xs bg-background border-border rounded-sm flex-1">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent className="bg-card border-border rounded-sm shadow-none">
+                      <SelectItem value="view" className="text-xs">Visualizar (solo lectura)</SelectItem>
+                      <SelectItem value="edit" className="text-xs">Edición</SelectItem>
+                      <SelectItem value="copy" className="text-xs">Copia independiente</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <Button
+                    type="button"
+                    size="sm"
+                    disabled={sharingUserId === selectedShareUser.id}
+                    onClick={async () => {
+                      const target = selectedShareUser;
+                      await handleSharePromptWithUser(target);
+                      setSelectedShareUser(null);
+                    }}
+                    className="h-9 px-4 text-xs rounded-sm bg-primary text-primary-foreground hover:bg-primary/90 shrink-0"
                   >
-                    <div className="min-w-0">
-                      <div className="text-xs font-mono font-medium text-foreground truncate">@{u.username}</div>
-                      {u.full_name && <div className="text-[11px] text-muted-foreground truncate">{u.full_name}</div>}
-                    </div>
-                    <Button
-                      type="button"
-                      size="sm"
-                      disabled={sharingUserId === u.id}
-                      onClick={() => handleSharePromptWithUser(u)}
-                      className="h-7 px-3 text-xs rounded-sm bg-primary text-primary-foreground hover:bg-primary/90 shrink-0"
-                    >
-                      {sharingUserId === u.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : "Compartir"}
-                    </Button>
-                  </div>
-                ));
-              })()}
-            </div>
+                    {sharingUserId === selectedShareUser.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : "Compartir"}
+                  </Button>
+                </div>
+              </div>
+            )}
           </div>
 
           <div className="flex justify-end pt-2 border-t border-border">
