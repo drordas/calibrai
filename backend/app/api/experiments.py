@@ -1195,6 +1195,48 @@ def export_experiment_models_json(
     if not resolved_items:
         raise HTTPException(status_code=404, detail="No se encontraron resultados JSON para los modelos seleccionados")
 
+    output_schema = None
+    if exp.eval_spec and isinstance(exp.eval_spec, dict):
+        schema_candidate = exp.eval_spec.get("output_schema")
+        if isinstance(schema_candidate, dict) and len(schema_candidate) > 0:
+            output_schema = schema_candidate
+
+    def project_output_to_schema(raw_val: Any, schema: Optional[Dict[str, Any]]) -> Any:
+        if not schema or not isinstance(raw_val, dict):
+            return raw_val
+        dim_source = raw_val.get("dimensions") if isinstance(raw_val.get("dimensions"), dict) else {}
+        projected: Dict[str, Any] = {}
+        for k, s_val in schema.items():
+            found = None
+            if k in raw_val:
+                found = raw_val[k]
+            else:
+                for rk, rv in raw_val.items():
+                    if rk.lower() == k.lower():
+                        found = rv
+                        break
+            if found is None and dim_source:
+                if k in dim_source:
+                    found = dim_source[k]
+                else:
+                    for dk, dv in dim_source.items():
+                        if dk.lower() == k.lower():
+                            found = dv
+                            break
+            if isinstance(s_val, dict):
+                projected[k] = project_output_to_schema(found if isinstance(found, dict) else {}, s_val)
+            elif found is not None:
+                projected[k] = found
+            elif isinstance(s_val, list):
+                projected[k] = []
+            elif isinstance(s_val, bool):
+                projected[k] = False
+            elif isinstance(s_val, (int, float)):
+                projected[k] = 0.0
+            else:
+                projected[k] = "blank" if k.lower() in ("sentiment", "polarity", "polaridad") else ""
+        return projected
+
     def build_model_payload(model_key: str, rows: List[Dict[str, Any]]) -> Dict[str, Any]:
         return {
             "experiment_id": exp.id,
@@ -1206,9 +1248,14 @@ def export_experiment_models_json(
                 {
                     "sample_id": _resolve_sample_id(r, idx, exp.id_column)[1],
                     "input": r.get("row_context") or {},
-                    "output": r.get("parsed_json") if r.get("parsed_json") is not None else r.get("raw_output"),
-                    "latency_ms": r.get("latency_ms"),
-                    "error": r.get("error"),
+                    "output": project_output_to_schema(
+                        r.get("parsed_json") if r.get("parsed_json") is not None else r.get("raw_output"),
+                        output_schema,
+                    ),
+                    "specs": {
+                        "latency_ms": r.get("latency_ms"),
+                        "error": r.get("error"),
+                    },
                 }
                 for idx, r in enumerate(rows)
             ],

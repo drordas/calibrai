@@ -219,29 +219,6 @@ def parse_schema_structured_blocks(text: str, output_schema: Dict[str, Any]) -> 
                 cleaned = raw_val.strip(" \"'") if raw_val else "blank"
                 section_obj[sub_k] = cleaned
 
-        if "sentiment" in section_obj and "markers_positive" in section_obj:
-            pos_frags = section_obj.get("markers_positive", []) if isinstance(section_obj.get("markers_positive"), list) else []
-            neg_frags = section_obj.get("markers_negative", []) if isinstance(section_obj.get("markers_negative"), list) else []
-            neu_frags = section_obj.get("markers_neutral", []) if isinstance(section_obj.get("markers_neutral"), list) else []
-            raw_sent = str(section_obj.get("sentiment") or "blank")
-            pos_filled = len(pos_frags) > 0
-            neg_filled = len(neg_frags) > 0
-            neu_filled = len(neu_frags) > 0
-            filled_count = sum([pos_filled, neg_filled, neu_filled])
-            if filled_count == 0:
-                expected_sent = "blank"
-            elif filled_count > 1:
-                expected_sent = "Mixed"
-            elif pos_filled:
-                expected_sent = "Positive"
-            elif neg_filled:
-                expected_sent = "Negative"
-            else:
-                expected_sent = "Neutral"
-            section_obj["active"] = (raw_sent.lower() != "blank") or (filled_count > 0)
-            section_obj["expected_sentiment"] = expected_sent
-            section_obj["is_rule_consistent"] = (raw_sent.lower() == expected_sent.lower())
-
         dimensions[canonical_key] = section_obj
 
     return {"format": "structured_blocks", "dimensions": dimensions}
