@@ -153,6 +153,11 @@ export interface ComputedSpec {
   name: string;
   function: string;
   expression?: string;
+  rules?: Array<{ condition: string; value: string }>;
+  default_value?: string;
+  apply_to_nested?: boolean;
+  target_blocks?: string[];
+  inject_into_output?: boolean;
   arguments: string[];
   ground_truth_col?: string;
   tolerance?: number;

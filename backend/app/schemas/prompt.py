@@ -3,9 +3,14 @@ from pydantic import BaseModel, Field
 
 class ComputedSpec(BaseModel):
     name: str = "spec_calculada"
-    function: str = "suma"  # "suma", "resta", "multiplicacion", "division", "promedio", "diff", "abs", "max", "min", "nss", "internal_consistency", "rule_consistency", "verbatim_faithfulness", "tolerance_match", "custom_expression"
+    function: str = "suma"  # "suma", "resta", "multiplicacion", "division", "promedio", "diff", "abs", "max", "min", "nss", "internal_consistency", "rule_consistency", "verbatim_faithfulness", "tolerance_match", "conditional_rule", "custom_expression"
     arguments: List[str] = Field(default_factory=list)  # outputs or chained specs: ["output_1", "output_2"]
     expression: Optional[str] = None  # e.g. "output_1 + output_2"
+    rules: Optional[List[Dict[str, str]]] = None  # e.g. [{"condition": "len(markers_positive) > 0 and len(markers_negative) > 0", "value": "Mixed"}]
+    default_value: Optional[str] = None  # fallback value when no conditional rule matches
+    apply_to_nested: bool = False  # apply rule to each nested dimension/object in parsed_json
+    target_blocks: Optional[List[str]] = None  # optional subset of block names when apply_to_nested is True
+    inject_into_output: bool = False  # inject derived value into evaluation copy for metrics & 1vs1
     ground_truth_col: Optional[str] = None
     tolerance: Optional[float] = 0.05
     description: Optional[str] = ""

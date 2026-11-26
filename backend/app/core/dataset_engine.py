@@ -452,19 +452,24 @@ class DatasetEngine:
         if dataset_id not in self.datasets:
             return {}
         meta = self.datasets[dataset_id]
-        if meta.get("cached_schema"):
+        if meta.get("cached_schema") and "input_field_types" in meta["cached_schema"]:
             return meta["cached_schema"]
 
         table_name = meta["table_name"]
         cols = [c.name for c in meta["summary"].columns]
+        col_types = {c.name: c.data_type for c in meta["summary"].columns}
 
         # Detect input fields
         input_fields = []
+        input_field_types: Dict[str, str] = {}
         for c in cols:
             if c.startswith("input."):
-                input_fields.append(c.replace("input.", ""))
+                short_name = c.replace("input.", "")
+                input_fields.append(short_name)
+                input_field_types[short_name] = col_types.get(c, "string")
             elif c.lower() in ["review_comment", "comment", "review_text", "text", "body", "review_rating", "rating"]:
                 input_fields.append(c)
+                input_field_types[c] = col_types.get(c, "string")
 
         # Detect ground_truth dimensions and fields
         dimensions: Dict[str, Dict[str, Any]] = {}
@@ -505,11 +510,14 @@ class DatasetEngine:
         for d in dimensions.values():
             all_sentiment_cats.update(d.get("sentiment_categories", []))
 
+        id_col_name = meta["summary"].detected_id_column
         schema_res = {
             "dataset_id": dataset_id,
-            "id_column": meta["summary"].detected_id_column,
+            "id_column": id_col_name,
+            "id_column_type": col_types.get(id_col_name, "string") if id_col_name else None,
             "has_ground_truth": has_ground_truth,
             "input_fields": list(set(input_fields)),
+            "input_field_types": input_field_types,
             "dimensions": list(dimensions.values()),
             "sentiment_categories": sorted(list(all_sentiment_cats))
         }

@@ -524,7 +524,7 @@
     "loadDefaultSpecs": "Load suggested specs",
     "deleteSpecConfirm": "Delete this specification?",
     "functionGroupClassic": "Classic / Arithmetic Operations",
-    "functionGroupMethodology": "Methodological Metrics (ValidationMethodology.md)",
+    "functionGroupMethodology": "Methodological Metrics",
     "functionGroupCustom": "Custom Expression",
     "fnSuma": "Sum (a + b + ...)",
     "fnResta": "Difference (a - b)",

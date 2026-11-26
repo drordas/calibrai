@@ -56,6 +56,7 @@ import {
   ChevronRight,
   Search,
   PencilSparkles,
+  ChevronsLeftRightEllipsis,
 } from "lucide-react";
 import {
   Dialog,
@@ -515,6 +516,8 @@ export const PromptEditor: React.FC<PromptEditorProps> = ({
   const [activeTab, setActiveTab] = useState<string>("editor");
   const [copied, setCopied] = useState<boolean>(false);
   const [selectedGroundTruth, setSelectedGroundTruth] = useState<string>("none");
+  const [loadedGtSchema, setLoadedGtSchema] = useState<any>(groundTruthSchema || null);
+  const [isGtAutoAssigned, setIsGtAutoAssigned] = useState<boolean>(false);
   const [isAutodetecting, setIsAutodetecting] = useState<boolean>(false);
   const [autodetectSuccess, setAutodetectSuccess] = useState<boolean>(false);
   const [lastGeneratedGtJson, setLastGeneratedGtJson] = useState<string | null>(null);
@@ -622,7 +625,8 @@ export const PromptEditor: React.FC<PromptEditorProps> = ({
   const [isAddingSpec, setIsAddingSpec] = useState<boolean>(false);
   const [editingSpecIndex, setEditingSpecIndex] = useState<number | null>(null);
   const [newSpecName, setNewSpecName] = useState<string>("");
-  const [newSpecFunction, setNewSpecFunction] = useState<string>("suma");
+  const [showSpecNameSuggest, setShowSpecNameSuggest] = useState<boolean>(false);
+  const [newSpecFunction, setNewSpecFunction] = useState<string>("");
   const [newSpecArgs, setNewSpecArgs] = useState<string[]>([]);
   const [newSpecCustomExpr, setNewSpecCustomExpr] = useState<string>("");
   const [isFormulaManuallyEdited, setIsFormulaManuallyEdited] = useState<boolean>(false);
@@ -630,38 +634,401 @@ export const PromptEditor: React.FC<PromptEditorProps> = ({
   const [newSpecGtCol, setNewSpecGtCol] = useState<string>("none");
   const [newSpecTolerance, setNewSpecTolerance] = useState<number>(0.05);
   const [newSpecDesc, setNewSpecDesc] = useState<string>("");
+  const [newSpecRules, setNewSpecRules] = useState<Array<{ condition: string; value: string }>>([
+    { condition: "", value: "" },
+  ]);
+  const [newSpecDefaultValue, setNewSpecDefaultValue] = useState<string>("");
+  const [newSpecApplyToNested, setNewSpecApplyToNested] = useState<boolean>(false);
+  const [newSpecTargetBlocks, setNewSpecTargetBlocks] = useState<string[]>([]);
+  const [newSpecInjectIntoOutput, setNewSpecInjectIntoOutput] = useState<boolean>(true);
+  type FormulaNode =
+    | { kind: "empty"; label?: string }
+    | { kind: "var"; path: string }
+    | { kind: "literal"; value: string }
+    | { kind: "call"; fn: string; args: FormulaNode[] };
+
+  interface SavedFormulaTemplate {
+    id: string;
+    name: string;
+    baseFunction: string;
+    tree: FormulaNode;
+  }
+
+  const [formulaTree, setFormulaTree] = useState<FormulaNode | null>(null);
+  const [activeSlotPath, setActiveSlotPath] = useState<number[] | null>(null);
+  const [dragOverPathKey, setDragOverPathKey] = useState<string | null>(null);
+  const [savedFormulas, setSavedFormulas] = useState<SavedFormulaTemplate[]>(() => {
+    try {
+      const raw = localStorage.getItem("calibrai_saved_spec_formulas");
+      return raw ? JSON.parse(raw) : [];
+    } catch {
+      return [];
+    }
+  });
+  const [isSavingFormulaTemplate, setIsSavingFormulaTemplate] = useState<boolean>(false);
+  const [formulaTemplateName, setFormulaTemplateName] = useState<string>("");
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("calibrai_saved_spec_formulas", JSON.stringify(savedFormulas));
+    } catch {
+      // ignore storage quota errors
+    }
+  }, [savedFormulas]);
+
+  const isVariadicFormulaFn = (fn: string) =>
+    ["suma", "multiplicacion", "promedio", "min", "max", "concat"].includes(fn);
+
+  const buildInitialFormulaTree = (fn: string): FormulaNode | null => {
+    switch (fn) {
+      case "nss":
+        return { kind: "call", fn: "nss", args: [{ kind: "empty", label: "positivos" }, { kind: "empty", label: "negativos" }] };
+      case "suma":
+      case "resta":
+      case "multiplicacion":
+      case "division":
+      case "promedio":
+      case "min":
+      case "max":
+      case "diff":
+      case "concat":
+      case "intersect":
+      case "union":
+        return { kind: "call", fn, args: [{ kind: "empty", label: "var 1" }, { kind: "empty", label: "var 2" }] };
+      case "abs":
+        return { kind: "call", fn: "abs", args: [{ kind: "empty", label: "var" }] };
+      case "len":
+      case "is_empty":
+      case "not_empty":
+        return { kind: "call", fn, args: [{ kind: "empty", label: "array / texto" }] };
+      case "lower":
+      case "upper":
+      case "trim":
+        return { kind: "call", fn, args: [{ kind: "empty", label: "texto" }] };
+      case "contains":
+        return { kind: "call", fn: "contains", args: [{ kind: "empty", label: "array / texto" }, { kind: "empty", label: "valor" }] };
+      case "join":
+        return { kind: "call", fn: "join", args: [{ kind: "empty", label: "array" }] };
+      case "split":
+        return { kind: "call", fn: "split", args: [{ kind: "empty", label: "texto" }, { kind: "literal", value: "," }] };
+      case "internal_consistency":
+        return {
+          kind: "call",
+          fn,
+          args: [
+            { kind: "empty", label: "positivos" },
+            { kind: "empty", label: "negativos" },
+            { kind: "empty", label: "neutros" },
+          ],
+        };
+      case "rule_consistency":
+        return {
+          kind: "call",
+          fn,
+          args: [
+            { kind: "empty", label: "sentiment" },
+            { kind: "empty", label: "positivos" },
+            { kind: "empty", label: "negativos" },
+          ],
+        };
+      case "verbatim_faithfulness":
+        return {
+          kind: "call",
+          fn,
+          args: [{ kind: "empty", label: "citas" }, { kind: "empty", label: "texto fuente" }],
+        };
+      case "tolerance_match":
+        return {
+          kind: "call",
+          fn,
+          args: [{ kind: "empty", label: "predicho" }, { kind: "empty", label: "referencia" }],
+        };
+      default:
+        return null;
+    }
+  };
+
+  const getNodeAtPath = (root: FormulaNode | null, path: number[]): FormulaNode | null => {
+    let curr: FormulaNode | null = root;
+    for (const idx of path) {
+      if (!curr || curr.kind !== "call" || idx < 0 || idx >= curr.args.length) return null;
+      curr = curr.args[idx];
+    }
+    return curr;
+  };
+
+  const updateNodeAtPath = (
+    root: FormulaNode,
+    path: number[],
+    updater: (node: FormulaNode) => FormulaNode
+  ): FormulaNode => {
+    if (path.length === 0) return updater(root);
+    if (root.kind !== "call") return root;
+    const [head, ...rest] = path;
+    return {
+      ...root,
+      args: root.args.map((arg, idx) => (idx === head ? updateNodeAtPath(arg, rest, updater) : arg)),
+    };
+  };
+
+  const stripFormulaVars = (node: FormulaNode): FormulaNode => {
+    if (node.kind === "var") return { kind: "empty", label: "var" };
+    if (node.kind === "call") {
+      return { ...node, args: node.args.map(stripFormulaVars) };
+    }
+    return { ...node };
+  };
+
+  const extractFormulaVars = (node: FormulaNode | null): string[] => {
+    if (!node) return [];
+    if (node.kind === "var") return [node.path];
+    if (node.kind === "call") {
+      const seen = new Set<string>();
+      const out: string[] = [];
+      for (const a of node.args) {
+        for (const v of extractFormulaVars(a)) {
+          if (!seen.has(v)) {
+            seen.add(v);
+            out.push(v);
+          }
+        }
+      }
+      return out;
+    }
+    return [];
+  };
+
+  const compileFormulaNode = (node: FormulaNode | null): string => {
+    if (!node) return "";
+    if (node.kind === "empty") return "";
+    if (node.kind === "var") return node.path;
+    if (node.kind === "literal") return JSON.stringify(node.value);
+    const compiled = node.args.map(compileFormulaNode);
+    switch (node.fn) {
+      case "suma": {
+        const parts = compiled.filter(Boolean);
+        return parts.length ? `(${parts.join(" + ")})` : "";
+      }
+      case "resta":
+        return `(${compiled[0] || "0"} - ${compiled[1] || "0"})`;
+      case "multiplicacion": {
+        const parts = compiled.filter(Boolean);
+        return parts.length ? `(${parts.join(" * ")})` : "";
+      }
+      case "division":
+        return `(${compiled[0] || "0"} / ${compiled[1] || "1"})`;
+      case "nss":
+        return `((${compiled[0] || "0"} - ${compiled[1] || "0"}) / (${compiled[0] || "0"} + ${compiled[1] || "0"}))`;
+      case "diff":
+        return `abs(${compiled[0] || "0"} - ${compiled[1] || "0"})`;
+      default: {
+        const parts = compiled.filter(Boolean);
+        return parts.length ? `${node.fn}(${parts.join(", ")})` : "";
+      }
+    }
+  };
+
+  const getExpectedTypeForPath = (
+    root: FormulaNode | null,
+    path: number[] | null
+  ): "number" | "string" | "array" | "collection" | "any" => {
+    if (!root || !path || path.length === 0) {
+      if (root?.kind === "call") {
+        if (["suma", "resta", "multiplicacion", "division", "promedio", "min", "max", "diff", "abs", "nss", "tolerance_match"].includes(root.fn)) {
+          return "number";
+        }
+        if (["len", "is_empty", "not_empty", "concat"].includes(root.fn)) return "collection";
+        if (["lower", "upper", "trim"].includes(root.fn)) return "string";
+        if (["join", "intersect", "union"].includes(root.fn)) return "array";
+      }
+      return "any";
+    }
+    const parent = getNodeAtPath(root, path.slice(0, -1));
+    const argIdx = path[path.length - 1];
+    if (!parent || parent.kind !== "call") return "any";
+    if (["suma", "resta", "multiplicacion", "division", "promedio", "min", "max", "diff", "abs", "nss", "tolerance_match"].includes(parent.fn)) {
+      return "number";
+    }
+    if (["len", "is_empty", "not_empty", "concat"].includes(parent.fn)) return "collection";
+    if (["lower", "upper", "trim"].includes(parent.fn)) return "string";
+    if (["join", "intersect", "union"].includes(parent.fn)) return "array";
+    if (parent.fn === "split") return argIdx === 0 ? "string" : "any";
+    if (parent.fn === "contains") return argIdx === 0 ? "collection" : "any";
+    return "any";
+  };
+
+  type VisualCondOp = "not_empty" | "is_empty" | "len_gt" | "len_eq" | "eq" | "neq" | "gt" | "lt";
+  interface VisualCondition {
+    id: string;
+    variable: string;
+    operator: VisualCondOp;
+    value: string;
+  }
+  interface VisualRuleBlock {
+    id: string;
+    combinator: "and" | "or";
+    conditions: VisualCondition[];
+    resultValue: string;
+  }
+
+  const mkSpecId = () => Math.random().toString(36).slice(2, 9);
+  const makeEmptyVisualRule = (defaultVar = ""): VisualRuleBlock => ({
+    id: mkSpecId(),
+    combinator: "and",
+    conditions: [{ id: mkSpecId(), variable: defaultVar, operator: "not_empty", value: "" }],
+    resultValue: "",
+  });
+
+  const [visualSpecRules, setVisualSpecRules] = useState<VisualRuleBlock[]>(() => [makeEmptyVisualRule()]);
+
+  const compileCondition = (c: VisualCondition): string => {
+    const v = c.variable.trim();
+    if (!v) return "";
+    const val = c.value.trim();
+    switch (c.operator) {
+      case "not_empty":
+        return `len(${v}) > 0`;
+      case "is_empty":
+        return `len(${v}) == 0`;
+      case "len_gt":
+        return `len(${v}) > ${Number(val) || 0}`;
+      case "len_eq":
+        return `len(${v}) == ${Number(val) || 0}`;
+      case "gt":
+        return `${v} > ${Number(val) || 0}`;
+      case "lt":
+        return `${v} < ${Number(val) || 0}`;
+      case "eq":
+        return isNaN(Number(val)) || val === "" ? `${v} == ${JSON.stringify(val)}` : `${v} == ${Number(val)}`;
+      case "neq":
+        return isNaN(Number(val)) || val === "" ? `${v} != ${JSON.stringify(val)}` : `${v} != ${Number(val)}`;
+    }
+  };
+
+  const compileVisualRulesToSpecs = (blocks: VisualRuleBlock[]): Array<{ condition: string; value: string }> =>
+    blocks
+      .map((b) => {
+        const parts = b.conditions.map(compileCondition).filter(Boolean);
+        return {
+          condition: parts.join(` ${b.combinator} `),
+          value: b.resultValue.trim(),
+        };
+      })
+      .filter((r) => r.condition.length > 0);
+
+  const parseRulesToVisualBlocks = (rules?: Array<{ condition: string; value: string }>): VisualRuleBlock[] => {
+    if (!rules || rules.length === 0) return [makeEmptyVisualRule()];
+    return rules.map((r) => {
+      const hasOr = /\s+or\s+/i.test(r.condition);
+      const combinator: "and" | "or" = hasOr ? "or" : "and";
+      const rawParts = r.condition.split(hasOr ? /\s+or\s+/i : /\s+and\s+/i);
+      const conditions: VisualCondition[] = rawParts.map((part) => {
+        const p = part.trim();
+        let m = p.match(/^len\(([^)]+)\)\s*>\s*0$/i);
+        if (m) return { id: mkSpecId(), variable: m[1].trim(), operator: "not_empty", value: "" };
+        m = p.match(/^len\(([^)]+)\)\s*==\s*0$/i);
+        if (m) return { id: mkSpecId(), variable: m[1].trim(), operator: "is_empty", value: "" };
+        m = p.match(/^len\(([^)]+)\)\s*>\s*(\d+)$/i);
+        if (m) return { id: mkSpecId(), variable: m[1].trim(), operator: "len_gt", value: m[2] };
+        m = p.match(/^len\(([^)]+)\)\s*==\s*(\d+)$/i);
+        if (m) return { id: mkSpecId(), variable: m[1].trim(), operator: "len_eq", value: m[2] };
+        m = p.match(/^([a-zA-Z0-9_.]+)\s*(==|!=|>|<)\s*(.+)$/);
+        if (m) {
+          const opMap: Record<string, VisualCondOp> = { "==": "eq", "!=": "neq", ">": "gt", "<": "lt" };
+          return {
+            id: mkSpecId(),
+            variable: m[1].trim(),
+            operator: opMap[m[2]] || "eq",
+            value: m[3].trim().replace(/^["']|["']$/g, ""),
+          };
+        }
+        return { id: mkSpecId(), variable: "", operator: "not_empty", value: "" };
+      });
+      return {
+        id: mkSpecId(),
+        combinator,
+        conditions: conditions.length > 0 ? conditions : [{ id: mkSpecId(), variable: "", operator: "not_empty", value: "" }],
+        resultValue: r.value || "",
+      };
+    });
+  };
 
   const resetNewSpecForm = () => {
     setEditingSpecIndex(null);
     setNewSpecName("");
+    setShowSpecNameSuggest(false);
+    setNewSpecFunction("");
     setNewSpecArgs([]);
     setNewSpecCustomExpr("");
     setIsFormulaManuallyEdited(false);
     setIsCustomExprMode(false);
     setNewSpecDesc("");
+    setNewSpecRules([{ condition: "", value: "" }]);
+    setVisualSpecRules([makeEmptyVisualRule()]);
+    setNewSpecDefaultValue("");
+    setNewSpecApplyToNested(false);
+    setNewSpecTargetBlocks([]);
+    setNewSpecInjectIntoOutput(true);
+    setFormulaTree(null);
+    setActiveSlotPath(null);
+    setDragOverPathKey(null);
+    setIsSavingFormulaTemplate(false);
+    setFormulaTemplateName("");
     setIsAddingSpec(false);
   };
 
-  // Parse detected outputs from current JSON schema text (including nested object subkeys)
+  // Parse detected leaf output paths from current JSON schema text (recursively)
   const detectedOutputKeys = useMemo<string[]>(() => {
     try {
       const parsed = JSON.parse(outputSchemaText);
       if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-        const keys: string[] = [];
-        for (const [k, v] of Object.entries(parsed)) {
-          keys.push(k);
-          if (v && typeof v === "object" && !Array.isArray(v)) {
-            for (const subKey of Object.keys(v)) {
-              keys.push(`${k}.${subKey}`);
+        const leaves: string[] = [];
+        const collectLeaves = (obj: Record<string, any>, prefix: string) => {
+          for (const [k, v] of Object.entries(obj)) {
+            const path = prefix ? `${prefix}.${k}` : k;
+            if (v && typeof v === "object" && !Array.isArray(v) && Object.keys(v).length > 0) {
+              collectLeaves(v, path);
+            } else {
+              leaves.push(path);
             }
           }
-        }
-        return keys;
+        };
+        collectLeaves(parsed, "");
+        return leaves;
       }
     } catch {
       // invalid JSON
     }
     return [];
+  }, [outputSchemaText]);
+
+  const detectedOutputTypes = useMemo<Record<string, "number" | "array" | "boolean" | "string">>(() => {
+    const types: Record<string, "number" | "array" | "boolean" | "string"> = {};
+    try {
+      const parsed = JSON.parse(outputSchemaText);
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        const collectTypes = (obj: Record<string, any>, prefix: string) => {
+          for (const [k, v] of Object.entries(obj)) {
+            const path = prefix ? `${prefix}.${k}` : k;
+            if (v && typeof v === "object" && !Array.isArray(v) && Object.keys(v).length > 0) {
+              collectTypes(v, path);
+            } else if (Array.isArray(v)) {
+              types[path] = "array";
+            } else if (typeof v === "number") {
+              types[path] = "number";
+            } else if (typeof v === "boolean") {
+              types[path] = "boolean";
+            } else {
+              types[path] = "string";
+            }
+          }
+        };
+        collectTypes(parsed, "");
+      }
+    } catch {
+      // invalid JSON
+    }
+    return types;
   }, [outputSchemaText]);
 
   // JSON Schema validity indicator
@@ -1393,15 +1760,144 @@ const calibraiJsonEditorTheme = EditorView.theme({
     };
   }, [outputSchemaText, parsedOutputSchema, outputPromptText, examplesText, instructionsText, useJsonOutput]);
 
+  const hasGroundTruth = Boolean(
+    groundTruthDatasetId || (groundTruthDatasetIds && groundTruthDatasetIds.length > 0)
+  );
+
+  useEffect(() => {
+    if (groundTruthSchema) {
+      setLoadedGtSchema(groundTruthSchema);
+      return;
+    }
+    if (!hasGroundTruth || !dataset?.id) {
+      setLoadedGtSchema(null);
+      return;
+    }
+    let cancelled = false;
+    fetchCompatibleGroundTruths(dataset.id)
+      .then((compats) => {
+        if (cancelled) return;
+        const targetGtId = groundTruthDatasetId || (groundTruthDatasetIds && groundTruthDatasetIds[0]);
+        const matched = targetGtId
+          ? compats.find((c) => c.dataset_id === targetGtId)
+          : compats[0];
+        if (matched?.schema) setLoadedGtSchema(matched.schema);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [groundTruthSchema, hasGroundTruth, groundTruthDatasetId, groundTruthDatasetIds, dataset?.id]);
+
+  const gtMatching = useMemo(() => {
+    const normType = (raw?: string | null): "string" | "number" | "boolean" => {
+      const tLower = String(raw || "string").toLowerCase();
+      if (/(int|float|double|num|dec|real)/.test(tLower)) return "number";
+      if (/(bool)/.test(tLower)) return "boolean";
+      return "string";
+    };
+
+    const selectedCols = Array.from(
+      new Set(
+        [idColumn, ...inputColumns, ...contextColumns].filter(
+          (c): c is string => Boolean(c && c.trim())
+        )
+      )
+    );
+    const allDatasetColNames = (dataset.columns || []).map((c) => c.name);
+    const dsColTypes = new Map<string, string>();
+    for (const col of dataset.columns || []) {
+      dsColTypes.set(col.name, col.data_type || "string");
+    }
+
+    if (!hasGroundTruth) {
+      return {
+        hasGroundTruth: false,
+        compatibleCols: allDatasetColNames,
+        nameAndTypeMatches: [] as string[],
+        isMissingGtSelection: false,
+      };
+    }
+
+    const gtFields: Array<{ name: string; type: "string" | "number" | "boolean" }> = [];
+    if (loadedGtSchema) {
+      if (loadedGtSchema.id_column) {
+        gtFields.push({
+          name: String(loadedGtSchema.id_column),
+          type: normType(loadedGtSchema.id_column_type || "string"),
+        });
+      }
+      const typeMap = loadedGtSchema.input_field_types || {};
+      for (const f of loadedGtSchema.input_fields || []) {
+        gtFields.push({ name: String(f), type: normType(typeMap[f] || "string") });
+      }
+    }
+
+    const baseCandidates = selectedCols.length > 0 ? selectedCols : allDatasetColNames;
+    const gtTypes = new Set(gtFields.map((g) => g.type));
+
+    const nameAndTypeMatches = baseCandidates.filter((colName) => {
+      const cType = normType(dsColTypes.get(colName));
+      return gtFields.some(
+        (gf) => gf.name.toLowerCase() === colName.toLowerCase() && gf.type === cType
+      );
+    });
+
+    const compatibleCols =
+      gtFields.length > 0
+        ? baseCandidates.filter((colName) => gtTypes.has(normType(dsColTypes.get(colName))))
+        : baseCandidates;
+
+    const isMissingGtSelection =
+      hasGroundTruth && (!selectedGroundTruth || selectedGroundTruth === "none");
+
+    return {
+      hasGroundTruth,
+      compatibleCols,
+      nameAndTypeMatches,
+      isMissingGtSelection,
+    };
+  }, [
+    hasGroundTruth,
+    loadedGtSchema,
+    idColumn,
+    inputColumns,
+    contextColumns,
+    dataset.columns,
+    selectedGroundTruth,
+  ]);
+
+  useEffect(() => {
+    if (
+      gtMatching.hasGroundTruth &&
+      (!selectedGroundTruth || selectedGroundTruth === "none") &&
+      gtMatching.nameAndTypeMatches.length === 1
+    ) {
+      const autoCol = gtMatching.nameAndTypeMatches[0];
+      setSelectedGroundTruth(autoCol);
+      setIsGtAutoAssigned(true);
+      syncAndValidate(promptRealText, outputSchemaText, computedSpecs, autoCol);
+    }
+  }, [gtMatching.hasGroundTruth, gtMatching.nameAndTypeMatches, selectedGroundTruth]);
+
   useEffect(() => {
     onValidationStateChange?.(
       Boolean(validation?.is_valid) &&
         isSchemaJsonValid &&
         !jsonPromptCoherence.invalidJson &&
-        jsonPromptCoherence.isCoherent,
+        jsonPromptCoherence.isCoherent &&
+        !gtMatching.isMissingGtSelection,
       isValidating
     );
-  }, [validation, isValidating, isSchemaJsonValid, jsonPromptCoherence.invalidJson, jsonPromptCoherence.isCoherent, onValidationStateChange]);
+  }, [
+    validation,
+    isValidating,
+    isSchemaJsonValid,
+    jsonPromptCoherence.invalidJson,
+    jsonPromptCoherence.isCoherent,
+    gtMatching.isMissingGtSelection,
+    onValidationStateChange,
+  ]);
 
   const missingVarsList = validation?.missing_variables || [];
   const instructionsHasVarError = missingVarsList.some((mv) =>
@@ -1488,7 +1984,23 @@ const calibraiJsonEditorTheme = EditorView.theme({
   const handleApplySavedPrompt = (item: SavedPromptItem) => {
     setSystemPrompt(item.system_prompt || "");
     const composed = applyFullPromptText(item.model_prompt);
-    syncAndValidate(composed, outputSchemaText, computedSpecs);
+    let nextGt = selectedGroundTruth;
+    if (gtMatching.hasGroundTruth) {
+      const currentValid =
+        nextGt && nextGt !== "none" && gtMatching.compatibleCols.includes(nextGt);
+      if (!currentValid) {
+        if (gtMatching.nameAndTypeMatches.length === 1) {
+          nextGt = gtMatching.nameAndTypeMatches[0];
+          setSelectedGroundTruth(nextGt);
+          setIsGtAutoAssigned(true);
+        } else {
+          nextGt = "none";
+          setSelectedGroundTruth("none");
+          setIsGtAutoAssigned(false);
+        }
+      }
+    }
+    syncAndValidate(composed, outputSchemaText, computedSpecs, nextGt);
     setShowLoadPromptModal(false);
   };
 
@@ -2092,7 +2604,32 @@ const calibraiJsonEditorTheme = EditorView.theme({
 
   const handleFunctionChange = (fn: string) => {
     setNewSpecFunction(fn);
-    const suggested = generateDefaultFormula(fn, newSpecArgs);
+    setActiveSlotPath(null);
+    setDragOverPathKey(null);
+    setIsSavingFormulaTemplate(false);
+    setFormulaTemplateName("");
+    if (!fn) {
+      setFormulaTree(null);
+      setNewSpecArgs([]);
+      setNewSpecCustomExpr("");
+      setIsFormulaManuallyEdited(false);
+      return;
+    }
+    if (fn.startsWith("saved:")) {
+      const tpl = savedFormulas.find((f) => f.id === fn.slice(6));
+      if (tpl) {
+        const cleanTree = stripFormulaVars(tpl.tree);
+        setFormulaTree(cleanTree);
+        setNewSpecArgs([]);
+        setNewSpecCustomExpr(compileFormulaNode(cleanTree));
+        setIsFormulaManuallyEdited(false);
+        return;
+      }
+    }
+    const initTree = buildInitialFormulaTree(fn);
+    setFormulaTree(initTree);
+    setNewSpecArgs([]);
+    const suggested = initTree ? "" : generateDefaultFormula(fn, []);
     setNewSpecCustomExpr(suggested);
     setIsFormulaManuallyEdited(false);
   };
@@ -2115,6 +2652,8 @@ const calibraiJsonEditorTheme = EditorView.theme({
     setEditingSpecIndex(idx);
     setNewSpecName(spec.name);
     setNewSpecFunction(spec.function || "custom_expr");
+    setFormulaTree(buildInitialFormulaTree(spec.function || ""));
+    setActiveSlotPath(null);
     setNewSpecArgs(spec.arguments || []);
     const expr = spec.expression || generateDefaultFormula(spec.function, spec.arguments || []);
     setNewSpecCustomExpr(expr);
@@ -2122,6 +2661,14 @@ const calibraiJsonEditorTheme = EditorView.theme({
     setNewSpecGtCol(spec.ground_truth_col || "none");
     setNewSpecTolerance(spec.tolerance ?? 0.05);
     setNewSpecDesc(spec.description || "");
+    setNewSpecRules(
+      spec.rules && spec.rules.length > 0 ? spec.rules : [{ condition: "", value: "" }]
+    );
+    setVisualSpecRules(parseRulesToVisualBlocks(spec.rules));
+    setNewSpecDefaultValue(spec.default_value || "");
+    setNewSpecApplyToNested(Boolean(spec.apply_to_nested) && !(spec.target_blocks && spec.target_blocks.length > 0));
+    setNewSpecTargetBlocks(spec.target_blocks || []);
+    setNewSpecInjectIntoOutput(spec.inject_into_output ?? true);
     setIsAddingSpec(true);
   };
 
@@ -2137,13 +2684,47 @@ const calibraiJsonEditorTheme = EditorView.theme({
       return;
     }
 
-    const expr = newSpecCustomExpr.trim() || generateDefaultFormula(newSpecFunction, newSpecArgs);
+    const resolvedFn = newSpecFunction.startsWith("saved:")
+      ? savedFormulas.find((f) => f.id === newSpecFunction.slice(6))?.baseFunction || "custom_expr"
+      : newSpecFunction;
+    const isConditional = resolvedFn === "conditional_rule";
+    const cleanRules = isConditional
+      ? compileVisualRulesToSpecs(visualSpecRules)
+      : undefined;
+
+    const expr = isConditional
+      ? undefined
+      : (newSpecCustomExpr.trim() || generateDefaultFormula(resolvedFn, newSpecArgs));
+
+    const sharedParents = Array.from(
+      new Set(
+        detectedOutputKeys
+          .filter((k) => {
+            const parts = k.split(".");
+            return parts.length > 1 && parts[parts.length - 1].toLowerCase() === cleanName;
+          })
+          .map((k) => k.split(".")[0])
+      )
+    );
+    const hasSharedParents = sharedParents.length >= 2;
+    if (hasSharedParents && !newSpecApplyToNested && newSpecTargetBlocks.length === 0) {
+      return;
+    }
+    const resolvedTargetBlocks =
+      hasSharedParents && !newSpecApplyToNested
+        ? newSpecTargetBlocks
+        : undefined;
 
     const newSpec: ComputedSpec = {
       name: cleanName,
-      function: newSpecFunction,
+      function: resolvedFn,
       arguments: newSpecArgs.length > 0 ? newSpecArgs : (detectedOutputKeys.length > 0 ? [detectedOutputKeys[0]] : []),
       expression: expr || undefined,
+      rules: cleanRules,
+      default_value: isConditional ? newSpecDefaultValue.trim() : undefined,
+      apply_to_nested: (newSpecApplyToNested || Boolean(resolvedTargetBlocks)) || undefined,
+      target_blocks: resolvedTargetBlocks,
+      inject_into_output: isConditional ? newSpecInjectIntoOutput : ((newSpecApplyToNested || Boolean(resolvedTargetBlocks)) ? newSpecInjectIntoOutput : undefined),
       ground_truth_col: newSpecGtCol !== "none" ? newSpecGtCol : undefined,
       tolerance: newSpecTolerance,
       description: newSpecDesc.trim() || undefined,
@@ -2940,19 +3521,34 @@ const calibraiJsonEditorTheme = EditorView.theme({
             </p>
           </div>
 
-          <div className="flex items-center gap-3 w-full md:w-auto">
+          <div className="flex flex-col items-end gap-1 w-full md:w-auto">
             <div className="flex items-center gap-2">
               <Label htmlFor="gt-select" className="text-xs font-medium text-muted-foreground whitespace-nowrap">
                 Ground Truth:
               </Label>
               <div className="w-56">
-                <Select value={selectedGroundTruth} onValueChange={handleGroundTruthChange}>
-                  <SelectTrigger id="gt-select" className="h-8 text-xs bg-background/80 border-border/80 font-mono">
+                <Select
+                  value={selectedGroundTruth}
+                  onValueChange={(val) => {
+                    setIsGtAutoAssigned(false);
+                    handleGroundTruthChange(val);
+                  }}
+                >
+                  <SelectTrigger
+                    id="gt-select"
+                    className={`h-8 text-xs bg-background/80 font-mono ${
+                      gtMatching.isMissingGtSelection
+                        ? "border-destructive text-destructive"
+                        : "border-border/80"
+                    }`}
+                  >
                     <SelectValue placeholder={t("prompt.groundTruthPlaceholder")} />
                   </SelectTrigger>
                   <SelectContent className="glass-panel border-border/80 text-xs font-mono">
-                    <SelectItem value="none">{t("prompt.groundTruthNone")}</SelectItem>
-                    {availableColumns.map((col) => (
+                    {!gtMatching.hasGroundTruth && (
+                      <SelectItem value="none">{t("prompt.groundTruthNone")}</SelectItem>
+                    )}
+                    {gtMatching.compatibleCols.map((col) => (
                       <SelectItem key={col} value={col}>
                         {col}
                       </SelectItem>
@@ -2961,6 +3557,16 @@ const calibraiJsonEditorTheme = EditorView.theme({
                 </Select>
               </div>
             </div>
+            {gtMatching.isMissingGtSelection && (
+              <p className="text-[11px] text-destructive font-medium">
+                Debes seleccionar una variable compatible para comparar con el Ground Truth.
+              </p>
+            )}
+            {!gtMatching.isMissingGtSelection && isGtAutoAssigned && (
+              <p className="text-[11px] text-amber-600 dark:text-amber-400 font-medium">
+                Determinado automáticamente por coincidencia de nombre y tipo; conviene revisar.
+              </p>
+            )}
           </div>
         </div>
 
@@ -3620,269 +4226,19 @@ const calibraiJsonEditorTheme = EditorView.theme({
                   </div>
                 </CardHeader>
                 <CardContent className="p-3.5 space-y-4">
-                  {/* Interactive Spec Builder Form or Add Button */}
-                  {!isAddingSpec ? (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      onClick={() => setIsAddingSpec(true)}
-                      className="w-full py-5 border-dashed border-border/80 hover:border-primary/50 hover:bg-muted/30 text-xs font-semibold gap-2 text-foreground transition-all duration-200"
-                    >
-                      <PlusCircle className="w-4 h-4 text-primary" />
-                      <span>{t("prompt.addSpecTitle")}</span>
-                    </Button>
-                  ) : (
-                    <div className="p-3.5 rounded-lg border border-primary/30 bg-muted/20 space-y-3.5 transition-all duration-300">
-                      <div className="flex items-center justify-between">
-                        <span className="text-xs font-semibold text-foreground flex items-center gap-1.5">
-                          <PlusCircle className="w-3.5 h-3.5 text-primary" />
-                          <span>{t("prompt.addSpecTitle")}</span>
-                        </span>
-                        <div className="flex items-center gap-2">
-                          <span className="text-[10px] text-muted-foreground italic font-mono hidden sm:inline">
-                            ej: sumar_variables = output_1 + output_2
-                          </span>
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="sm"
-                            onClick={resetNewSpecForm}
-                            className="h-6 px-2 text-[11px] text-muted-foreground hover:text-foreground"
-                          >
-                            {t("common.cancel")}
-                          </Button>
-                        </div>
-                      </div>
-
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                        {/* Spec Name */}
-                        <div className="space-y-1">
-                          <Label htmlFor="spec-name" className="text-xs font-medium text-foreground">
-                            {t("prompt.specNameLabel")}
-                          </Label>
-                          <Input
-                            id="spec-name"
-                            value={newSpecName}
-                            onChange={(e) => setNewSpecName(e.target.value)}
-                            placeholder={t("prompt.specNamePlaceholder")}
-                            className="text-xs h-8 font-mono bg-background/80"
-                          />
-                        </div>
-
-                        {/* Spec Function */}
-                        <div className="space-y-1">
-                          <Label htmlFor="spec-function" className="text-xs font-medium text-foreground">
-                            {t("prompt.specFunctionLabel")}
-                          </Label>
-                          <Select value={newSpecFunction} onValueChange={handleFunctionChange}>
-                            <SelectTrigger id="spec-function" className="h-8 text-xs bg-background/80">
-                              <SelectValue placeholder="Selecciona función" />
-                            </SelectTrigger>
-                            <SelectContent className="glass-panel text-xs max-h-64">
-                              {/* Clásicas */}
-                              <div className="px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
-                                {t("prompt.functionGroupClassic")}
-                              </div>
-                              <SelectItem value="suma">{t("prompt.fnSuma")}</SelectItem>
-                              <SelectItem value="resta">{t("prompt.fnResta")}</SelectItem>
-                              <SelectItem value="multiplicacion">{t("prompt.fnMultiplicacion")}</SelectItem>
-                              <SelectItem value="division">{t("prompt.fnDivision")}</SelectItem>
-                              <SelectItem value="promedio">{t("prompt.fnPromedio")}</SelectItem>
-                              <SelectItem value="diff">{t("prompt.fnDiff")}</SelectItem>
-                              <SelectItem value="abs">{t("prompt.fnAbs")}</SelectItem>
-                              <SelectItem value="min">{t("prompt.fnMin")}</SelectItem>
-                              <SelectItem value="max">{t("prompt.fnMax")}</SelectItem>
-
-                              {/* Metodológicas */}
-                              <div className="px-2 py-1 mt-1 text-[10px] font-bold uppercase tracking-wider text-muted-foreground border-t border-border/50">
-                                {t("prompt.functionGroupMethodology")}
-                              </div>
-                              <SelectItem value="nss">{t("prompt.fnNss")}</SelectItem>
-                              <SelectItem value="internal_consistency">{t("prompt.fnInternalConsistency")}</SelectItem>
-                              <SelectItem value="rule_consistency">{t("prompt.fnRuleConsistency")}</SelectItem>
-                              <SelectItem value="verbatim_faithfulness">{t("prompt.fnVerbatimFaithfulness")}</SelectItem>
-                              <SelectItem value="tolerance_match">{t("prompt.fnToleranceMatch")}</SelectItem>
-
-                              {/* Custom */}
-                              <div className="px-2 py-1 mt-1 text-[10px] font-bold uppercase tracking-wider text-muted-foreground border-t border-border/50">
-                                {t("prompt.functionGroupCustom")}
-                              </div>
-                              <SelectItem value="custom_expr">{t("prompt.fnCustomExpr")}</SelectItem>
-                            </SelectContent>
-                          </Select>
-                        </div>
-                      </div>
-
-                      {/* Arguments Selector (Outputs or Specs anteriores para encadenar) */}
-                      <div className="space-y-1.5">
-                        <Label className="text-xs font-medium text-foreground block">
-                          {t("prompt.specArgsLabel")}
-                        </Label>
-                        <p className="text-[11px] text-muted-foreground">
-                          {t("prompt.specArgsHelp")}
-                        </p>
-                        <div className="flex flex-wrap gap-1.5 pt-0.5">
-                          {availableSpecArgumentCandidates.map((cand) => {
-                            const isSelected = newSpecArgs.includes(cand.name);
-                            const getStyle = () => {
-                              if (isSelected) {
-                                switch (cand.type) {
-                                  case "output":
-                                    return "bg-amber-500/20 text-amber-300 border-amber-500/50 font-bold shadow-sm";
-                                  case "context":
-                                    return "bg-purple-500/20 text-purple-300 border-purple-500/50 font-bold shadow-sm";
-                                  case "id":
-                                    return "bg-amber-500/20 text-amber-300 border-amber-500/50 font-bold shadow-sm";
-                                  case "input":
-                                    return "bg-blue-500/20 text-blue-300 border-blue-500/50 font-bold shadow-sm";
-                                  case "spec_col":
-                                    return "bg-emerald-500/20 text-emerald-300 border-emerald-500/50 font-bold shadow-sm";
-                                  case "spec":
-                                    return "bg-purple-500/20 text-purple-300 border-purple-500/50 font-bold shadow-sm";
-                                }
-                              }
-                              switch (cand.type) {
-                                case "output":
-                                  return "bg-background/80 text-foreground border-border hover:bg-muted/40";
-                                case "context":
-                                  return "bg-purple-950/20 text-purple-400 border-purple-800/40 hover:bg-purple-900/30";
-                                case "id":
-                                  return "bg-amber-950/20 text-amber-400 border-amber-800/40 hover:bg-amber-900/30";
-                                case "input":
-                                  return "bg-blue-950/20 text-blue-400 border-blue-800/40 hover:bg-blue-900/30";
-                                case "spec_col":
-                                  return "bg-emerald-950/20 text-emerald-400 border-emerald-800/40 hover:bg-emerald-900/30";
-                                case "spec":
-                                  return "bg-purple-950/20 text-purple-400 border-purple-800/40 hover:bg-purple-900/30";
-                              }
-                            };
-
-                            const renderIcon = () => {
-                              switch (cand.type) {
-                                case "output":
-                                  return <Zap className="w-3 h-3 text-amber-400" />;
-                                case "context":
-                                  return <Layers className="w-3 h-3 text-purple-400" />;
-                                case "id":
-                                  return <Key className="w-3 h-3 text-amber-400" />;
-                                case "input":
-                                  return <FileText className="w-3 h-3 text-blue-400" />;
-                                case "spec_col":
-                                  return <Calculator className="w-3 h-3 text-emerald-400" />;
-                                case "spec":
-                                  return <FunctionSquare className="w-3 h-3 text-purple-400" />;
-                              }
-                            };
-
-                            return (
-                              <button
-                                key={`${cand.type}-${cand.name}`}
-                                type="button"
-                                onClick={() => toggleArgumentForNewSpec(cand.name)}
-                                className={`inline-flex items-center gap-1.5 text-xs font-mono px-2.5 py-1 rounded-md border transition-all ${getStyle()}`}
-                                title={`${cand.name} (${cand.badge})`}
-                              >
-                                {renderIcon()}
-                                <span>{cand.name}</span>
-                                <span className="text-[9px] px-1 py-0 bg-background/50 font-sans rounded opacity-80 uppercase tracking-wider">
-                                  {cand.badge}
-                                </span>
-                                {isSelected && <span className="text-xs font-bold">✓</span>}
-                              </button>
-                            );
-                          })}
-                        </div>
-                      </div>
-
-                      {/* Formula Preview & Editable Free Expression */}
-                      <div className="space-y-1.5 pt-1">
-                        <div className="flex items-center justify-between">
-                          <Label className="text-xs font-medium text-foreground flex items-center gap-1.5">
-                            <Calculator className="w-3.5 h-3.5 text-primary" />
-                            <span>Fórmula Matemática Sugerida / Editable</span>
-                            {isFormulaManuallyEdited && (
-                              <Badge variant="outline" className="text-[9px] font-mono py-0 text-amber-400 border-amber-500/30">
-                                Personalizada
-                              </Badge>
-                            )}
-                          </Label>
-                          {isFormulaManuallyEdited && (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setIsFormulaManuallyEdited(false);
-                                setNewSpecCustomExpr(generateDefaultFormula(newSpecFunction, newSpecArgs));
-                              }}
-                              className="text-[11px] text-primary hover:underline font-mono flex items-center gap-1"
-                            >
-                              <RotateCcw className="w-3 h-3" />
-                              <span>Restaurar sugerencia</span>
-                            </button>
-                          )}
-                        </div>
-
-                        <div className="space-y-1">
-                          <Input
-                            id="spec-expression"
-                            value={newSpecCustomExpr || generateDefaultFormula(newSpecFunction, newSpecArgs)}
-                            onChange={(e) => {
-                              setIsFormulaManuallyEdited(true);
-                              setNewSpecCustomExpr(e.target.value);
-                            }}
-                            placeholder={generateDefaultFormula(newSpecFunction, newSpecArgs) || "Escribe fórmula libre (ej. (a - b) / max(a + b, 1))"}
-                            className="text-xs h-8 font-mono bg-background/80"
-                          />
-                          <p className="text-[10px] text-muted-foreground">
-                            Puedes editar libremente la expresión sugerida, cambiar variables o añadir ponderaciones como <code className="text-foreground font-mono">0.7 * a - 0.3 * b</code>.
-                          </p>
-                        </div>
-                      </div>
-
-                      {/* Description or Hypothesis */}
-                      <div className="space-y-1">
-                        <Label htmlFor="spec-desc" className="text-xs font-medium text-muted-foreground">
-                          {t("prompt.specDescLabel")}
-                        </Label>
-                        <Input
-                          id="spec-desc"
-                          value={newSpecDesc}
-                          onChange={(e) => setNewSpecDesc(e.target.value)}
-                          placeholder={t("prompt.specDescPlaceholder")}
-                          className="text-xs h-8 bg-background/80"
-                        />
-                      </div>
-
-                      <div className="flex items-center justify-end gap-2 pt-1 border-t border-border/40">
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="sm"
-                          onClick={resetNewSpecForm}
-                          className="text-xs h-8 px-3 text-muted-foreground hover:text-foreground"
-                        >
-                          {t("common.cancel")}
-                        </Button>
-                        <Button
-                          type="button"
-                          onClick={handleAddComputedSpec}
-                          disabled={!newSpecName.trim()}
-                          className="text-xs font-semibold gap-1.5 bg-primary text-primary-foreground h-8 px-4"
-                        >
-                          {editingSpecIndex !== null ? (
-                            <>
-                              <Check className="w-3.5 h-3.5" />
-                              <span>Guardar Cambios</span>
-                            </>
-                          ) : (
-                            <>
-                              <Plus className="w-3.5 h-3.5" />
-                              <span>{t("prompt.addSpecBtn")}</span>
-                            </>
-                          )}
-                        </Button>
-                      </div>
-                    </div>
-                  )}
+                  {/* Add Evaluation Spec Button (opens Visual Modal) */}
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => {
+                      resetNewSpecForm();
+                      setIsAddingSpec(true);
+                    }}
+                    className="w-full py-5 border-dashed border-border/80 hover:border-primary/50 hover:bg-muted/30 text-xs font-semibold gap-2 text-foreground transition-all duration-200"
+                  >
+                    <PlusCircle className="w-4 h-4 text-primary" />
+                    <span>{t("prompt.addSpecTitle")}</span>
+                  </Button>
 
                   {/* List of Configured Evaluation Specs */}
                   <div className="space-y-2 pt-1">
@@ -3918,6 +4274,12 @@ const calibraiJsonEditorTheme = EditorView.theme({
                                 {spec.expression && (
                                   <Badge variant="secondary" className="text-[10px] font-mono py-0 text-primary">
                                     {spec.expression}
+                                  </Badge>
+                                )}
+                                {spec.function === "conditional_rule" && spec.rules && (
+                                  <Badge variant="secondary" className="text-[10px] font-mono py-0 text-primary">
+                                    {spec.rules.length} {spec.rules.length === 1 ? "regla" : "reglas"}
+                                    {spec.default_value ? ` · ELSE "${spec.default_value}"` : ""}
                                   </Badge>
                                 )}
                               </div>
@@ -4649,8 +5011,19 @@ const calibraiJsonEditorTheme = EditorView.theme({
                           <div className="font-semibold leading-snug">
                             Claves del JSON ausentes en el Prompt
                           </div>
-                          <div className="text-[11px] opacity-90 font-mono">
-                            Faltan en el prompt: {jsonPromptCoherence.missingKeys.join(", ")}
+                          <div className="text-[11px] opacity-90 font-mono space-y-1">
+                            <div>Faltan en el prompt:</div>
+                            <ul className="list-disc pl-4 space-y-0.5">
+                              {Array.from(
+                                new Set(
+                                  jsonPromptCoherence.missingKeys.map((k) =>
+                                    k.includes(".") ? k.split(".").slice(1).join(".") : k
+                                  )
+                                )
+                              ).map((k) => (
+                                <li key={k}>{k}</li>
+                              ))}
+                            </ul>
                           </div>
                         </div>
                       </div>
@@ -4662,8 +5035,19 @@ const calibraiJsonEditorTheme = EditorView.theme({
                           <div className="font-semibold leading-snug">
                             Claves del Prompt ausentes en el JSON
                           </div>
-                          <div className="text-[11px] opacity-90 font-mono">
-                            Faltan en el JSON: {jsonPromptCoherence.missingInJsonKeys.join(", ")}
+                          <div className="text-[11px] opacity-90 font-mono space-y-1">
+                            <div>Faltan en el JSON:</div>
+                            <ul className="list-disc pl-4 space-y-0.5">
+                              {Array.from(
+                                new Set(
+                                  jsonPromptCoherence.missingInJsonKeys.map((k) =>
+                                    k.includes(".") ? k.split(".").slice(1).join(".") : k
+                                  )
+                                )
+                              ).map((k) => (
+                                <li key={k}>{k}</li>
+                              ))}
+                            </ul>
                           </div>
                         </div>
                       </div>
@@ -5265,6 +5649,1472 @@ const calibraiJsonEditorTheme = EditorView.theme({
                     <span>Aplicar JSON</span>
                   </Button>
                 </>
+              );
+            })()}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Visual No-Code Evaluation Spec Builder Modal */}
+      <Dialog open={isAddingSpec} onOpenChange={(open) => !open && resetNewSpecForm()}>
+        <DialogContent
+          onOpenAutoFocus={(e) => e.preventDefault()}
+          className="sm:max-w-3xl max-h-[85vh] flex flex-col bg-card border-border rounded-sm shadow-none"
+        >
+          <DialogHeader className="border-b border-border pb-3">
+            <DialogTitle className="font-serif text-base font-bold text-foreground flex items-center gap-2">
+              <Sliders className="w-4 h-4 text-primary" />
+              <span>
+                {editingSpecIndex !== null
+                  ? "Editar Evaluation Spec"
+                  : "Constructor de SPEC"}
+              </span>
+            </DialogTitle>
+            <DialogDescription className="text-xs text-muted-foreground">
+              Define cálculos matemáticos o reglas condicionales (IF / ELSE) visualmente sin escribir código.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="flex-1 overflow-y-auto space-y-4 py-2 px-1">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {(() => {
+                const trimmedSpecName = newSpecName.trim().toLowerCase();
+                const isDerivedSpecName =
+                  Boolean(trimmedSpecName) &&
+                  jsonPromptCoherence.missingKeys
+                    .filter((k) => k !== "JSON inválido")
+                    .some((k) => {
+                      const leaf = k.includes(".") ? k.split(".").slice(1).join(".") : k;
+                      return k.toLowerCase() === trimmedSpecName || leaf.toLowerCase() === trimmedSpecName;
+                    });
+                const isDatasetSpecName =
+                  Boolean(trimmedSpecName) &&
+                  specColumns.some((c) => c.toLowerCase() === trimmedSpecName);
+                const specInputColorClass = isDerivedSpecName
+                  ? "border-primary/70 bg-primary/10 text-primary font-semibold focus-visible:ring-primary disabled:opacity-85"
+                  : isDatasetSpecName
+                  ? "border-blue-500/30 bg-blue-500/10 text-blue-400 font-semibold focus-visible:ring-blue-500 disabled:opacity-85"
+                  : "bg-background";
+                return (
+                  <div className="space-y-1 relative">
+                    <Label htmlFor="spec-name" className="text-xs font-medium text-foreground">
+                      {t("prompt.specNameLabel")}
+                    </Label>
+                    <Input
+                      id="spec-name"
+                      value={newSpecName}
+                      disabled={Boolean(newSpecFunction)}
+                      onFocus={() => setShowSpecNameSuggest(true)}
+                      onClick={() => setShowSpecNameSuggest(true)}
+                      onBlur={() => setTimeout(() => setShowSpecNameSuggest(false), 150)}
+                      onChange={(e) => {
+                        setNewSpecName(e.target.value);
+                        setShowSpecNameSuggest(true);
+                      }}
+                      placeholder={t("prompt.specNamePlaceholder")}
+                      className={`text-xs h-8 font-mono ${specInputColorClass}`}
+                    />
+                    {showSpecNameSuggest && !newSpecFunction && (() => {
+                  const jsonMissing = Array.from(
+                    new Set(
+                      jsonPromptCoherence.missingKeys
+                        .filter((k) => k !== "JSON inválido")
+                        .map((k) => (k.includes(".") ? k.split(".").slice(1).join(".") : k))
+                    )
+                  ).map((name) => ({ name, source: "JSON (por definir)" }));
+                  const datasetSpecs = specColumns.map((name) => ({
+                    name,
+                    source: "Dataset (SPEC)",
+                  }));
+                  const seen = new Set<string>();
+                  const allOpts = [...jsonMissing, ...datasetSpecs].filter((item) => {
+                    const low = item.name.toLowerCase();
+                    if (seen.has(low)) return false;
+                    seen.add(low);
+                    return true;
+                  });
+                  const q = newSpecName.trim().toLowerCase();
+                  const filtered = allOpts.filter((o) =>
+                    !q ? true : o.name.toLowerCase().includes(q)
+                  );
+                  if (filtered.length === 0) return null;
+                  return (
+                    <div className="absolute z-50 left-0 right-0 top-full mt-1 max-h-40 overflow-y-auto rounded-sm border border-border bg-card shadow-md py-1">
+                      {filtered.map((opt) => (
+                        <button
+                          key={opt.name}
+                          type="button"
+                          onMouseDown={(e) => {
+                            e.preventDefault();
+                            setNewSpecName(opt.name);
+                            setShowSpecNameSuggest(false);
+                            const matchingParents = detectedOutputKeys.filter((k) => {
+                              const parts = k.split(".");
+                              return parts.length > 1 && parts[parts.length - 1].toLowerCase() === opt.name.toLowerCase();
+                            });
+                            if (matchingParents.length > 1) {
+                              setNewSpecApplyToNested(true);
+                              setNewSpecInjectIntoOutput(true);
+                            }
+                          }}
+                          className="w-full text-left px-2.5 py-1.5 text-xs font-mono hover:bg-primary/10 flex items-center justify-between gap-2 transition-colors"
+                        >
+                          <span className="text-foreground truncate">{opt.name}</span>
+                          <span className="text-[10px] font-sans text-muted-foreground shrink-0">
+                            {opt.source}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  );
+                })()}
+                  </div>
+                );
+              })()}
+
+              <div className="space-y-1">
+                <Label htmlFor="spec-function" className="text-xs font-medium text-foreground">
+                  {t("prompt.specFunctionLabel")}
+                </Label>
+                <Select
+                  value={newSpecFunction}
+                  onValueChange={handleFunctionChange}
+                  disabled={!newSpecName.trim()}
+                >
+                  <SelectTrigger
+                    id="spec-function"
+                    className="h-8 text-xs bg-background disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    <SelectValue placeholder="Seleccionar función" />
+                  </SelectTrigger>
+                  <SelectContent className="bg-card border-border text-xs max-h-72">
+                    {savedFormulas.length > 0 && (
+                      <>
+                        <div className="px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-primary">
+                          Fórmulas Guardadas
+                        </div>
+                        {savedFormulas.map((tpl) => (
+                          <SelectItem key={tpl.id} value={`saved:${tpl.id}`}>
+                            {tpl.name}
+                          </SelectItem>
+                        ))}
+                        <div className="my-1 border-t border-border/50" />
+                      </>
+                    )}
+
+                    <div className="px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+                      Reglas / Campos Derivados
+                    </div>
+                    <SelectItem value="conditional_rule">Regla Condicional (IF / ELSE)</SelectItem>
+
+                    <div className="px-2 py-1 mt-1 text-[10px] font-bold uppercase tracking-wider text-muted-foreground border-t border-border/50">
+                      {t("prompt.functionGroupClassic")}
+                    </div>
+                    <SelectItem value="suma">{t("prompt.fnSuma")}</SelectItem>
+                    <SelectItem value="resta">{t("prompt.fnResta")}</SelectItem>
+                    <SelectItem value="multiplicacion">{t("prompt.fnMultiplicacion")}</SelectItem>
+                    <SelectItem value="division">{t("prompt.fnDivision")}</SelectItem>
+                    <SelectItem value="promedio">{t("prompt.fnPromedio")}</SelectItem>
+                    <SelectItem value="diff">{t("prompt.fnDiff")}</SelectItem>
+                    <SelectItem value="abs">{t("prompt.fnAbs")}</SelectItem>
+                    <SelectItem value="min">{t("prompt.fnMin")}</SelectItem>
+                    <SelectItem value="max">{t("prompt.fnMax")}</SelectItem>
+
+                    <div className="px-2 py-1 mt-1 text-[10px] font-bold uppercase tracking-wider text-muted-foreground border-t border-border/50">
+                      Cadenas y Arrays
+                    </div>
+                    <SelectItem value="len">Longitud de cadena / array (len)</SelectItem>
+                    <SelectItem value="is_empty">Está vacío (is_empty)</SelectItem>
+                    <SelectItem value="not_empty">No está vacío (not_empty)</SelectItem>
+                    <SelectItem value="contains">Contiene valor / subcadena (contains)</SelectItem>
+                    <SelectItem value="concat">Concatenar cadenas / arrays (concat)</SelectItem>
+                    <SelectItem value="join">Unir array en texto (join)</SelectItem>
+                    <SelectItem value="split">Trocear texto por separador (split)</SelectItem>
+                    <SelectItem value="lower">Minúsculas (lower)</SelectItem>
+                    <SelectItem value="upper">Mayúsculas (upper)</SelectItem>
+                    <SelectItem value="intersect">Intersección de arrays (intersect)</SelectItem>
+                    <SelectItem value="union">Unión de arrays (union)</SelectItem>
+
+                    <div className="px-2 py-1 mt-1 text-[10px] font-bold uppercase tracking-wider text-muted-foreground border-t border-border/50">
+                      {t("prompt.functionGroupMethodology")}
+                    </div>
+                    <SelectItem value="nss">{t("prompt.fnNss")}</SelectItem>
+                    <SelectItem value="internal_consistency">{t("prompt.fnInternalConsistency")}</SelectItem>
+                    <SelectItem value="rule_consistency">{t("prompt.fnRuleConsistency")}</SelectItem>
+                    <SelectItem value="verbatim_faithfulness">{t("prompt.fnVerbatimFaithfulness")}</SelectItem>
+                    <SelectItem value="tolerance_match">{t("prompt.fnToleranceMatch")}</SelectItem>
+
+                    <div className="px-2 py-1 mt-1 text-[10px] font-bold uppercase tracking-wider text-muted-foreground border-t border-border/50">
+                      {t("prompt.functionGroupCustom")}
+                    </div>
+                    <SelectItem value="custom_expr">{t("prompt.fnCustomExpr")}</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            {(() => {
+              const cleanSpec = newSpecName.trim().toLowerCase();
+              if (!cleanSpec) return null;
+              const sharedParents = Array.from(
+                new Set(
+                  detectedOutputKeys
+                    .filter((k) => {
+                      const parts = k.split(".");
+                      return parts.length > 1 && parts[parts.length - 1].toLowerCase() === cleanSpec;
+                    })
+                    .map((k) => k.split(".")[0])
+                )
+              );
+              if (sharedParents.length < 2) return null;
+              return (
+                <div className="p-2.5 rounded-sm border border-primary/35 bg-primary/5 space-y-2 text-xs">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                    <div className="text-foreground">
+                      <span className="font-semibold text-primary">Variable compartida:</span>{" "}
+                      <code className="font-mono font-semibold text-primary">{cleanSpec}</code> aparece en:
+                      <br />
+                      <strong>{sharedParents.length} bloques</strong> ({sharedParents.join(", ")}).
+                    </div>
+                    <label className="inline-flex items-center gap-2 font-medium text-primary cursor-pointer shrink-0">
+                      <input
+                        type="checkbox"
+                        checked={newSpecApplyToNested}
+                        disabled={Boolean(newSpecFunction)}
+                        onChange={(e) => {
+                          setNewSpecApplyToNested(e.target.checked);
+                          if (e.target.checked) {
+                            setNewSpecInjectIntoOutput(true);
+                          } else {
+                            setNewSpecTargetBlocks([]);
+                          }
+                        }}
+                        className="h-3.5 w-3.5 accent-primary disabled:opacity-50"
+                      />
+                      <span>Aplicar a todos</span>
+                    </label>
+                  </div>
+
+                  {!newSpecApplyToNested && (
+                    <div className="space-y-1.5 pt-1.5 border-t border-primary/20">
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <span className="text-[11px] font-medium text-primary mr-1">
+                          Bloques seleccionados:
+                        </span>
+                        {newSpecTargetBlocks.length === 0 ? (
+                          <span className="text-[11px] text-destructive font-medium">
+                            Ninguno — haz clic en los campos <code className="font-mono">{cleanSpec}</code> de los bloques inferiores para seleccionar uno o varios.
+                          </span>
+                        ) : (
+                          newSpecTargetBlocks.map((blk) => (
+                            <span
+                              key={blk}
+                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-sm border border-primary/40 bg-primary/15 text-primary text-[11px] font-mono"
+                            >
+                              <span>{blk}</span>
+                              {!newSpecFunction && (
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setNewSpecTargetBlocks((prev) => prev.filter((b) => b !== blk))
+                                  }
+                                  className="hover:text-destructive transition-colors"
+                                  title="Quitar bloque"
+                                >
+                                  <X className="w-3 h-3" />
+                                </button>
+                              )}
+                            </span>
+                          ))
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
+
+            {newSpecFunction === "conditional_rule" ? (
+              (() => {
+                const varOptions = Array.from(
+                  new Set([
+                    ...detectedOutputKeys.map((k) => (k.includes(".") ? k.split(".").slice(1).join(".") : k)),
+                    ...availableSpecArgumentCandidates.map((c) => c.name),
+                  ])
+                );
+
+                return (
+                  <div className="space-y-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <Label className="text-xs font-semibold text-foreground">
+                        Reglas Visuales (IF / THEN / ELSE)
+                      </Label>
+                      <div className="flex items-center gap-1.5">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => {
+                            if (!newSpecName.trim()) setNewSpecName("sentiment");
+                            setNewSpecApplyToNested(true);
+                            setNewSpecInjectIntoOutput(true);
+                            setVisualSpecRules([
+                              {
+                                id: mkSpecId(),
+                                combinator: "and",
+                                conditions: [
+                                  { id: mkSpecId(), variable: "markers_positive", operator: "not_empty", value: "" },
+                                  { id: mkSpecId(), variable: "markers_negative", operator: "not_empty", value: "" },
+                                ],
+                                resultValue: "Mixed",
+                              },
+                              {
+                                id: mkSpecId(),
+                                combinator: "and",
+                                conditions: [
+                                  { id: mkSpecId(), variable: "markers_positive", operator: "not_empty", value: "" },
+                                ],
+                                resultValue: "Positive",
+                              },
+                              {
+                                id: mkSpecId(),
+                                combinator: "and",
+                                conditions: [
+                                  { id: mkSpecId(), variable: "markers_negative", operator: "not_empty", value: "" },
+                                ],
+                                resultValue: "Negative",
+                              },
+                              {
+                                id: mkSpecId(),
+                                combinator: "and",
+                                conditions: [
+                                  { id: mkSpecId(), variable: "markers_neutral", operator: "not_empty", value: "" },
+                                ],
+                                resultValue: "Neutral",
+                              },
+                            ]);
+                            setNewSpecDefaultValue("blank");
+                            if (!newSpecDesc.trim()) {
+                              setNewSpecDesc("Calcula sentiment desde markers (neutral no genera Mixed)");
+                            }
+                          }}
+                          className="h-7 px-2.5 text-[11px] font-mono border-primary/40 text-primary hover:bg-primary/10"
+                        >
+                          Cargar plantilla: Sentimiento desde markers
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => handleFunctionChange("")}
+                          className="h-7 w-7 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                          title="Quitar función y volver a editar la definición de la SPEC"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </Button>
+                      </div>
+                    </div>
+
+                    <div className="space-y-3">
+                      {visualSpecRules.map((rule, rIdx) => (
+                        <div key={rule.id} className="p-3 rounded-sm border border-border bg-background space-y-2.5">
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="flex items-center gap-2">
+                              <Badge variant="outline" className="text-[10px] font-mono">
+                                {rIdx === 0 ? "IF" : "ELSE IF"} #{rIdx + 1}
+                              </Badge>
+                              {rule.conditions.length > 1 && (
+                                <Select
+                                  value={rule.combinator}
+                                  onValueChange={(val) =>
+                                    setVisualSpecRules((prev) =>
+                                      prev.map((rb) =>
+                                        rb.id === rule.id ? { ...rb, combinator: val as "and" | "or" } : rb
+                                      )
+                                    )
+                                  }
+                                >
+                                  <SelectTrigger className="h-6 w-20 text-[10px] font-mono">
+                                    <SelectValue />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="and" className="text-xs font-mono">AND</SelectItem>
+                                    <SelectItem value="or" className="text-xs font-mono">OR</SelectItem>
+                                  </SelectContent>
+                                </Select>
+                              )}
+                            </div>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon"
+                              disabled={visualSpecRules.length <= 1}
+                              onClick={() =>
+                                setVisualSpecRules((prev) => prev.filter((rb) => rb.id !== rule.id))
+                              }
+                              className="h-7 w-7 text-muted-foreground hover:text-destructive"
+                              title="Eliminar regla"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </Button>
+                          </div>
+
+                          <div className="pl-4 border-l-2 border-primary/30 space-y-2">
+                            {rule.conditions.map((cond) => {
+                              const needsValue = cond.operator !== "not_empty" && cond.operator !== "is_empty";
+                              return (
+                                <div
+                                  key={cond.id}
+                                  className={`grid items-center gap-2 ${
+                                    needsValue
+                                      ? "grid-cols-[minmax(0,1fr)_165px_100px_28px]"
+                                      : "grid-cols-[minmax(0,1fr)_190px_28px]"
+                                  }`}
+                                >
+                                  <Select
+                                    value={cond.variable}
+                                    onValueChange={(val) =>
+                                      setVisualSpecRules((prev) =>
+                                        prev.map((rb) =>
+                                          rb.id === rule.id
+                                            ? {
+                                                ...rb,
+                                                conditions: rb.conditions.map((c) =>
+                                                  c.id === cond.id ? { ...c, variable: val } : c
+                                                ),
+                                              }
+                                            : rb
+                                        )
+                                      )
+                                    }
+                                  >
+                                    <SelectTrigger className="h-8 text-xs font-mono">
+                                      <SelectValue placeholder="Variable..." />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      {varOptions.map((vo) => (
+                                        <SelectItem key={vo} value={vo} className="text-xs font-mono">
+                                          {vo}
+                                        </SelectItem>
+                                      ))}
+                                    </SelectContent>
+                                  </Select>
+
+                                  <Select
+                                    value={cond.operator}
+                                    onValueChange={(val) =>
+                                      setVisualSpecRules((prev) =>
+                                        prev.map((rb) =>
+                                          rb.id === rule.id
+                                            ? {
+                                                ...rb,
+                                                conditions: rb.conditions.map((c) =>
+                                                  c.id === cond.id ? { ...c, operator: val as VisualCondOp } : c
+                                                ),
+                                              }
+                                            : rb
+                                        )
+                                      )
+                                    }
+                                  >
+                                    <SelectTrigger className="h-8 text-xs">
+                                      <SelectValue />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      <SelectItem value="not_empty" className="text-xs">tiene elementos</SelectItem>
+                                      <SelectItem value="is_empty" className="text-xs">está vacío</SelectItem>
+                                      <SelectItem value="len_gt" className="text-xs">longitud &gt;</SelectItem>
+                                      <SelectItem value="len_eq" className="text-xs">longitud ==</SelectItem>
+                                      <SelectItem value="eq" className="text-xs">es igual a</SelectItem>
+                                      <SelectItem value="neq" className="text-xs">es distinto de</SelectItem>
+                                      <SelectItem value="gt" className="text-xs">mayor que (&gt;)</SelectItem>
+                                      <SelectItem value="lt" className="text-xs">menor que (&lt;)</SelectItem>
+                                    </SelectContent>
+                                  </Select>
+
+                                  {needsValue && (
+                                    <Input
+                                      value={cond.value}
+                                      onChange={(e) =>
+                                        setVisualSpecRules((prev) =>
+                                          prev.map((rb) =>
+                                            rb.id === rule.id
+                                              ? {
+                                                  ...rb,
+                                                  conditions: rb.conditions.map((c) =>
+                                                    c.id === cond.id ? { ...c, value: e.target.value } : c
+                                                  ),
+                                                }
+                                              : rb
+                                          )
+                                        )
+                                      }
+                                      placeholder="valor"
+                                      className="h-8 text-xs font-mono"
+                                    />
+                                  )}
+
+                                  <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="icon"
+                                    disabled={rule.conditions.length <= 1}
+                                    onClick={() =>
+                                      setVisualSpecRules((prev) =>
+                                        prev.map((rb) =>
+                                          rb.id === rule.id
+                                            ? { ...rb, conditions: rb.conditions.filter((c) => c.id !== cond.id) }
+                                            : rb
+                                        )
+                                      )
+                                    }
+                                    className="h-8 w-7 text-muted-foreground hover:text-destructive"
+                                  >
+                                    <X className="w-3.5 h-3.5" />
+                                  </Button>
+                                </div>
+                              );
+                            })}
+
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              onClick={() =>
+                                setVisualSpecRules((prev) =>
+                                  prev.map((rb) =>
+                                    rb.id === rule.id
+                                      ? {
+                                          ...rb,
+                                          conditions: [
+                                            ...rb.conditions,
+                                            { id: mkSpecId(), variable: varOptions[0] || "", operator: "not_empty", value: "" },
+                                          ],
+                                        }
+                                      : rb
+                                  )
+                                )
+                              }
+                              className="h-6 px-2 text-[11px] text-primary gap-1"
+                            >
+                              <Plus className="w-3 h-3" />
+                              <span>Añadir condición</span>
+                            </Button>
+                          </div>
+
+                          <div className="flex items-center gap-2 pt-1 border-t border-border/50">
+                            <span className="text-[11px] font-mono text-muted-foreground shrink-0">
+                              ENTONCES →
+                            </span>
+                            <Input
+                              value={rule.resultValue}
+                              onChange={(e) =>
+                                setVisualSpecRules((prev) =>
+                                  prev.map((rb) =>
+                                    rb.id === rule.id ? { ...rb, resultValue: e.target.value } : rb
+                                  )
+                                )
+                              }
+                              placeholder="Valor resultante (ej. Mixed, Positive...)"
+                              className="h-8 text-xs font-mono"
+                            />
+                          </div>
+                        </div>
+                      ))}
+
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setVisualSpecRules((prev) => [...prev, makeEmptyVisualRule(varOptions[0] || "")])}
+                        className="w-full h-8 text-xs border-dashed gap-1.5"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                        <span>Añadir regla</span>
+                      </Button>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-3 rounded-sm border border-border bg-muted/20">
+                      <div className="space-y-1">
+                        <Label className="text-[11px] font-medium text-muted-foreground">
+                          Valor por defecto (ELSE)
+                        </Label>
+                        <Input
+                          value={newSpecDefaultValue}
+                          onChange={(e) => setNewSpecDefaultValue(e.target.value)}
+                          placeholder="ej. blank"
+                          className="h-8 text-xs font-mono bg-background"
+                        />
+                      </div>
+                      <div className="space-y-1.5 flex flex-col justify-end text-xs">
+                        <label className="flex items-center gap-2 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={newSpecApplyToNested}
+                            onChange={(e) => setNewSpecApplyToNested(e.target.checked)}
+                            className="h-3.5 w-3.5 accent-primary"
+                          />
+                          <span>Aplicar a cada bloque/dimensión anidada</span>
+                        </label>
+                        <label className="flex items-center gap-2 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={newSpecInjectIntoOutput}
+                            onChange={(e) => setNewSpecInjectIntoOutput(e.target.checked)}
+                            className="h-3.5 w-3.5 accent-primary"
+                          />
+                          <span>Usar campo derivado en métricas y Matriz 1vs1</span>
+                        </label>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()
+            ) : (
+              (() => {
+                interface VarTreeNode {
+                  label: string;
+                  fullPath: string;
+                  children: VarTreeNode[];
+                }
+
+                const buildOutputTree = (paths: string[]): VarTreeNode[] => {
+                  const root: VarTreeNode[] = [];
+                  for (const fullPath of paths) {
+                    const parts = fullPath.split(".");
+                    let level = root;
+                    let acc = "";
+                    for (let i = 0; i < parts.length; i++) {
+                      const part = parts[i];
+                      acc = acc ? `${acc}.${part}` : part;
+                      let existing = level.find((n) => n.label === part);
+                      if (!existing) {
+                        existing = { label: part, fullPath: acc, children: [] };
+                        level.push(existing);
+                      }
+                      level = existing.children;
+                    }
+                  }
+                  return root;
+                };
+
+                const missingInPromptSet = new Set(
+                  jsonPromptCoherence.missingKeys.map((k) => k.toLowerCase())
+                );
+                const outputTree = buildOutputTree(detectedOutputKeys);
+                const specLeafOptions = availableSpecArgumentCandidates.filter(
+                  (c) => c.type === "spec_col" || c.type === "spec"
+                );
+
+                const isCustomMode = newSpecFunction === "custom_expr";
+                const expectedSlotType = getExpectedTypeForPath(formulaTree, activeSlotPath);
+
+                const getVariableType = (path: string): "number" | "array" | "boolean" | "string" | "unknown" => {
+                  if (detectedOutputTypes[path]) return detectedOutputTypes[path];
+                  const dsCol = (dataset.columns || []).find((c) => c.name === path);
+                  if (dsCol) {
+                    const dt = (dsCol.data_type || "").toLowerCase();
+                    if (/(int|float|double|num|dec|real)/.test(dt)) return "number";
+                    if (/(bool)/.test(dt)) return "boolean";
+                    return "string";
+                  }
+                  const prevSpec = computedSpecs.find((s) => s.name === path);
+                  if (prevSpec) {
+                    return prevSpec.function === "conditional_rule" ? "string" : "number";
+                  }
+                  return "unknown";
+                };
+
+                const isTypeCompatible = (path: string): { ok: boolean; reason?: string; exprToken: string } => {
+                  const vType = getVariableType(path);
+                  if (vType === "unknown" || expectedSlotType === "any") {
+                    return { ok: true, exprToken: path };
+                  }
+                  if (expectedSlotType === "number") {
+                    if (vType === "number") return { ok: true, exprToken: path };
+                    return {
+                      ok: false,
+                      reason:
+                        vType === "array"
+                          ? "Tipo incompatible (array): anida len() en este hueco si necesitas su longitud"
+                          : `Tipo incompatible (${vType === "boolean" ? "booleano" : "texto"}) para operación numérica`,
+                      exprToken: path,
+                    };
+                  }
+                  if (expectedSlotType === "collection") {
+                    if (vType === "array" || vType === "string") return { ok: true, exprToken: path };
+                    return {
+                      ok: false,
+                      reason: `Tipo incompatible (${vType}): se requiere array o texto`,
+                      exprToken: path,
+                    };
+                  }
+                  if (expectedSlotType === "array") {
+                    if (vType === "array") return { ok: true, exprToken: path };
+                    return {
+                      ok: false,
+                      reason: `Tipo incompatible (${vType}): se requiere array`,
+                      exprToken: path,
+                    };
+                  }
+                  if (expectedSlotType === "string") {
+                    if (vType === "string") return { ok: true, exprToken: path };
+                    return {
+                      ok: false,
+                      reason: `Tipo incompatible (${vType}): se requiere texto`,
+                      exprToken: path,
+                    };
+                  }
+                  return { ok: true, exprToken: path };
+                };
+
+                const syncTreeState = (nextTree: FormulaNode) => {
+                  setFormulaTree(nextTree);
+                  setNewSpecArgs(extractFormulaVars(nextTree));
+                  setIsFormulaManuallyEdited(false);
+                  setNewSpecCustomExpr(compileFormulaNode(nextTree));
+                };
+
+                const assignPathValue = (path: number[], varPath: string) => {
+                  if (!formulaTree) return;
+                  const compat = isTypeCompatible(varPath);
+                  if (!compat.ok) return;
+                  const leafOnly = varPath.includes(".") ? varPath.split(".").slice(1).join(".") : varPath;
+                  const resolved =
+                    newSpecApplyToNested && varPath.includes(".") ? leafOnly : varPath;
+                  const nextTree = updateNodeAtPath(formulaTree, path, () => ({
+                    kind: "var",
+                    path: resolved,
+                  }));
+                  syncTreeState(nextTree);
+                };
+
+                const clearPathValue = (path: number[], placeholderLabel = "var") => {
+                  if (!formulaTree) return;
+                  const nextTree = updateNodeAtPath(formulaTree, path, () => ({
+                    kind: "empty",
+                    label: placeholderLabel,
+                  }));
+                  syncTreeState(nextTree);
+                  setActiveSlotPath(path);
+                };
+
+                const nestFunctionAtPath = (path: number[], nestedFn: string) => {
+                  if (!formulaTree) return;
+                  const template = buildInitialFormulaTree(nestedFn);
+                  if (!template || template.kind !== "call") return;
+                  const existing = getNodeAtPath(formulaTree, path);
+                  const nextCall: FormulaNode = { ...template, args: [...template.args] };
+                  let nextFocusOffset = 0;
+                  if (existing && existing.kind !== "empty") {
+                    nextCall.args[0] = existing;
+                    nextFocusOffset = nextCall.args.length > 1 ? 1 : 0;
+                  }
+                  const nextTree = updateNodeAtPath(formulaTree, path, () => nextCall);
+                  syncTreeState(nextTree);
+                  setActiveSlotPath([...path, nextFocusOffset]);
+                };
+
+                const addVariadicArgAtPath = (parentPath: number[], varPath?: string) => {
+                  if (!formulaTree) return;
+                  const parentNode = getNodeAtPath(formulaTree, parentPath);
+                  if (!parentNode || parentNode.kind !== "call") return;
+                  const nextIdx = parentNode.args.length;
+                  const newArg: FormulaNode = varPath
+                    ? {
+                        kind: "var",
+                        path:
+                          newSpecApplyToNested && varPath.includes(".")
+                            ? varPath.split(".").slice(1).join(".")
+                            : varPath,
+                      }
+                    : { kind: "empty", label: `var ${nextIdx + 1}` };
+                  const nextTree = updateNodeAtPath(formulaTree, parentPath, (node) =>
+                    node.kind === "call"
+                      ? { ...node, args: [...node.args, newArg] }
+                      : node
+                  );
+                  syncTreeState(nextTree);
+                  setActiveSlotPath([...parentPath, nextIdx]);
+                };
+
+                const insertIntoCustomExpr = (path: string) => {
+                  const curr = newSpecCustomExpr || "";
+                  const sep = curr && !/[\s(+\-*/,]$/.test(curr) ? " + " : "";
+                  const updated = `${curr}${sep}${path}`;
+                  setIsFormulaManuallyEdited(true);
+                  setNewSpecCustomExpr(updated);
+                  if (!newSpecArgs.includes(path)) {
+                    setNewSpecArgs((prev) => [...prev, path]);
+                  }
+                };
+
+                const pathEquals = (a: number[] | null, b: number[]) =>
+                  Boolean(a && a.length === b.length && a.every((v, i) => v === b[i]));
+
+                const renderFormulaNode = (node: FormulaNode, path: number[]): React.ReactNode => {
+                  const pathKey = path.join(".");
+                  const isActive = pathEquals(activeSlotPath, path);
+                  const isDragOver = dragOverPathKey === pathKey;
+
+                  if (node.kind === "literal") {
+                    return (
+                      <input
+                        key={pathKey}
+                        type="text"
+                        value={node.value}
+                        onChange={(e) => {
+                          if (!formulaTree) return;
+                          const nextTree = updateNodeAtPath(formulaTree, path, () => ({
+                            kind: "literal",
+                            value: e.target.value,
+                          }));
+                          syncTreeState(nextTree);
+                        }}
+                        placeholder="sep"
+                        title="Separador literal (ej. , o ;)"
+                        className="w-12 px-1.5 py-0.5 rounded-sm border border-border bg-background text-xs font-mono text-center focus:outline-none focus:ring-1 focus:ring-primary"
+                      />
+                    );
+                  }
+
+                  if (node.kind === "empty" || node.kind === "var") {
+                    const labelText = node.kind === "var" ? node.path : `[${node.label || "var"}]`;
+                    return (
+                      <span
+                        key={pathKey}
+                        onDragOver={(e) => {
+                          e.preventDefault();
+                          if (dragOverPathKey !== pathKey) setDragOverPathKey(pathKey);
+                        }}
+                        onDragLeave={() => {
+                          if (dragOverPathKey === pathKey) setDragOverPathKey(null);
+                        }}
+                        onDrop={(e) => {
+                          e.preventDefault();
+                          setDragOverPathKey(null);
+                          const dropped = e.dataTransfer.getData("text/plain");
+                          if (dropped) {
+                            setActiveSlotPath(path);
+                            assignPathValue(path, dropped);
+                          }
+                        }}
+                        className={`inline-flex items-center gap-1 rounded-sm border text-xs font-mono transition-all ${
+                          isDragOver
+                            ? "border-primary bg-primary/25 text-primary ring-2 ring-primary/50 scale-[1.02]"
+                            : isActive
+                            ? "border-primary bg-primary/15 text-primary ring-1 ring-primary/40"
+                            : node.kind === "var"
+                            ? "border-emerald-500/40 bg-emerald-500/10 text-foreground hover:border-primary/50"
+                            : "border-dashed border-primary/50 bg-background text-muted-foreground hover:border-primary hover:text-primary"
+                        }`}
+                      >
+                        <button
+                          type="button"
+                          onClick={() => setActiveSlotPath((prev) => (pathEquals(prev, path) ? null : path))}
+                          className="px-2 py-1 text-left"
+                        >
+                          {labelText}
+                        </button>
+                        {node.kind === "var" && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              clearPathValue(path);
+                            }}
+                            className="pr-1.5 pl-0.5 py-1 text-muted-foreground hover:text-destructive transition-colors"
+                            title="Borrar variable del hueco"
+                          >
+                            <X className="w-3 h-3" />
+                          </button>
+                        )}
+                      </span>
+                    );
+                  }
+
+                  const opSymbol: Record<string, string> = {
+                    suma: "+",
+                    resta: "−",
+                    multiplicacion: "×",
+                    division: "/",
+                  };
+                  const variadic = isVariadicFormulaFn(node.fn);
+                  const newKey = `${pathKey}.new`;
+                  const isDragOverNew = dragOverPathKey === newKey;
+
+                  const variadicControl = variadic ? (
+                    <>
+                      {opSymbol[node.fn] ? (
+                        <span className="px-0.5 font-bold opacity-50">{opSymbol[node.fn]}</span>
+                      ) : (
+                        <span className="opacity-50">,</span>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => addVariadicArgAtPath(path)}
+                        onDragOver={(e) => {
+                          e.preventDefault();
+                          if (dragOverPathKey !== newKey) setDragOverPathKey(newKey);
+                        }}
+                        onDragLeave={() => {
+                          if (dragOverPathKey === newKey) setDragOverPathKey(null);
+                        }}
+                        onDrop={(e) => {
+                          e.preventDefault();
+                          setDragOverPathKey(null);
+                          const dropped = e.dataTransfer.getData("text/plain");
+                          if (dropped) addVariadicArgAtPath(path, dropped);
+                        }}
+                        className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-sm border border-dashed text-[10px] font-mono transition-all ${
+                          isDragOverNew
+                            ? "border-primary bg-primary/20 text-primary ring-2 ring-primary/40"
+                            : "border-primary/40 text-primary/80 hover:border-primary hover:bg-primary/5"
+                        }`}
+                        title="Haz clic o arrastra una variable aquí para añadir otro argumento"
+                      >
+                        <Plus className="w-2.5 h-2.5" />
+                      </button>
+                    </>
+                  ) : null;
+
+                  const wrapNested = (content: React.ReactNode) => {
+                    if (path.length === 0) return content;
+                    return (
+                      <span
+                        key={pathKey}
+                        className="inline-flex flex-wrap items-center gap-1 px-1.5 py-0.5 rounded-sm border border-primary/30 bg-primary/5"
+                      >
+                        {content}
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            clearPathValue(path);
+                          }}
+                          className="ml-0.5 text-muted-foreground hover:text-destructive transition-colors"
+                          title="Quitar función anidada"
+                        >
+                          <X className="w-3 h-3" />
+                        </button>
+                      </span>
+                    );
+                  };
+
+                  if (node.fn === "nss") {
+                    return wrapNested(
+                      <span className="inline-flex flex-wrap items-center gap-1 font-mono text-xs">
+                        <span>(</span>
+                        {renderFormulaNode(node.args[0], [...path, 0])}
+                        <span>−</span>
+                        {renderFormulaNode(node.args[1], [...path, 1])}
+                        <span>) / (</span>
+                        {renderFormulaNode(node.args[0], [...path, 0])}
+                        <span>+</span>
+                        {renderFormulaNode(node.args[1], [...path, 1])}
+                        <span>)</span>
+                      </span>
+                    );
+                  }
+                  if (node.fn === "diff") {
+                    return wrapNested(
+                      <span className="inline-flex flex-wrap items-center gap-1 font-mono text-xs">
+                        <span>|</span>
+                        {renderFormulaNode(node.args[0], [...path, 0])}
+                        <span>−</span>
+                        {renderFormulaNode(node.args[1], [...path, 1])}
+                        <span>|</span>
+                      </span>
+                    );
+                  }
+                  if (node.fn === "abs") {
+                    return wrapNested(
+                      <span className="inline-flex flex-wrap items-center gap-1 font-mono text-xs">
+                        <span>|</span>
+                        {renderFormulaNode(node.args[0], [...path, 0])}
+                        <span>|</span>
+                      </span>
+                    );
+                  }
+                  if (opSymbol[node.fn]) {
+                    const sym = opSymbol[node.fn];
+                    return wrapNested(
+                      <span className="inline-flex flex-wrap items-center gap-1 font-mono text-xs">
+                        {path.length > 0 && <span>(</span>}
+                        {node.args.map((arg, idx) => (
+                          <React.Fragment key={idx}>
+                            {idx > 0 && <span className="px-0.5 font-bold">{sym}</span>}
+                            {renderFormulaNode(arg, [...path, idx])}
+                          </React.Fragment>
+                        ))}
+                        {variadicControl}
+                        {path.length > 0 && <span>)</span>}
+                      </span>
+                    );
+                  }
+                  return wrapNested(
+                    <span className="inline-flex flex-wrap items-center gap-1 font-mono text-xs">
+                      <span className="text-primary font-semibold">{node.fn}(</span>
+                      {node.args.map((arg, idx) => (
+                        <React.Fragment key={idx}>
+                          {idx > 0 && <span>,</span>}
+                          {renderFormulaNode(arg, [...path, idx])}
+                        </React.Fragment>
+                      ))}
+                      {variadicControl}
+                      <span className="text-primary font-semibold">)</span>
+                    </span>
+                  );
+                };
+
+                const renderVisualFormula = () => {
+                  if (!formulaTree) return null;
+                  return renderFormulaNode(formulaTree, []);
+                };
+
+                const renderTreeNodes = (nodes: VarTreeNode[], depth = 0): React.ReactNode => (
+                  <div
+                    className={
+                      depth === 0
+                        ? "grid grid-cols-[repeat(auto-fit,minmax(240px,1fr))] gap-2.5 items-start"
+                        : "pl-3 border-l-2 border-primary/25 space-y-1.5 mt-1 flex flex-col"
+                    }
+                  >
+                    {nodes.map((node) => {
+                      const isLeaf = node.children.length === 0;
+                      if (isLeaf) {
+                        const isCalculable = !missingInPromptSet.has(node.fullPath.toLowerCase());
+                        const compat = isTypeCompatible(node.fullPath);
+                        const canSelectTarget = isCustomMode || activeSlotPath !== null;
+                        const parentBlock = node.fullPath.includes(".") ? node.fullPath.split(".")[0] : "";
+                        const isMatchingDerivedField =
+                          !isCalculable &&
+                          Boolean(newSpecName.trim()) &&
+                          node.label.toLowerCase() === newSpecName.trim().toLowerCase() &&
+                          Boolean(parentBlock);
+                        const isTargetSelectableDerived =
+                          isMatchingDerivedField && !newSpecFunction && !newSpecApplyToNested;
+                        const isSelectedDerivedBlock =
+                          isMatchingDerivedField &&
+                          (newSpecApplyToNested || newSpecTargetBlocks.includes(parentBlock));
+                        const isClickable = isTargetSelectableDerived || (isCalculable && compat.ok && canSelectTarget);
+                        const vType = getVariableType(node.fullPath);
+                        const activeNode = activeSlotPath ? getNodeAtPath(formulaTree, activeSlotPath) : null;
+                        const isUsedInActive =
+                          activeNode?.kind === "var" && activeNode.path === node.fullPath;
+                        return (
+                          <button
+                            key={node.fullPath}
+                            type="button"
+                            draggable={isCalculable && compat.ok}
+                            onDragStart={(e) => {
+                              if (!isCalculable || !compat.ok) {
+                                e.preventDefault();
+                                return;
+                              }
+                              e.dataTransfer.setData("text/plain", node.fullPath);
+                              e.dataTransfer.effectAllowed = "copy";
+                            }}
+                            disabled={!isTargetSelectableDerived && (!isCalculable || (canSelectTarget && !compat.ok))}
+                            onClick={() => {
+                              if (isTargetSelectableDerived) {
+                                setNewSpecTargetBlocks((prev) =>
+                                  prev.includes(parentBlock)
+                                    ? prev.filter((b) => b !== parentBlock)
+                                    : [...prev, parentBlock]
+                                );
+                                return;
+                              }
+                              if (!isClickable) return;
+                              if (isCustomMode) {
+                                insertIntoCustomExpr(node.fullPath);
+                              } else if (activeSlotPath !== null) {
+                                assignPathValue(activeSlotPath, node.fullPath);
+                              }
+                            }}
+                            className={`w-full inline-flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-sm text-xs font-mono transition-all ${
+                              isSelectedDerivedBlock
+                                ? isTargetSelectableDerived
+                                  ? "border border-primary bg-primary/20 text-primary ring-1 ring-primary/50 font-semibold cursor-pointer"
+                                  : "border border-primary/70 bg-primary/20 text-primary ring-1 ring-primary/40 font-semibold opacity-80 cursor-not-allowed"
+                                : isTargetSelectableDerived
+                                ? "border border-dashed border-primary/70 bg-background text-primary hover:border-primary hover:bg-primary/10 font-medium cursor-pointer"
+                                : !isCalculable
+                                ? "border border-primary/25 bg-primary/5 text-primary/60 opacity-60 cursor-not-allowed"
+                                : !compat.ok && canSelectTarget
+                                ? "border border-border/50 bg-muted/40 text-muted-foreground opacity-50 cursor-not-allowed"
+                                : isUsedInActive
+                                ? "border border-emerald-500 bg-emerald-500/15 text-foreground font-semibold cursor-grab active:cursor-grabbing"
+                                : canSelectTarget
+                                ? "border border-emerald-500/30 bg-background hover:border-emerald-500/70 hover:bg-emerald-500/5 text-foreground cursor-grab active:cursor-grabbing"
+                                : compat.ok
+                                ? "border border-emerald-500/25 bg-background text-foreground cursor-grab active:cursor-grabbing"
+                                : "border border-emerald-500/25 bg-background text-foreground"
+                            }`}
+                            title={
+                              isTargetSelectableDerived
+                                ? `Haz clic para ${isSelectedDerivedBlock ? "quitar" : "añadir"} el bloque "${parentBlock}" como destino`
+                                : isSelectedDerivedBlock
+                                ? `${node.fullPath} — Seleccionado como destino`
+                                : !isCalculable
+                                ? `${node.fullPath} — Campo derivado (sin definir aún)`
+                                : !compat.ok && canSelectTarget
+                                ? compat.reason
+                                : node.fullPath
+                            }
+                          >
+                            <span className="inline-flex items-center gap-1.5 min-w-0">
+                              {isCalculable ? (
+                                <FunctionSquare className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                              ) : (
+                                <ChevronsLeftRightEllipsis
+                                  className={`w-3.5 h-3.5 shrink-0 ${
+                                    isSelectedDerivedBlock || isTargetSelectableDerived ? "text-primary" : "text-primary/60"
+                                  }`}
+                                />
+                              )}
+                              <span className="truncate">{node.label}</span>
+                            </span>
+                            {isSelectedDerivedBlock ? (
+                              <span className="text-[10px] px-1.5 py-0.5 rounded bg-primary/20 text-primary font-sans font-semibold shrink-0">
+                                ✓ Destino
+                              </span>
+                            ) : isTargetSelectableDerived ? (
+                              <span className="text-[10px] px-1.5 py-0.5 rounded bg-primary/15 text-primary font-sans font-medium shrink-0">
+                                + Elegir
+                              </span>
+                            ) : vType !== "unknown" ? (
+                              <span className="text-[9px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground shrink-0">
+                                {vType}
+                              </span>
+                            ) : null}
+                          </button>
+                        );
+                      }
+                      return (
+                        <div
+                          key={node.fullPath}
+                          className={
+                            depth === 0
+                              ? "p-2.5 rounded-sm border border-border/70 bg-muted/15 space-y-1.5 min-w-0"
+                              : "space-y-1 w-full"
+                          }
+                        >
+                          <div className="text-xs font-mono font-semibold text-muted-foreground select-none truncate">
+                            {node.label}
+                          </div>
+                          {renderTreeNodes(node.children, depth + 1)}
+                        </div>
+                      );
+                    })}
+                    {depth === 0 && specLeafOptions.length > 0 && (
+                      <div className="p-2.5 rounded-sm border border-border/70 bg-muted/15 space-y-1.5 min-w-0">
+                        <div className="text-xs font-mono font-semibold text-muted-foreground select-none truncate">
+                          SPEC
+                        </div>
+                        <div className="pl-3 border-l-2 border-primary/25 space-y-1.5 mt-1 flex flex-col">
+                          {specLeafOptions.map((cand) => {
+                            const compat = isTypeCompatible(cand.name);
+                            const canSelectTarget = isCustomMode || activeSlotPath !== null;
+                            const isClickable = compat.ok && canSelectTarget;
+                            return (
+                              <button
+                                key={`${cand.type}-${cand.name}`}
+                                type="button"
+                                draggable={compat.ok}
+                                onDragStart={(e) => {
+                                  if (!compat.ok) {
+                                    e.preventDefault();
+                                    return;
+                                  }
+                                  e.dataTransfer.setData("text/plain", cand.name);
+                                  e.dataTransfer.effectAllowed = "copy";
+                                }}
+                                disabled={canSelectTarget && !compat.ok}
+                                onClick={() => {
+                                  if (!isClickable) return;
+                                  if (isCustomMode) {
+                                    insertIntoCustomExpr(cand.name);
+                                  } else if (activeSlotPath !== null) {
+                                    assignPathValue(activeSlotPath, cand.name);
+                                  }
+                                }}
+                                title={compat.ok ? cand.name : compat.reason}
+                                className={`w-full inline-flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-sm border text-xs font-mono transition-colors ${
+                                  !compat.ok && canSelectTarget
+                                    ? "border-border/50 bg-muted/40 text-muted-foreground opacity-50 cursor-not-allowed"
+                                    : canSelectTarget
+                                    ? "border-blue-500/30 bg-blue-500/10 hover:border-blue-500/60 hover:bg-blue-500/15 text-blue-400 cursor-grab active:cursor-grabbing"
+                                    : compat.ok
+                                    ? "border-blue-500/30 bg-blue-500/10 text-blue-400 cursor-grab active:cursor-grabbing"
+                                    : "border-blue-500/30 bg-blue-500/10 text-blue-400"
+                                }`}
+                              >
+                                <span className="inline-flex items-center gap-1.5 min-w-0">
+                                  <FunctionSquare className="w-3.5 h-3.5 text-blue-400 shrink-0" />
+                                  <span className="truncate">{cand.name}</span>
+                                </span>
+                                <span className="text-[9px] px-1.5 py-0.5 rounded bg-blue-500/15 text-blue-400 shrink-0">
+                                  {getVariableType(cand.name)}
+                                </span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+
+                return (
+                  <div className="space-y-3">
+                    {newSpecFunction && !isCustomMode && formulaTree ? (
+                      <div className="p-3 rounded-sm border border-border bg-muted/20 space-y-2.5">
+                        <div className="flex items-start justify-between gap-2">
+                          <Label className="text-xs font-semibold text-foreground flex items-center gap-1.5 min-w-0 pt-0.5">
+                            <Calculator className="w-3.5 h-3.5 text-primary shrink-0" />
+                            <span>Fórmula (haz clic en cada hueco para asignar una variable o anidar una función)</span>
+                          </Label>
+                          <div className="flex items-center gap-1 shrink-0">
+                            {formulaTree.kind === "call" && isVariadicFormulaFn(formulaTree.fn) && (
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => addVariadicArgAtPath([])}
+                                className="h-6 px-2 text-[11px] text-primary gap-1"
+                              >
+                                <Plus className="w-3 h-3" />
+                                <span>Añadir hueco</span>
+                              </Button>
+                            )}
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => setIsSavingFormulaTemplate((prev) => !prev)}
+                              className="h-6 w-6 text-muted-foreground hover:text-primary hover:bg-primary/10"
+                              title="Guardar fórmula (con huecos libres) para reutilizarla"
+                            >
+                              <Save className="w-3.5 h-3.5" />
+                            </Button>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => handleFunctionChange("")}
+                              className="h-6 w-6 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                              title="Quitar función y volver a editar la definición de la SPEC"
+                            >
+                              <X className="w-3.5 h-3.5" />
+                            </Button>
+                          </div>
+                        </div>
+
+                        {isSavingFormulaTemplate && (
+                          <div className="flex items-center gap-2 p-2 rounded-sm border border-primary/30 bg-background">
+                            <Input
+                              value={formulaTemplateName}
+                              onChange={(e) => setFormulaTemplateName(e.target.value)}
+                              placeholder="Nombre de la fórmula guardada (ej. NSS doble positivo)"
+                              className="h-7 text-xs flex-1"
+                            />
+                            <Button
+                              type="button"
+                              size="sm"
+                              disabled={!formulaTemplateName.trim()}
+                              onClick={() => {
+                                const name = formulaTemplateName.trim();
+                                if (!name || !formulaTree) return;
+                                const baseFn = newSpecFunction.startsWith("saved:")
+                                  ? savedFormulas.find((f) => f.id === newSpecFunction.slice(6))?.baseFunction || "custom_expr"
+                                  : newSpecFunction;
+                                setSavedFormulas((prev) => [
+                                  ...prev,
+                                  {
+                                    id: mkSpecId(),
+                                    name,
+                                    baseFunction: baseFn,
+                                    tree: stripFormulaVars(formulaTree),
+                                  },
+                                ]);
+                                setFormulaTemplateName("");
+                                setIsSavingFormulaTemplate(false);
+                              }}
+                              className="h-7 px-2.5 text-xs"
+                            >
+                              Guardar
+                            </Button>
+                          </div>
+                        )}
+
+                        <div className="p-2.5 rounded-sm border border-border bg-background">
+                          {renderVisualFormula()}
+                        </div>
+                      </div>
+                    ) : newSpecFunction === "custom_expr" ? (
+                      <div className="space-y-1.5">
+                        <div className="flex items-center justify-between gap-2">
+                          <Label className="text-xs font-medium text-foreground flex items-center gap-1.5">
+                            <Calculator className="w-3.5 h-3.5 text-primary" />
+                            <span>Expresión personalizada</span>
+                          </Label>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => handleFunctionChange("")}
+                            className="h-6 w-6 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                            title="Quitar función y volver a editar la definición de la SPEC"
+                          >
+                            <X className="w-3.5 h-3.5" />
+                          </Button>
+                        </div>
+                        <Input
+                          id="spec-expression"
+                          value={newSpecCustomExpr}
+                          onChange={(e) => {
+                            setIsFormulaManuallyEdited(true);
+                            setNewSpecCustomExpr(e.target.value);
+                          }}
+                          placeholder="ej. (a - b) / max(a + b, 1)"
+                          className="text-xs h-8 font-mono bg-background"
+                        />
+                      </div>
+                    ) : null}
+
+                    {(outputTree.length > 0 || specLeafOptions.length > 0) && (
+                      <div className="p-3 rounded-sm border border-primary/30 bg-background space-y-3">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <span className="text-[11px] font-mono font-semibold text-primary">
+                            {isCustomMode
+                              ? "Haz clic en una variable calculable para insertarla:"
+                              : activeSlotPath !== null
+                              ? `Hueco activo — selecciona variable (${expectedSlotType === "number" ? "numérica" : expectedSlotType === "collection" ? "array/texto" : expectedSlotType === "array" ? "array" : expectedSlotType === "string" ? "texto" : "cualquiera"}) o anida una función:`
+                              : "Variables disponibles (haz clic en un hueco de la fórmula para asignar o anidar):"}
+                          </span>
+
+                          <div className="flex items-center gap-3 text-[10px] text-muted-foreground">
+                            <span className="inline-flex items-center gap-1">
+                              <FunctionSquare className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
+                              <span>Calculable</span>
+                            </span>
+                            <span className="inline-flex items-center gap-1">
+                              <ChevronsLeftRightEllipsis className="w-3 h-3 text-primary" />
+                              <span className="text-primary font-medium">Campo derivado (sin definir)</span>
+                            </span>
+                          </div>
+                        </div>
+
+                        {!isCustomMode && activeSlotPath !== null && formulaTree && (
+                          <div className="flex flex-wrap items-center gap-1 p-2 rounded-sm border border-border/70 bg-muted/20">
+                            <span className="text-[10px] font-medium text-muted-foreground mr-1">
+                              Anidar función en hueco:
+                            </span>
+                            {(
+                              [
+                                { id: "suma", label: "+" },
+                                { id: "resta", label: "−" },
+                                { id: "multiplicacion", label: "×" },
+                                { id: "division", label: "/" },
+                                { id: "abs", label: "abs()" },
+                                { id: "min", label: "min()" },
+                                { id: "max", label: "max()" },
+                                { id: "promedio", label: "promedio()" },
+                                { id: "len", label: "len()" },
+                                { id: "is_empty", label: "is_empty()" },
+                                { id: "not_empty", label: "not_empty()" },
+                                { id: "contains", label: "contains()" },
+                                { id: "concat", label: "concat()" },
+                                { id: "join", label: "join()" },
+                                { id: "split", label: "split()" },
+                                { id: "lower", label: "lower()" },
+                                { id: "upper", label: "upper()" },
+                                { id: "intersect", label: "intersect()" },
+                                { id: "union", label: "union()" },
+                              ] as const
+                            ).map((op) => (
+                              <button
+                                key={op.id}
+                                type="button"
+                                onClick={() => nestFunctionAtPath(activeSlotPath, op.id)}
+                                className="px-1.5 py-0.5 text-[10px] font-mono rounded-sm border border-border bg-background text-foreground hover:border-primary hover:bg-primary/10 hover:text-primary transition-colors"
+                              >
+                                {op.label}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+
+                        <div className="space-y-1.5">
+                          <div className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">
+                            Variables del JSON de Salida y SPEC
+                          </div>
+                          {renderTreeNodes(outputTree)}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()
+            )}
+
+            <div className="space-y-1">
+              <Label htmlFor="spec-desc" className="text-xs font-medium text-muted-foreground">
+                {t("prompt.specDescLabel")}
+              </Label>
+              <Input
+                id="spec-desc"
+                value={newSpecDesc}
+                onChange={(e) => setNewSpecDesc(e.target.value)}
+                placeholder={t("prompt.specDescPlaceholder")}
+                className="text-xs h-8 bg-background"
+              />
+            </div>
+          </div>
+
+          <div className="flex items-center justify-end gap-2 pt-3 border-t border-border">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={resetNewSpecForm}
+              className="h-8 text-xs rounded-sm"
+            >
+              {t("common.cancel")}
+            </Button>
+            {(() => {
+              const cleanSpec = newSpecName.trim().toLowerCase();
+              const sharedParents = cleanSpec
+                ? Array.from(
+                    new Set(
+                      detectedOutputKeys
+                        .filter((k) => {
+                          const parts = k.split(".");
+                          return parts.length > 1 && parts[parts.length - 1].toLowerCase() === cleanSpec;
+                        })
+                        .map((k) => k.split(".")[0])
+                    )
+                  )
+                : [];
+              const missingTargetSelection =
+                sharedParents.length >= 2 && !newSpecApplyToNested && newSpecTargetBlocks.length === 0;
+              return (
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={handleAddComputedSpec}
+                  disabled={!newSpecName.trim() || !newSpecFunction || missingTargetSelection}
+                  title={
+                    missingTargetSelection
+                      ? "Selecciona al menos un bloque destino o marca 'Aplicar misma fórmula a todos los bloques'"
+                      : undefined
+                  }
+                  className="h-8 text-xs rounded-sm gap-1.5"
+                >
+                  <Check className="w-3.5 h-3.5" />
+                  <span>{editingSpecIndex !== null ? "Guardar Cambios" : t("prompt.addSpecBtn")}</span>
+                </Button>
               );
             })()}
           </div>

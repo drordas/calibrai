@@ -163,44 +163,160 @@ def _to_numeric(val: Any) -> float:
             return 0.0
     return 0.0
 
-def evaluate_safe_math_expression(expr: str, env: Dict[str, Any]) -> float:
-    """Safely evaluates a basic mathematical expression using Python AST and env variables."""
+def evaluate_safe_expression(expr: str, env: Dict[str, Any]) -> Any:
+    """Safely evaluates math, boolean, comparison, and len() expressions using Python AST."""
     try:
         node = ast.parse(expr.strip(), mode='eval')
-        def _eval_raw(node):
-            if isinstance(node, ast.Expression):
-                return _eval_raw(node.body)
-            elif isinstance(node, ast.Constant):
-                return node.value
-            elif isinstance(node, ast.Num):
-                return node.n
-            elif isinstance(node, ast.Name):
-                return env.get(node.id, 0.0)
-            elif isinstance(node, ast.Attribute):
-                parent = _eval_raw(node.value)
+
+        def _eval_raw(n):
+            if isinstance(n, ast.Expression):
+                return _eval_raw(n.body)
+            elif isinstance(n, ast.Constant):
+                return n.value
+            elif isinstance(n, ast.Num):
+                return n.n
+            elif isinstance(n, ast.Str):
+                return n.s
+            elif isinstance(n, (ast.List, ast.Tuple)):
+                return [_eval_raw(el) for el in n.elts]
+            elif isinstance(n, ast.Name):
+                if n.id == "True":
+                    return True
+                if n.id == "False":
+                    return False
+                if n.id == "None":
+                    return None
+                return env.get(n.id, 0.0)
+            elif isinstance(n, ast.Attribute):
+                parent = _eval_raw(n.value)
                 if isinstance(parent, dict):
-                    return parent.get(node.attr, 0.0)
-                # Check flattened env fallback
-                flat_key = f"{getattr(node.value, 'id', '')}.{node.attr}"
+                    return parent.get(n.attr, 0.0)
+                flat_key = f"{getattr(n.value, 'id', '')}.{n.attr}"
                 return env.get(flat_key, 0.0)
-            elif isinstance(node, ast.BinOp):
-                left = _to_numeric(_eval_raw(node.left))
-                right = _to_numeric(_eval_raw(node.right))
-                if isinstance(node.op, ast.Add): return left + right
-                elif isinstance(node.op, ast.Sub): return left - right
-                elif isinstance(node.op, ast.Mult): return left * right
-                elif isinstance(node.op, ast.Div): return left / right if right != 0 else 0.0
-                elif isinstance(node.op, ast.Mod): return left % right if right != 0 else 0.0
-                elif isinstance(node.op, ast.Pow): return left ** min(right, 10.0)
-                else: return 0.0
-            elif isinstance(node, ast.UnaryOp):
-                operand = _to_numeric(_eval_raw(node.operand))
-                if isinstance(node.op, ast.UAdd): return +operand
-                elif isinstance(node.op, ast.USub): return -operand
-                else: return operand
-            elif isinstance(node, ast.Call):
-                func_name = node.func.id.lower() if isinstance(node.func, ast.Name) else ""
-                args = [_to_numeric(_eval_raw(a)) for a in node.args]
+            elif isinstance(n, ast.BinOp):
+                left = _to_numeric(_eval_raw(n.left))
+                right = _to_numeric(_eval_raw(n.right))
+                if isinstance(n.op, ast.Add): return left + right
+                elif isinstance(n.op, ast.Sub): return left - right
+                elif isinstance(n.op, ast.Mult): return left * right
+                elif isinstance(n.op, ast.Div): return left / right if right != 0 else 0.0
+                elif isinstance(n.op, ast.Mod): return left % right if right != 0 else 0.0
+                elif isinstance(n.op, ast.Pow): return left ** min(right, 10.0)
+                return 0.0
+            elif isinstance(n, ast.UnaryOp):
+                if isinstance(n.op, ast.Not):
+                    return not bool(_eval_raw(n.operand))
+                operand = _to_numeric(_eval_raw(n.operand))
+                if isinstance(n.op, ast.UAdd): return +operand
+                elif isinstance(n.op, ast.USub): return -operand
+                return operand
+            elif isinstance(n, ast.BoolOp):
+                if isinstance(n.op, ast.And):
+                    return all(bool(_eval_raw(v)) for v in n.values)
+                elif isinstance(n.op, ast.Or):
+                    return any(bool(_eval_raw(v)) for v in n.values)
+                return False
+            elif isinstance(n, ast.Compare):
+                left = _eval_raw(n.left)
+                for op, comp in zip(n.ops, n.comparators):
+                    right = _eval_raw(comp)
+                    ok = False
+                    if isinstance(op, ast.Gt): ok = _to_numeric(left) > _to_numeric(right)
+                    elif isinstance(op, ast.GtE): ok = _to_numeric(left) >= _to_numeric(right)
+                    elif isinstance(op, ast.Lt): ok = _to_numeric(left) < _to_numeric(right)
+                    elif isinstance(op, ast.LtE): ok = _to_numeric(left) <= _to_numeric(right)
+                    elif isinstance(op, ast.Eq): ok = (str(left).lower() == str(right).lower()) if isinstance(left, str) or isinstance(right, str) else (left == right)
+                    elif isinstance(op, ast.NotEq): ok = (str(left).lower() != str(right).lower()) if isinstance(left, str) or isinstance(right, str) else (left != right)
+                    elif isinstance(op, ast.In): ok = left in right if isinstance(right, (list, tuple, set, dict, str)) else False
+                    elif isinstance(op, ast.NotIn): ok = left not in right if isinstance(right, (list, tuple, set, dict, str)) else True
+                    if not ok:
+                        return False
+                    left = right
+                return True
+            elif isinstance(n, ast.IfExp):
+                return _eval_raw(n.body) if bool(_eval_raw(n.test)) else _eval_raw(n.orelse)
+            elif isinstance(n, ast.Call):
+                func_name = n.func.id.lower() if isinstance(n.func, ast.Name) else ""
+                if func_name in ("len", "count"):
+                    if not n.args:
+                        return 0
+                    target = _eval_raw(n.args[0])
+                    if isinstance(target, (list, tuple, set, dict)):
+                        return len([x for x in target if str(x).strip().lower() not in ("", "blank", "none")]) if isinstance(target, list) else len(target)
+                    if isinstance(target, str):
+                        return 0 if target.strip().lower() in ("", "blank", "none") else len(target.strip())
+                    return 0
+                if func_name == "is_empty":
+                    if not n.args:
+                        return True
+                    target = _eval_raw(n.args[0])
+                    if isinstance(target, (list, tuple, set, dict)):
+                        return len([x for x in target if str(x).strip().lower() not in ("", "blank", "none")]) == 0 if isinstance(target, list) else len(target) == 0
+                    return str(target or "").strip().lower() in ("", "blank", "none")
+                if func_name == "not_empty":
+                    if not n.args:
+                        return False
+                    target = _eval_raw(n.args[0])
+                    if isinstance(target, (list, tuple, set, dict)):
+                        return len([x for x in target if str(x).strip().lower() not in ("", "blank", "none")]) > 0 if isinstance(target, list) else len(target) > 0
+                    return str(target or "").strip().lower() not in ("", "blank", "none")
+                if func_name == "contains":
+                    if len(n.args) < 2:
+                        return False
+                    hay = _eval_raw(n.args[0])
+                    needle = _eval_raw(n.args[1])
+                    needle_s = str(needle or "").strip().lower()
+                    if isinstance(hay, (list, tuple, set)):
+                        return any(str(x).strip().lower() == needle_s for x in hay)
+                    return needle_s in str(hay or "").lower()
+                if func_name == "lower":
+                    return str(_eval_raw(n.args[0]) if n.args else "").lower()
+                if func_name == "upper":
+                    return str(_eval_raw(n.args[0]) if n.args else "").upper()
+                if func_name in ("strip", "trim"):
+                    return str(_eval_raw(n.args[0]) if n.args else "").strip()
+                if func_name == "concat":
+                    raw_args = [_eval_raw(a) for a in n.args]
+                    if any(isinstance(a, list) for a in raw_args):
+                        out_list = []
+                        for a in raw_args:
+                            if isinstance(a, list):
+                                out_list.extend(a)
+                            elif a is not None and str(a).strip() != "":
+                                out_list.append(a)
+                        return out_list
+                    return "".join(str(a or "") for a in raw_args)
+                if func_name == "join":
+                    arr = _eval_raw(n.args[0]) if n.args else []
+                    sep = str(_eval_raw(n.args[1])) if len(n.args) > 1 else ", "
+                    if isinstance(arr, (list, tuple)):
+                        return sep.join(str(x) for x in arr if str(x).strip().lower() not in ("", "blank", "none"))
+                    return str(arr or "")
+                if func_name == "split":
+                    text = str(_eval_raw(n.args[0]) if n.args else "")
+                    sep = str(_eval_raw(n.args[1])) if len(n.args) > 1 else ","
+                    if text.strip().lower() in ("", "blank", "none"):
+                        return []
+                    if sep == "":
+                        return list(text)
+                    return [part.strip() for part in text.split(sep) if part.strip()]
+                if func_name == "intersect":
+                    a = _eval_raw(n.args[0]) if len(n.args) > 0 else []
+                    b = _eval_raw(n.args[1]) if len(n.args) > 1 else []
+                    sa = {str(x).strip() for x in (a if isinstance(a, list) else []) if str(x).strip().lower() not in ("", "blank", "none")}
+                    sb = {str(x).strip() for x in (b if isinstance(b, list) else []) if str(x).strip().lower() not in ("", "blank", "none")}
+                    return sorted(sa & sb)
+                if func_name == "union":
+                    a = _eval_raw(n.args[0]) if len(n.args) > 0 else []
+                    b = _eval_raw(n.args[1]) if len(n.args) > 1 else []
+                    seen = []
+                    for src in (a if isinstance(a, list) else []), (b if isinstance(b, list) else []):
+                        for x in src:
+                            sx = str(x).strip()
+                            if sx.lower() not in ("", "blank", "none") and sx not in seen:
+                                seen.append(sx)
+                    return seen
+                args = [_to_numeric(_eval_raw(a)) for a in n.args]
                 if func_name in ["abs", "absoluto"]: return abs(args[0]) if args else 0.0
                 elif func_name in ["suma", "sum"]: return sum(args)
                 elif func_name in ["promedio", "mean", "avg"]: return sum(args) / len(args) if args else 0.0
@@ -212,11 +328,120 @@ def evaluate_safe_math_expression(expr: str, env: Dict[str, Any]) -> float:
                     tot = args[0] + args[1]
                     return (args[0] - args[1]) / tot if tot > 0 else 0.0
                 return 0.0
-            else:
-                return 0.0
-        return _to_numeric(_eval_raw(node))
+            return 0.0
+
+        return _eval_raw(node)
     except Exception:
-        return 0.0
+        return None
+
+
+def evaluate_safe_math_expression(expr: str, env: Dict[str, Any]) -> float:
+    """Safely evaluates a basic mathematical expression using Python AST and env variables."""
+    return _to_numeric(evaluate_safe_expression(expr, env))
+
+
+def evaluate_conditional_rules(
+    rules: Optional[List[Dict[str, str]]],
+    default_value: Optional[str],
+    env: Dict[str, Any],
+) -> Any:
+    """Evaluates an ordered list of IF condition -> value rules against env."""
+    if rules:
+        for rule in rules:
+            cond = str((rule or {}).get("condition") or "").strip()
+            if not cond:
+                continue
+            if bool(evaluate_safe_expression(cond, env)):
+                return (rule or {}).get("value", "")
+    return default_value if default_value is not None else ""
+
+
+def _build_eval_env(row_context: Dict[str, Any], parsed_json: Dict[str, Any]) -> Dict[str, Any]:
+    env: Dict[str, Any] = {}
+    if row_context:
+        env.update(_flatten_dict_for_env(row_context))
+        for k, v in row_context.items():
+            if isinstance(v, (list, dict)):
+                env[k] = v
+            else:
+                try:
+                    env[k] = float(v)
+                except (ValueError, TypeError):
+                    env[k] = v
+    if parsed_json:
+        env.update(_flatten_dict_for_env(parsed_json))
+        for k, v in parsed_json.items():
+            if isinstance(v, (list, dict)):
+                env[k] = v
+            else:
+                try:
+                    env[k] = float(v)
+                except (ValueError, TypeError):
+                    env[k] = v
+    return env
+
+
+def apply_computed_specs_to_parsed(
+    row_context: Dict[str, Any],
+    parsed_json: Dict[str, Any],
+    computed_specs: Optional[List[ComputedSpec]],
+) -> Dict[str, Any]:
+    """
+    Returns an evaluation copy of `parsed_json` with any `inject_into_output=True`
+    computed specs applied (without mutating the stored raw model output).
+    """
+    if not computed_specs or not isinstance(parsed_json, dict):
+        return parsed_json
+
+    has_injected = any(getattr(s, "inject_into_output", False) for s in computed_specs)
+    if not has_injected:
+        return parsed_json
+
+    import copy
+    eval_parsed = copy.deepcopy(parsed_json)
+    env = _build_eval_env(row_context or {}, eval_parsed)
+
+    for spec in computed_specs:
+        if not getattr(spec, "inject_into_output", False):
+            continue
+        fn = (spec.function or "").lower()
+        rules = getattr(spec, "rules", None) or []
+        default_val = getattr(spec, "default_value", None)
+
+        def _eval_spec_on_env(target_env: Dict[str, Any]) -> Any:
+            if fn == "conditional_rule":
+                return evaluate_conditional_rules(rules, default_val, target_env)
+            if spec.expression and spec.expression.strip():
+                return evaluate_safe_math_expression(spec.expression, target_env)
+            return None
+
+        if getattr(spec, "apply_to_nested", False):
+            target_container = (
+                eval_parsed.get("dimensions")
+                if isinstance(eval_parsed.get("dimensions"), dict)
+                else eval_parsed
+            )
+            allowed_blocks = {
+                str(b).strip().lower()
+                for b in (getattr(spec, "target_blocks", None) or [])
+                if str(b).strip()
+            }
+            if isinstance(target_container, dict):
+                for dk, dv in target_container.items():
+                    if allowed_blocks and str(dk).strip().lower() not in allowed_blocks:
+                        continue
+                    if isinstance(dv, dict) and spec.name not in dv:
+                        local_env = {**env, **dv}
+                        derived = _eval_spec_on_env(local_env)
+                        if derived is not None:
+                            dv[spec.name] = derived
+        else:
+            if spec.name not in eval_parsed:
+                derived = _eval_spec_on_env(env)
+                if derived is not None:
+                    eval_parsed[spec.name] = derived
+
+    return eval_parsed
 
 def _flatten_dict_for_env(d: Dict[str, Any], prefix: str = "") -> Dict[str, Any]:
     flat = {}
@@ -262,10 +487,29 @@ def evaluate_computed_specs(
         for a in args:
             resolved_vals.append(env.get(a, 0.0))
 
-        val = 0.0
+        val: Any = 0.0
 
-        if spec.expression and spec.expression.strip():
-            val = evaluate_safe_math_expression(spec.expression, env)
+        if fn == "conditional_rule":
+            rules = getattr(spec, "rules", None) or []
+            default_val = getattr(spec, "default_value", None)
+            if getattr(spec, "apply_to_nested", False) and isinstance(parsed_json, dict):
+                container = parsed_json.get("dimensions") if isinstance(parsed_json.get("dimensions"), dict) else parsed_json
+                nested_out = {}
+                for dk, dv in (container or {}).items():
+                    if isinstance(dv, dict):
+                        nested_out[dk] = evaluate_conditional_rules(rules, default_val, {**env, **dv})
+                val = nested_out
+            else:
+                val = evaluate_conditional_rules(rules, default_val, env)
+
+        elif spec.expression and spec.expression.strip():
+            raw_val = evaluate_safe_expression(spec.expression, env)
+            if raw_val is None:
+                val = 0.0
+            elif isinstance(raw_val, (str, list, bool)):
+                val = raw_val
+            else:
+                val = _to_numeric(raw_val)
 
         # 1. Classical arithmetic
         elif fn in ["suma", "sum", "add"]:
@@ -395,6 +639,41 @@ def attach_computed_specs_to_summary(
 
     for spec in eval_spec.computed_specs:
         spec_vals = [r.get("computed_specs", {}).get(spec.name, 0.0) for r in results if "computed_specs" in r]
+        if (spec.function or "").lower() == "conditional_rule":
+            flat_cats: List[str] = []
+            for sv in spec_vals:
+                if isinstance(sv, dict):
+                    flat_cats.extend(str(v) for v in sv.values() if v is not None)
+                elif sv is not None:
+                    flat_cats.append(str(sv))
+            cat_counts = Counter(flat_cats)
+            top_cat = cat_counts.most_common(1)[0][0] if cat_counts else "blank"
+            computed_summary[spec.name] = {
+                "name": spec.name,
+                "function": spec.function,
+                "expression": spec.expression,
+                "arguments": spec.arguments,
+                "mean": 0.0,
+                "min": 0.0,
+                "max": 0.0,
+                "std": 0.0,
+                "count": len(flat_cats),
+                "categories": dict(cat_counts),
+                "mode": top_cat,
+                "description": spec.description or f"Regla condicional: {spec.name}",
+            }
+            if not getattr(spec, "inject_into_output", False):
+                spec_cards.append(MetricCard(
+                    id=f"spec_{spec.name}",
+                    label=spec.name.replace("_", " ").title(),
+                    value=float(cat_counts.get(top_cat, 0)),
+                    formatted=top_cat,
+                    unit="",
+                    higher_is_better=True,
+                    description=spec.description or f"Campo derivado ({spec.name}): moda = {top_cat}",
+                ))
+            continue
+
         num_vals = [float(v) for v in spec_vals if isinstance(v, (int, float))]
         mean_v = float(np.mean(num_vals)) if num_vals else 0.0
         min_v = float(np.min(num_vals)) if num_vals else 0.0
@@ -781,7 +1060,11 @@ class MetricsEngine:
                 return cur
 
             for r in results:
-                parsed = r.get("parsed_json") or {}
+                parsed = apply_computed_specs_to_parsed(
+                    r.get("row_context") or {},
+                    r.get("parsed_json") or {},
+                    eval_spec.computed_specs if eval_spec else None,
+                )
                 row_ctx = r.get("row_context") or {}
 
                 # Extract predicted number
@@ -984,7 +1267,11 @@ class MetricsEngine:
                 return cur
 
             for r in results:
-                parsed = r.get("parsed_json") or {}
+                parsed = apply_computed_specs_to_parsed(
+                    r.get("row_context") or {},
+                    r.get("parsed_json") or {},
+                    eval_spec.computed_specs if eval_spec else None,
+                )
                 row_ctx = r.get("row_context") or {}
 
                 # Source text for verbatim checks (parameterized slot first, then universal resolver)
@@ -1438,6 +1725,10 @@ class MetricsEngine:
         for i in range(min_len):
             pa = results_a[i].get("parsed_json") or {}
             pb = results_b[i].get("parsed_json") or {}
+            if not is_human_a and eval_spec:
+                pa = apply_computed_specs_to_parsed(results_a[i].get("row_context") or {}, pa, eval_spec.computed_specs)
+            if not is_human_b and eval_spec:
+                pb = apply_computed_specs_to_parsed(results_b[i].get("row_context") or {}, pb, eval_spec.computed_specs)
 
             aspects_a = {item["dimension"].lower(): item for item in extract_aspect_items(pa)}
             aspects_b = {item["dimension"].lower(): item for item in extract_aspect_items(pb)}
