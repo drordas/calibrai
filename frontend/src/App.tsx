@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import {
   DatasetSummary,
   ModelCatalogItem,
@@ -173,6 +173,127 @@ export function App() {
     executionMode?: "sequential" | "parallel";
     evalSpec?: Record<string, any>;
   } | null>(null);
+
+  const isApplyingPopstateRef = useRef(false);
+  const hasInitHistoryRef = useRef(false);
+
+  const buildNavHash = (
+    mode: "dashboard" | "wizard" | "results",
+    step: 1 | 2 | 3 | 4,
+    tab: "leaderboard" | "matrix" | "methodology",
+    expId: string | null
+  ) => {
+    if (mode === "wizard") return `#wizard/step-${step}`;
+    if (mode === "results") return `#results/${tab}${expId ? `/${expId}` : ""}`;
+    return "#dashboard";
+  };
+
+  const parseNavHash = (
+    hash: string
+  ): {
+    mode: "dashboard" | "wizard" | "results";
+    wizardStep: 1 | 2 | 3 | 4;
+    resultsTab: "leaderboard" | "matrix" | "methodology";
+    experimentId: string | null;
+  } | null => {
+    const clean = (hash || "").replace(/^#/, "");
+    if (!clean || clean === "dashboard") {
+      return { mode: "dashboard", wizardStep: 1, resultsTab: "leaderboard", experimentId: null };
+    }
+    const wizMatch = clean.match(/^wizard\/step-([1-4])$/);
+    if (wizMatch) {
+      return {
+        mode: "wizard",
+        wizardStep: Number(wizMatch[1]) as 1 | 2 | 3 | 4,
+        resultsTab: "leaderboard",
+        experimentId: null,
+      };
+    }
+    const resMatch = clean.match(/^results\/(leaderboard|matrix|methodology)(?:\/([^/]+))?$/);
+    if (resMatch) {
+      return {
+        mode: "results",
+        wizardStep: 1,
+        resultsTab: resMatch[1] as "leaderboard" | "matrix" | "methodology",
+        experimentId: resMatch[2] || null,
+      };
+    }
+    return null;
+  };
+
+  useEffect(() => {
+    const onPopState = (e: PopStateEvent) => {
+      const state = e.state && e.state.mode ? e.state : parseNavHash(window.location.hash);
+      if (!state) return;
+      isApplyingPopstateRef.current = true;
+      if (state.mode === "wizard") {
+        setCurrentMode("wizard");
+        setWizardStep((state.wizardStep as 1 | 2 | 3 | 4) || 1);
+      } else if (state.mode === "results") {
+        const targetTab = (state.resultsTab as "leaderboard" | "matrix" | "methodology") || "leaderboard";
+        if (state.experimentId && state.experimentId !== currentExperimentId) {
+          fetchExperimentDetail(state.experimentId)
+            .then((detail) => {
+              handleInspectExperimentResults(detail);
+              setResultsTab(targetTab);
+            })
+            .catch(() => {
+              setCurrentMode("dashboard");
+            });
+        } else {
+          setCurrentMode("results");
+          setResultsTab(targetTab);
+        }
+      } else {
+        setCurrentMode("dashboard");
+      }
+    };
+
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, [currentExperimentId]);
+
+  useEffect(() => {
+    if (!currentUser) {
+      hasInitHistoryRef.current = false;
+      return;
+    }
+    const nextHash = buildNavHash(currentMode, wizardStep, resultsTab, currentExperimentId);
+    const stateObj = {
+      mode: currentMode,
+      wizardStep,
+      resultsTab,
+      experimentId: currentExperimentId,
+    };
+
+    if (!hasInitHistoryRef.current) {
+      hasInitHistoryRef.current = true;
+      const parsed = parseNavHash(window.location.hash);
+      if (parsed && parsed.mode === "results" && parsed.experimentId) {
+        isApplyingPopstateRef.current = true;
+        fetchExperimentDetail(parsed.experimentId)
+          .then((detail) => {
+            handleInspectExperimentResults(detail);
+            setResultsTab(parsed.resultsTab);
+          })
+          .catch(() => {
+            window.history.replaceState(stateObj, "", "#dashboard");
+          });
+        return;
+      }
+      window.history.replaceState(stateObj, "", nextHash);
+      return;
+    }
+
+    if (isApplyingPopstateRef.current) {
+      isApplyingPopstateRef.current = false;
+      return;
+    }
+
+    if (window.location.hash !== nextHash) {
+      window.history.pushState(stateObj, "", nextHash);
+    }
+  }, [currentUser, currentMode, wizardStep, resultsTab, currentExperimentId]);
   const [showTemplateModal, setShowTemplateModal] = useState<boolean>(false);
   const [templateCandidates, setTemplateCandidates] = useState<ExperimentSummary[]>([]);
   const [loadingTemplates, setLoadingTemplates] = useState<boolean>(false);
