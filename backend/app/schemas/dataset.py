@@ -22,6 +22,7 @@ class DatasetSummary(BaseModel):
     detected_id_column: Optional[str] = None
     is_ground_truth: bool = False
     benchmark_id: Optional[str] = None
+    file_hash: Optional[str] = None
     is_shared: bool = False
     is_shared_by_owner: bool = False
     share_mode: Optional[str] = None

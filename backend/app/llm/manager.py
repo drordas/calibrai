@@ -836,6 +836,73 @@ class LLMManager:
             print(f"[LLMManager] Note: Could not preload model {clean_model} in Ollama: {e}")
         return False
 
+    @staticmethod
+    def _extract_http_error(resp: httpx.Response) -> str:
+        """Extracts a concise error message from a non-200 HTTP provider response."""
+        try:
+            body = resp.json()
+            if isinstance(body, dict):
+                err = body.get("error")
+                if isinstance(err, dict) and err.get("message"):
+                    return f"HTTP {resp.status_code}: {err['message']}"
+                if isinstance(err, str) and err:
+                    return f"HTTP {resp.status_code}: {err}"
+                if body.get("message"):
+                    return f"HTTP {resp.status_code}: {body['message']}"
+                if body.get("detail"):
+                    return f"HTTP {resp.status_code}: {body['detail']}"
+        except Exception:
+            pass
+        snippet = (resp.text or "").strip().replace("\n", " ")[:240]
+        return f"HTTP {resp.status_code}: {snippet or 'Empty error response'}"
+
+    @staticmethod
+    def _api_error_response(model_id: str, provider: str, t0: float, error_message: str) -> LLMResponse:
+        """Builds a failed LLMResponse so real API errors never fall back silently to mock output."""
+        return LLMResponse(
+            model_id=model_id,
+            provider=provider,
+            raw_response="",
+            parsed_json=None,
+            is_valid_json=False,
+            latency_ms=(time.perf_counter() - t0) * 1000,
+            prompt_tokens=0,
+            completion_tokens=0,
+            estimated_cost_usd=0.0,
+            success=False,
+            error_message=error_message,
+        )
+
+    @staticmethod
+    async def _post_with_retry(
+        client: httpx.AsyncClient,
+        url: str,
+        max_retries: int = 2,
+        **kwargs: Any,
+    ) -> httpx.Response:
+        """Executes an HTTP POST with bounded exponential backoff on transient failures (429/5xx/timeouts)."""
+        transient_statuses = {429, 500, 502, 503, 504}
+        last_exc: Optional[Exception] = None
+        for attempt in range(max_retries + 1):
+            try:
+                resp = await client.post(url, **kwargs)
+                if resp.status_code not in transient_statuses or attempt >= max_retries:
+                    return resp
+                retry_after_raw = resp.headers.get("retry-after")
+                try:
+                    delay = min(5.0, float(retry_after_raw)) if retry_after_raw else 1.5 * (2 ** attempt)
+                except (TypeError, ValueError):
+                    delay = 1.5 * (2 ** attempt)
+                await asyncio.sleep(delay)
+            except (httpx.TimeoutException, httpx.TransportError) as exc:
+                last_exc = exc
+                if attempt >= max_retries:
+                    raise
+                await asyncio.sleep(1.5 * (2 ** attempt))
+        if last_exc:
+            raise last_exc
+        raise RuntimeError("Unexpected retry loop termination")
+
     async def invoke_model(
         self,
         model_id: str,
@@ -873,7 +940,8 @@ class LLMManager:
                             "stream": False,
                         }
 
-                        resp = await client.post(
+                        resp = await self._post_with_retry(
+                            client,
                             f"{self.ollama_base_url}/api/chat",
                             json=req_payload
                         )
@@ -897,8 +965,9 @@ class LLMManager:
                                 estimated_cost_usd=0.0,
                                 success=True
                             )
-                except Exception:
-                    pass
+                        return self._api_error_response(model_id, "ollama", t0, self._extract_http_error(resp))
+                except Exception as exc:
+                    return self._api_error_response(model_id, "ollama", t0, f"{type(exc).__name__}: {exc}")
 
         # 2. Real OpenAI invocation
         openai_key = keys.get("openai") or os.getenv("OPENAI_API_KEY")
@@ -918,7 +987,8 @@ class LLMManager:
                     if "json" in prompt.lower() and "do not generate json" not in prompt.lower():
                         req_json["response_format"] = {"type": "json_object"}
 
-                    resp = await client.post(
+                    resp = await self._post_with_retry(
+                        client,
                         "https://api.openai.com/v1/chat/completions",
                         headers={"Authorization": f"Bearer {openai_key}"},
                         json=req_json
@@ -944,8 +1014,9 @@ class LLMManager:
                             estimated_cost_usd=cost,
                             success=True
                         )
-            except Exception:
-                pass
+                    return self._api_error_response(model_id, "openai", t0, self._extract_http_error(resp))
+            except Exception as exc:
+                return self._api_error_response(model_id, "openai", t0, f"{type(exc).__name__}: {exc}")
 
         # 3. Real Google Gemini invocation
         gemini_key = keys.get("gemini") or os.getenv("GEMINI_API_KEY")
@@ -959,7 +1030,8 @@ class LLMManager:
                     if system_prompt:
                         req_body["systemInstruction"] = {"parts": [{"text": system_prompt}]}
 
-                    resp = await client.post(
+                    resp = await self._post_with_retry(
+                        client,
                         f"https://generativelanguage.googleapis.com/v1beta/models/{clean_model}:generateContent?key={gemini_key}",
                         json=req_body
                     )
@@ -988,8 +1060,9 @@ class LLMManager:
                             estimated_cost_usd=cost,
                             success=True
                         )
-            except Exception:
-                pass
+                    return self._api_error_response(model_id, "gemini", t0, self._extract_http_error(resp))
+            except Exception as exc:
+                return self._api_error_response(model_id, "gemini", t0, f"{type(exc).__name__}: {exc}")
 
         # 4. Real Anthropic Claude invocation
         anthropic_key = keys.get("anthropic") or os.getenv("ANTHROPIC_API_KEY")
@@ -1005,7 +1078,8 @@ class LLMManager:
                     if system_prompt:
                         req_body["system"] = system_prompt
 
-                    resp = await client.post(
+                    resp = await self._post_with_retry(
+                        client,
                         "https://api.anthropic.com/v1/messages",
                         headers={
                             "x-api-key": anthropic_key,
@@ -1036,8 +1110,9 @@ class LLMManager:
                             estimated_cost_usd=cost,
                             success=True
                         )
-            except Exception:
-                pass
+                    return self._api_error_response(model_id, "anthropic", t0, self._extract_http_error(resp))
+            except Exception as exc:
+                return self._api_error_response(model_id, "anthropic", t0, f"{type(exc).__name__}: {exc}")
 
         # 5. Real Groq invocation
         groq_key = keys.get("groq") or os.getenv("GROQ_API_KEY")
@@ -1049,7 +1124,8 @@ class LLMManager:
                         messages.append({"role": "system", "content": system_prompt})
                     messages.append({"role": "user", "content": prompt})
 
-                    resp = await client.post(
+                    resp = await self._post_with_retry(
+                        client,
                         "https://api.groq.com/openai/v1/chat/completions",
                         headers={"Authorization": f"Bearer {groq_key}"},
                         json={
@@ -1078,8 +1154,9 @@ class LLMManager:
                             estimated_cost_usd=(pt * 0.05 + ct * 0.08) / 1_000_000,
                             success=True
                         )
-            except Exception:
-                pass
+                    return self._api_error_response(model_id, "groq", t0, self._extract_http_error(resp))
+            except Exception as exc:
+                return self._api_error_response(model_id, "groq", t0, f"{type(exc).__name__}: {exc}")
 
         # 6. Realistic Simulation Fallback (for unkeyed test models)
         await asyncio.sleep(0.12 + (0.08 if "7b" in model_id or "sonnet" in model_id else 0.04))

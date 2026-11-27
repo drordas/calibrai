@@ -134,19 +134,31 @@ export const Leaderboard: React.FC<LeaderboardProps> = ({
     return `${arrow} +${diff.toFixed(1)}%`;
   };
 
-  // Determine top model
+  // Determine top model: prioritize 100% reliability (success_rate & json_validity_rate) before task metrics
+  const reliabilityScore = (m: ModelBenchmarkSummary) =>
+    Math.min(m.success_rate ?? 100, m.json_validity_rate ?? 100);
+
   let winner = modelList[0];
   if (activeTaskType === "numeric_math") {
-    // Top model is the one with highest exact_match or lowest mae
     winner = modelList.toSorted((a, b) => {
+      const relDiff = reliabilityScore(b) - reliabilityScore(a);
+      if (Math.abs(relDiff) > 0.01) return relDiff;
       const maeA = a.metric_cards.find((c) => c.id === "mae")?.value ?? 999;
       const maeB = b.metric_cards.find((c) => c.id === "mae")?.value ?? 999;
-      return maeA - maeB;
+      if (maeA !== maeB) return maeA - maeB;
+      return (a.mean_latency_ms ?? 999999) - (b.mean_latency_ms ?? 999999);
     })[0];
   } else {
-    winner = modelList.toSorted(
-      (a, b) => b.internal_consistency_score - a.internal_consistency_score
-    )[0];
+    winner = modelList.toSorted((a, b) => {
+      const relDiff = reliabilityScore(b) - reliabilityScore(a);
+      if (Math.abs(relDiff) > 0.01) return relDiff;
+      const consDiff = b.internal_consistency_score - a.internal_consistency_score;
+      if (Math.abs(consDiff) > 0.01) return consDiff;
+      const rcA = a.metric_cards.find((c) => c.id === "rating_congruence")?.value ?? -1;
+      const rcB = b.metric_cards.find((c) => c.id === "rating_congruence")?.value ?? -1;
+      if (Math.abs(rcB - rcA) > 0.001) return rcB - rcA;
+      return (a.mean_latency_ms ?? 999999) - (b.mean_latency_ms ?? 999999);
+    })[0];
   }
 
   const getWinnerDescription = () => {

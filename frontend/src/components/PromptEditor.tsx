@@ -8,6 +8,7 @@ import {
   fetchCompatibleGroundTruths,
   fetchSavedPrompts,
   saveUserPrompt,
+  updateSavedPrompt,
   deleteSavedPrompt,
   SavedPromptItem,
 } from "../services/api";
@@ -39,11 +40,7 @@ import {
   PlusCircle,
   Trash2,
   Plus,
-  ArrowRight,
-  Zap,
   BrainCog,
-  Key,
-  FileText,
   Pencil,
   RotateCcw,
   X,
@@ -112,6 +109,8 @@ interface PromptEditorProps {
   groundTruthSchema?: any;
   idColumn?: string | null;
   specColumns?: string[];
+  initialEvalSpec?: Record<string, any>;
+  onEvalSpecChange?: (evalSpecPatch: Record<string, any>) => void;
   onValidationStateChange?: (isValid: boolean, isValidating: boolean) => void;
 }
 
@@ -303,6 +302,25 @@ function buildYamlSpec(
       if (s.description && s.description.trim()) {
         lines.push(`    description: "${s.description.replace(/"/g, '\\"')}"`);
       }
+      if (s.apply_to_nested) {
+        lines.push(`    apply_to_nested: true`);
+      }
+      if (s.target_blocks && s.target_blocks.length > 0) {
+        lines.push(`    target_blocks: [${s.target_blocks.map((b) => JSON.stringify(b)).join(", ")}]`);
+      }
+      if (s.inject_into_output) {
+        lines.push(`    inject_into_output: true`);
+      }
+      if (s.default_value !== undefined && s.default_value !== "") {
+        lines.push(`    default_value: ${JSON.stringify(s.default_value)}`);
+      }
+      if (s.rules && s.rules.length > 0) {
+        lines.push(`    rules:`);
+        for (const r of s.rules) {
+          lines.push(`      - condition: ${JSON.stringify(r.condition)}`);
+          lines.push(`        value: ${JSON.stringify(r.value)}`);
+        }
+      }
     }
   }
 
@@ -371,15 +389,21 @@ function decomposeFullTemplate(rawTemplate: string): {
   promptText: string;
   outputSchemaStr: string;
   metricBindings: MetricBindingsMap;
+  groundTruthCol?: string;
 } {
   let text = rawTemplate || "";
   let schemaStr = '{\n  "output_1": 0.0,\n  "output_2": 0.0\n}';
   const metricBindings: MetricBindingsMap = {};
+  let groundTruthCol: string | undefined;
 
   // 1. Extract evaluation-spec
   const evalMatch = text.match(/```(?:evaluation-spec|eval-spec)\s*([\s\S]*?)\s*```/i);
   if (evalMatch && evalMatch.index !== undefined) {
     const specBlock = evalMatch[1];
+    const gtMatch = specBlock.match(/^ground_truth_col:\s*([^\n#]+)/m);
+    if (gtMatch && gtMatch[1].trim() && gtMatch[1].trim() !== "none") {
+      groundTruthCol = gtMatch[1].trim();
+    }
     // Parse metric_bindings block if present (supports flat lists and nested parameter slots)
     const mbMatch = specBlock.match(/metric_bindings:\s*\n((?:[ \t]+[^\n]+\n?)*)/);
     if (mbMatch) {
@@ -442,6 +466,7 @@ function decomposeFullTemplate(rawTemplate: string): {
     promptText: text,
     outputSchemaStr: schemaStr,
     metricBindings,
+    groundTruthCol,
   };
 }
 
@@ -509,13 +534,18 @@ export const PromptEditor: React.FC<PromptEditorProps> = ({
   groundTruthDatasetIds,
   groundTruthSchema,
   idColumn,
+  initialEvalSpec,
+  onEvalSpecChange,
 }) => {
   const { t } = useTranslation();
   const [validation, setValidation] = useState<PromptValidationResponse | null>(null);
   const [isValidating, setIsValidating] = useState<boolean>(false);
   const [activeTab, setActiveTab] = useState<string>("editor");
   const [copied, setCopied] = useState<boolean>(false);
-  const [selectedGroundTruth, setSelectedGroundTruth] = useState<string>("none");
+  const initialDecomposed = useMemo(() => decomposeFullTemplate(template), []);
+  const [selectedGroundTruth, setSelectedGroundTruth] = useState<string>(
+    initialDecomposed.groundTruthCol || initialEvalSpec?.ground_truth_col || "none"
+  );
   const [loadedGtSchema, setLoadedGtSchema] = useState<any>(groundTruthSchema || null);
   const [isGtAutoAssigned, setIsGtAutoAssigned] = useState<boolean>(false);
   const [isAutodetecting, setIsAutodetecting] = useState<boolean>(false);
@@ -536,7 +566,6 @@ export const PromptEditor: React.FC<PromptEditorProps> = ({
   // -------------------------------------------------------
   // 3-PART STATE
   // -------------------------------------------------------
-  const initialDecomposed = useMemo(() => decomposeFullTemplate(template), []);
   const initialSections = useMemo(
     () => splitPromptIntoSections(initialDecomposed.promptText),
     [initialDecomposed.promptText]
@@ -555,8 +584,17 @@ export const PromptEditor: React.FC<PromptEditorProps> = ({
   const [openOutputSection, setOpenOutputSection] = useState<boolean>(true);
 
   const [outputSchemaText, setOutputSchemaText] = useState<string>(initialDecomposed.outputSchemaStr);
-  const [computedSpecs, setComputedSpecs] = useState<ComputedSpec[]>([]);
+  const [computedSpecs, setComputedSpecs] = useState<ComputedSpec[]>(
+    Array.isArray(initialEvalSpec?.computed_specs) ? initialEvalSpec.computed_specs : []
+  );
   const [metricBindings, setMetricBindings] = useState<MetricBindingsMap>(initialDecomposed.metricBindings || {});
+
+  useEffect(() => {
+    onEvalSpecChange?.({
+      computed_specs: computedSpecs,
+      ground_truth_col: selectedGroundTruth && selectedGroundTruth !== "none" ? selectedGroundTruth : undefined,
+    });
+  }, [computedSpecs, selectedGroundTruth]);
   const promptTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const examplesTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const lastCursorRef = useRef<{ field: PromptFieldKey; start: number; end: number } | null>(null);
@@ -1843,10 +1881,17 @@ const calibraiJsonEditorTheme = EditorView.theme({
       );
     });
 
-    const compatibleCols =
+    const baseCompatibleCols =
       gtFields.length > 0
         ? baseCandidates.filter((colName) => gtTypes.has(normType(dsColTypes.get(colName))))
         : baseCandidates;
+
+    const compatibleCols =
+      selectedGroundTruth &&
+      selectedGroundTruth !== "none" &&
+      !baseCompatibleCols.includes(selectedGroundTruth)
+        ? [selectedGroundTruth, ...baseCompatibleCols]
+        : baseCompatibleCols;
 
     const isMissingGtSelection =
       hasGroundTruth && (!selectedGroundTruth || selectedGroundTruth === "none");
@@ -1899,7 +1944,10 @@ const calibraiJsonEditorTheme = EditorView.theme({
     onValidationStateChange,
   ]);
 
-  const missingVarsList = validation?.missing_variables || [];
+  const missingVarsList = useMemo(
+    () => validation?.missing_variables || [],
+    [validation]
+  );
   const instructionsHasVarError = missingVarsList.some((mv) =>
     instructionsText.includes(`{${mv}}`)
   );
@@ -1925,6 +1973,10 @@ const calibraiJsonEditorTheme = EditorView.theme({
   const [savePromptName, setSavePromptName] = useState("");
   const [savingPrompt, setSavingPrompt] = useState(false);
   const [savePromptError, setSavePromptError] = useState<string | null>(null);
+  const [activeSavedPrompt, setActiveSavedPrompt] = useState<SavedPromptItem | null>(null);
+  const [saveMode, setSaveMode] = useState<"overwrite" | "new">("new");
+  const [overwriteTargetId, setOverwriteTargetId] = useState<number | null>(null);
+  const [loadingSaveModalPrompts, setLoadingSaveModalPrompts] = useState(false);
 
   const [showLoadPromptModal, setShowLoadPromptModal] = useState(false);
   const [savedPrompts, setSavedPrompts] = useState<SavedPromptItem[]>([]);
@@ -1932,10 +1984,47 @@ const calibraiJsonEditorTheme = EditorView.theme({
   const [loadPromptError, setLoadPromptError] = useState<string | null>(null);
   const [previewSavedPrompt, setPreviewSavedPrompt] = useState<SavedPromptItem | null>(null);
 
+  const isPromptEditable = (item: SavedPromptItem | null | undefined): boolean =>
+    Boolean(item && (!item.is_shared || item.share_mode === "edit"));
+
   const handleOpenSavePromptModal = () => {
-    setSavePromptName("");
     setSavePromptError(null);
+    if (activeSavedPrompt) {
+      setSavePromptName(activeSavedPrompt.name);
+      if (isPromptEditable(activeSavedPrompt)) {
+        setSaveMode("overwrite");
+        setOverwriteTargetId(activeSavedPrompt.id);
+      } else {
+        setSaveMode("new");
+        setOverwriteTargetId(null);
+      }
+    } else {
+      setSavePromptName("");
+      setSaveMode("new");
+      setOverwriteTargetId(null);
+    }
     setShowSavePromptModal(true);
+    setLoadingSaveModalPrompts(true);
+    fetchSavedPrompts(dataset.id)
+      .then((items) => {
+        setSavedPrompts(items);
+        if (!activeSavedPrompt) {
+          const exactMatch = items.find(
+            (p) =>
+              p.model_prompt === promptRealText &&
+              (p.system_prompt || "") === (systemPrompt || "")
+          );
+          if (exactMatch) {
+            setSavePromptName(exactMatch.name);
+            if (isPromptEditable(exactMatch)) {
+              setSaveMode("overwrite");
+              setOverwriteTargetId(exactMatch.id);
+            }
+          }
+        }
+      })
+      .catch(() => {})
+      .finally(() => setLoadingSaveModalPrompts(false));
   };
 
   const handleSavePrompt = async (e: React.FormEvent) => {
@@ -1952,11 +2041,32 @@ const calibraiJsonEditorTheme = EditorView.theme({
     }
     setSavingPrompt(true);
     try {
-      await saveUserPrompt({
-        name: cleanName,
-        dataset_id: dataset.id,
-        system_prompt: systemPrompt || "",
-        model_prompt: promptRealText,
+      const targetPrompt =
+        savedPrompts.find((p) => p.id === overwriteTargetId) ||
+        (activeSavedPrompt?.id === overwriteTargetId ? activeSavedPrompt : null);
+
+      let savedItem: SavedPromptItem;
+      if (saveMode === "overwrite" && overwriteTargetId && isPromptEditable(targetPrompt)) {
+        savedItem = await updateSavedPrompt(overwriteTargetId, {
+          name: cleanName,
+          dataset_id: dataset.id,
+          system_prompt: systemPrompt || "",
+          model_prompt: promptRealText,
+        });
+      } else {
+        savedItem = await saveUserPrompt({
+          name: cleanName,
+          dataset_id: dataset.id,
+          system_prompt: systemPrompt || "",
+          model_prompt: promptRealText,
+        });
+      }
+      setActiveSavedPrompt(savedItem);
+      setSavedPrompts((prev) => {
+        const exists = prev.some((p) => p.id === savedItem.id);
+        return exists
+          ? prev.map((p) => (p.id === savedItem.id ? savedItem : p))
+          : [savedItem, ...prev];
       });
       setShowSavePromptModal(false);
     } catch (err: any) {
@@ -1982,6 +2092,7 @@ const calibraiJsonEditorTheme = EditorView.theme({
   };
 
   const handleApplySavedPrompt = (item: SavedPromptItem) => {
+    setActiveSavedPrompt(item);
     setSystemPrompt(item.system_prompt || "");
     const composed = applyFullPromptText(item.model_prompt);
     let nextGt = selectedGroundTruth;
@@ -2008,6 +2119,9 @@ const calibraiJsonEditorTheme = EditorView.theme({
     try {
       await deleteSavedPrompt(id);
       setSavedPrompts((prev) => prev.filter((p) => p.id !== id));
+      if (activeSavedPrompt?.id === id) {
+        setActiveSavedPrompt(null);
+      }
     } catch (err: any) {
       setLoadPromptError(err.message || "Error eliminando prompt");
     }
@@ -2652,7 +2766,21 @@ const calibraiJsonEditorTheme = EditorView.theme({
     setEditingSpecIndex(idx);
     setNewSpecName(spec.name);
     setNewSpecFunction(spec.function || "custom_expr");
-    setFormulaTree(buildInitialFormulaTree(spec.function || ""));
+    const initTree = buildInitialFormulaTree(spec.function || "");
+    const specArgs = spec.arguments || [];
+    if (initTree && initTree.kind === "call" && specArgs.length > 0) {
+      const targetLen = isVariadicFormulaFn(initTree.fn)
+        ? Math.max(initTree.args.length, specArgs.length)
+        : initTree.args.length;
+      const filledArgs: FormulaNode[] = Array.from({ length: targetLen }, (_, i) =>
+        specArgs[i]
+          ? { kind: "var", path: specArgs[i] }
+          : initTree.args[i] || { kind: "empty", label: `var ${i + 1}` }
+      );
+      setFormulaTree({ ...initTree, args: filledArgs });
+    } else {
+      setFormulaTree(initTree);
+    }
     setActiveSlotPath(null);
     setNewSpecArgs(spec.arguments || []);
     const expr = spec.expression || generateDefaultFormula(spec.function, spec.arguments || []);
@@ -5140,12 +5268,126 @@ const calibraiJsonEditorTheme = EditorView.theme({
                 id="save-prompt-name"
                 type="text"
                 value={savePromptName}
-                onChange={(e) => setSavePromptName(e.target.value)}
+                onChange={(e) => {
+                  const nextVal = e.target.value;
+                  setSavePromptName(nextVal);
+                  const clean = nextVal.trim().toLowerCase();
+                  if (!clean) {
+                    setOverwriteTargetId(null);
+                    setSaveMode("new");
+                    return;
+                  }
+                  const matched = savedPrompts.find(
+                    (p) => p.name.trim().toLowerCase() === clean
+                  );
+                  if (matched && isPromptEditable(matched)) {
+                    setOverwriteTargetId(matched.id);
+                    setSaveMode("overwrite");
+                  } else if (activeSavedPrompt && isPromptEditable(activeSavedPrompt) && overwriteTargetId === activeSavedPrompt.id) {
+                    // Keep overwrite target if user is renaming the currently active prompt
+                  } else {
+                    setOverwriteTargetId(null);
+                    setSaveMode("new");
+                  }
+                }}
                 placeholder={t("prompt.savePromptNamePlaceholder")}
                 className="h-9 text-xs bg-background border-border rounded-sm"
                 autoFocus
               />
             </div>
+
+            {(() => {
+              const targetPrompt =
+                savedPrompts.find((p) => p.id === overwriteTargetId) ||
+                (activeSavedPrompt?.id === overwriteTargetId ? activeSavedPrompt : null);
+              const matchedByName = savedPrompts.find(
+                (p) => p.name.trim().toLowerCase() === savePromptName.trim().toLowerCase()
+              );
+              const readOnlyMatch =
+                matchedByName && !isPromptEditable(matchedByName) ? matchedByName : null;
+
+              return (
+                <>
+                  {targetPrompt && isPromptEditable(targetPrompt) && (
+                    <div className="p-2.5 rounded-sm bg-muted/40 border border-border space-y-2">
+                      <div className="flex flex-col gap-1.5">
+                        <label className="flex items-center gap-2 text-xs cursor-pointer">
+                          <input
+                            type="radio"
+                            name="save-prompt-mode"
+                            checked={saveMode === "overwrite"}
+                            onChange={() => setSaveMode("overwrite")}
+                            className="accent-primary"
+                          />
+                          <span className="font-medium text-foreground">
+                            {t("prompt.savePromptModeOverwrite", { name: targetPrompt.name })}
+                          </span>
+                        </label>
+                        <label className="flex items-center gap-2 text-xs cursor-pointer">
+                          <input
+                            type="radio"
+                            name="save-prompt-mode"
+                            checked={saveMode === "new"}
+                            onChange={() => setSaveMode("new")}
+                            className="accent-primary"
+                          />
+                          <span className="text-muted-foreground">
+                            {t("prompt.savePromptModeNew")}
+                          </span>
+                        </label>
+                      </div>
+                    </div>
+                  )}
+
+                  {readOnlyMatch && (
+                    <div className="p-2 rounded-sm bg-amber-500/10 border border-amber-500/30 text-[11px] text-amber-700 dark:text-amber-300">
+                      {t("prompt.savePromptReadOnlyShared")}
+                    </div>
+                  )}
+
+                  {(loadingSaveModalPrompts || savedPrompts.length > 0) && (
+                    <div className="space-y-1.5">
+                      <div className="text-[11px] font-medium text-muted-foreground flex items-center justify-between">
+                        <span>{t("prompt.savePromptExistingList")}</span>
+                        {loadingSaveModalPrompts && <Loader2 className="w-3 h-3 animate-spin" />}
+                      </div>
+                      {savedPrompts.length > 0 && (
+                        <div className="max-h-28 overflow-y-auto space-y-1 pr-1">
+                          {savedPrompts.map((item) => {
+                            const editable = isPromptEditable(item);
+                            const isSelected = saveMode === "overwrite" && overwriteTargetId === item.id;
+                            return (
+                              <button
+                                key={item.id}
+                                type="button"
+                                disabled={!editable}
+                                onClick={() => {
+                                  setSavePromptName(item.name);
+                                  setOverwriteTargetId(item.id);
+                                  setSaveMode("overwrite");
+                                }}
+                                className={`w-full text-left px-2.5 py-1.5 rounded-sm border text-xs flex items-center justify-between gap-2 transition-colors ${
+                                  isSelected
+                                    ? "bg-primary/10 border-primary text-foreground font-semibold"
+                                    : editable
+                                      ? "bg-background border-border hover:bg-muted/50 text-foreground"
+                                      : "bg-muted/30 border-border/60 text-muted-foreground opacity-60 cursor-not-allowed"
+                                }`}
+                              >
+                                <span className="truncate">{item.name}</span>
+                                <span className="text-[10px] text-muted-foreground shrink-0">
+                                  {editable ? (isSelected ? "✓" : "") : "Solo lectura"}
+                                </span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </>
+              );
+            })()}
 
             {savePromptError && (
               <div className="p-2.5 rounded-sm bg-destructive/10 border border-destructive/30 flex items-center gap-2 text-xs text-destructive">
@@ -5176,7 +5418,11 @@ const calibraiJsonEditorTheme = EditorView.theme({
                     <span>{t("prompt.savingPrompt")}</span>
                   </>
                 ) : (
-                  <span>{t("prompt.savePromptAction")}</span>
+                  <span>
+                    {saveMode === "overwrite" && overwriteTargetId
+                      ? t("prompt.overwritePromptAction")
+                      : t("prompt.savePromptAction")}
+                  </span>
                 )}
               </Button>
             </div>

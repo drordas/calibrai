@@ -948,15 +948,14 @@ export const ValidationMethodologyView: React.FC<ValidationMethodologyViewProps>
                 </TableHead>
                 <TableHead className="text-xs font-medium text-center">
                   <span className="inline-flex items-center justify-center">
-                    <span>Criterio Publicabilidad</span>
+                    <span>Nivel de Fiabilidad</span>
                     <MetricCalcInfo
-                      title="Criterio de Publicabilidad Científica"
-                      formula="Clasificación según Ratio vs Línea Base Humana y κ/α"
-                      description="Determina si la fiabilidad inter-juez alcanzada por el modelo cumple los estándares de revisión por pares:"
+                      title="Nivel de Fiabilidad Inter-Juez"
+                      formula="Con 2+ expertos: Ratio vs Línea Base Humana · Con 1 experto: Krippendorff's α"
+                      description="Clasifica la fiabilidad del acuerdo alcanzado por el modelo frente al criterio humano:"
                       thresholds={[
-                        "Ratio ≥ 95%: Fuerte (Apto)",
-                        "Ratio 80% – 94.9%: Aceptable (Exploratorio)",
-                        "Ratio < 80%: Insuficiente (Requiere ajuste de prompt)",
+                        "Con 2+ expertos — Ratio ≥ 95%: Fiable | 80–94.9%: Aceptable | < 80%: Insuficiente",
+                        "Con 1 experto (Ratio N/D) — α ≥ 0.80: Fiable | 0.67–0.79: Tentativo | < 0.67: Insuficiente",
                       ]}
                     />
                   </span>
@@ -968,20 +967,34 @@ export const ValidationMethodologyView: React.FC<ValidationMethodologyViewProps>
                 const llmName = !isHumanModel(p.model_a) ? p.model_a : p.model_b;
                 const humanName = isHumanModel(p.model_a) ? p.model_a : p.model_b;
                 const ratio = p.human_baseline_ratio ?? (humanBaselinePair ? p.cohens_kappa / humanBaselinePair.cohens_kappa : undefined);
+                const alphaVal = p.krippendorff_alpha ?? p.cohens_kappa;
 
-                const badgeColor =
-                  ratio && ratio >= 0.95
-                    ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/30"
-                    : ratio && ratio >= 0.8
-                    ? "bg-amber-500/10 text-amber-400 border-amber-500/30"
-                    : "bg-zinc-500/10 text-zinc-400 border-zinc-500/30";
+                let badgeColor = "bg-zinc-500/10 text-zinc-400 border-zinc-500/30";
+                let badgeLabel = "Insuficiente (α < 0.67)";
 
-                const badgeLabel =
-                  ratio && ratio >= 0.95
-                    ? "Fuerte (Apto Q1/Q2)"
-                    : ratio && ratio >= 0.8
-                    ? "Aceptable (Q2)"
-                    : "Insuficiente (<0.67)";
+                if (ratio !== undefined && Number.isFinite(ratio)) {
+                  if (ratio >= 0.95) {
+                    badgeColor = "bg-emerald-500/10 text-emerald-400 border-emerald-500/30";
+                    badgeLabel = "Fiable (≥95% base)";
+                  } else if (ratio >= 0.8) {
+                    badgeColor = "bg-amber-500/10 text-amber-400 border-amber-500/30";
+                    badgeLabel = "Aceptable (80–94%)";
+                  } else {
+                    badgeColor = "bg-rose-500/10 text-rose-400 border-rose-500/30";
+                    badgeLabel = "Insuficiente (<80%)";
+                  }
+                } else {
+                  if (alphaVal >= 0.8) {
+                    badgeColor = "bg-emerald-500/10 text-emerald-400 border-emerald-500/30";
+                    badgeLabel = "Fiable (α ≥ 0.80)";
+                  } else if (alphaVal >= 0.67) {
+                    badgeColor = "bg-amber-500/10 text-amber-400 border-amber-500/30";
+                    badgeLabel = "Tentativo (0.67–0.79)";
+                  } else {
+                    badgeColor = "bg-rose-500/10 text-rose-400 border-rose-500/30";
+                    badgeLabel = "Insuficiente (α < 0.67)";
+                  }
+                }
 
                 return (
                   <TableRow key={`${p.model_a}_${p.model_b}_${idx}`} className="hover:bg-muted/20">
@@ -1208,12 +1221,30 @@ export const ValidationMethodologyView: React.FC<ValidationMethodologyViewProps>
 
             return (
               <div key={idx} className="p-3.5 rounded-lg bg-muted/20 border border-border space-y-2">
-                <div className="flex items-center justify-between">
-                  <div className="text-xs font-semibold text-foreground font-mono truncate max-w-[180px]">
-                    {formatName(p.model_a)} vs {formatName(p.model_b)}
+                <div className="flex items-start justify-between gap-2">
+                  <div className="flex-1 flex flex-col items-center text-center gap-0.5 min-w-0">
+                    {isHumanModel(p.model_a) ? (
+                      <Badge variant="outline" className="font-mono text-[10px] bg-emerald-500/10 text-emerald-400 border-emerald-500/30 py-0">
+                        {formatName(p.model_a)}
+                      </Badge>
+                    ) : (
+                      <span className="text-xs font-semibold text-foreground font-mono break-all leading-tight">
+                        {formatName(p.model_a)}
+                      </span>
+                    )}
+                    <span className="text-[10px] text-muted-foreground font-mono">vs</span>
+                    {isHumanModel(p.model_b) ? (
+                      <Badge variant="outline" className="font-mono text-[10px] bg-emerald-500/10 text-emerald-400 border-emerald-500/30 py-0">
+                        {formatName(p.model_b)}
+                      </Badge>
+                    ) : (
+                      <span className="text-xs font-semibold text-foreground font-mono break-all leading-tight">
+                        {formatName(p.model_b)}
+                      </span>
+                    )}
                   </div>
                   {isVsH && (
-                    <Badge variant="outline" className="text-[9px] bg-emerald-500/10 text-emerald-400 border-emerald-500/30 py-0 font-mono">
+                    <Badge variant="outline" className="text-[9px] bg-emerald-500/10 text-emerald-400 border-emerald-500/30 py-0 font-mono shrink-0">
                       vs Humano
                     </Badge>
                   )}

@@ -12,6 +12,7 @@ import {
   startExperiment,
   pauseExperiment,
   resumeExperiment,
+  retryFailedExperiment,
   deleteExperiment,
   subscribeToExperimentStream,
   fetchDatasetShares,
@@ -188,6 +189,21 @@ export const ExperimentDashboard: React.FC<ExperimentDashboardProps> = ({
       await loadExperimentsList();
     } catch (err) {
       console.error("Error resuming experiment:", err);
+    } finally {
+      setActionLoadingId(null);
+    }
+  };
+
+  // Handle Retry Failed Samples
+  const handleRetryFailed = async (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setActionLoadingId(id);
+    setDashboardError(null);
+    try {
+      await retryFailedExperiment(id);
+      await loadExperimentsList();
+    } catch (err: any) {
+      setDashboardError(err?.message || t("common.error"));
     } finally {
       setActionLoadingId(null);
     }
@@ -809,10 +825,28 @@ export const ExperimentDashboard: React.FC<ExperimentDashboardProps> = ({
                                 "bg-emerald-500/15 border-emerald-600/40 text-emerald-700 dark:text-emerald-300 font-semibold";
                             }
 
+                            const badgeTitle =
+                              isModelDone && hasModelErrors
+                                ? (() => {
+                                    const total = modelSummary?.total_samples ?? exp.total_samples ?? exp.sample_size;
+                                    const failed =
+                                      modelSummary?.failed_samples ??
+                                      Math.max(
+                                        1,
+                                        Math.round(
+                                          total * (1 - Math.min(modelSummary?.success_rate ?? 100, modelSummary?.json_validity_rate ?? 100) / 100)
+                                        )
+                                      );
+                                    const errText = modelSummary?.sample_errors?.[0] || exp.error_message || "Error en la ejecución del modelo";
+                                    return `${failed}/${total} muestras fallidas — ${errText}`;
+                                  })()
+                                : undefined;
+
                             return (
                               <Badge
                                 key={m}
                                 variant="secondary"
+                                title={badgeTitle}
                                 className={`text-[9px] px-1.5 py-0 border transition-all flex items-center gap-1 ${badgeClass}`}
                               >
                                 {isCurrentRunning && (
@@ -840,6 +874,73 @@ export const ExperimentDashboard: React.FC<ExperimentDashboardProps> = ({
                         {t("common.samples")}: <strong className="text-foreground">{exp.total_samples || exp.sample_size}</strong>
                       </span>
                     </div>
+
+                    {/* Model Error Summary Banner (when completed/failed with partial or total model errors) */}
+                    {(exp.status === "completed" || exp.status === "failed") && (() => {
+                      const erroredModels = exp.model_ids
+                        .map((m) => {
+                          const s = exp.summaries?.[m];
+                          const hasErr =
+                            (exp.status === "failed" && exp.model_ids.indexOf(m) === (exp.current_model_index ?? 0)) ||
+                            Boolean(s && ((s.success_rate ?? 100) < 100 || (s.json_validity_rate ?? 100) < 100));
+                          if (!hasErr) return null;
+                          const total = s?.total_samples ?? exp.total_samples ?? exp.sample_size;
+                          const okRate = Math.min(s?.success_rate ?? 100, s?.json_validity_rate ?? 100);
+                          const failedCount =
+                            s?.failed_samples ??
+                            Math.max(1, Math.round(total * (1 - okRate / 100)));
+                          const firstErr = s?.sample_errors?.[0] || exp.error_message || null;
+                          return { modelId: m, failedCount, total, okRate, firstErr };
+                        })
+                        .filter(Boolean) as Array<{
+                        modelId: string;
+                        failedCount: number;
+                        total: number;
+                        okRate: number;
+                        firstErr: string | null;
+                      }>;
+
+                      if (erroredModels.length === 0) return null;
+
+                      return (
+                        <div className="mt-2 p-2.5 rounded-md bg-destructive/10 border border-destructive/30 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                          <div className="space-y-1 min-w-0">
+                            <div className="flex items-center gap-1.5 font-semibold text-destructive">
+                              <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                              <span>{t("dashboard.modelErrorsNotice")}</span>
+                            </div>
+                            <ul className="space-y-0.5 text-[11px] text-foreground/90 pl-5 list-disc">
+                              {erroredModels.map((em) => (
+                                <li key={em.modelId} className="break-words">
+                                  <span className="font-mono font-semibold">{em.modelId.split("/")[1] || em.modelId}</span>
+                                  {": "}
+                                  <span>
+                                    {em.failedCount}/{em.total} fallidas ({em.okRate.toFixed(0)}% válidas)
+                                  </span>
+                                  {em.firstErr && (
+                                    <span className="text-muted-foreground"> — {em.firstErr}</span>
+                                  )}
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                          {(!exp.is_shared || exp.share_mode === "edit") && (
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              disabled={isActionLoading}
+                              onClick={(e) => handleRetryFailed(exp.id, e)}
+                              title={t("dashboard.retryFailedTitle")}
+                              className="h-7 px-2.5 text-xs font-medium border-destructive/40 text-destructive hover:bg-destructive/10 gap-1.5 rounded-md shrink-0 self-start sm:self-center"
+                            >
+                              <RotateCcw className="w-3 h-3" />
+                              <span>{t("dashboard.retryFailed")}</span>
+                            </Button>
+                          )}
+                        </div>
+                      );
+                    })()}
 
                     {/* Progress Bar (Visible if running, queued or paused) */}
                     {(isProcessing || isPaused || isQueued) && (() => {

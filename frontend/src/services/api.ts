@@ -349,17 +349,37 @@ export async function fetchCompatibleGroundTruths(inputDatasetId: string): Promi
   return res.json();
 }
 
+export interface DuplicateDatasetMatch {
+  id: string;
+  name: string;
+  filename: string;
+  is_ground_truth?: boolean;
+}
+
+export class DuplicateDatasetError extends Error {
+  existingDatasets: DuplicateDatasetMatch[];
+  fileHash: string;
+  constructor(message: string, existingDatasets: DuplicateDatasetMatch[], fileHash: string) {
+    super(message);
+    this.name = "DuplicateDatasetError";
+    this.existingDatasets = existingDatasets;
+    this.fileHash = fileHash;
+  }
+}
+
 export async function uploadDataset(
   file: File,
   name?: string,
   expectedInputDatasetId?: string,
-  isGroundTruth?: boolean
+  isGroundTruth?: boolean,
+  confirmDuplicate: boolean = false
 ): Promise<DatasetSummary> {
   const formData = new FormData();
   formData.append("file", file);
   if (name) formData.append("name", name);
   if (expectedInputDatasetId) formData.append("expected_input_dataset_id", expectedInputDatasetId);
   if (isGroundTruth !== undefined) formData.append("is_ground_truth", String(isGroundTruth));
+  if (confirmDuplicate) formData.append("confirm_duplicate", "true");
 
   const res = await fetch(`${API_BASE}/datasets/upload`, {
     method: "POST",
@@ -368,7 +388,14 @@ export async function uploadDataset(
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: "Error subiendo archivo" }));
-    throw new Error(err.detail || "Error subiendo archivo");
+    if (res.status === 409 && err?.detail?.code === "DUPLICATE_DATASET_HASH") {
+      throw new DuplicateDatasetError(
+        err.detail.message || "Ya existe un dataset guardado con el mismo contenido.",
+        err.detail.existing_datasets || [],
+        err.detail.file_hash || ""
+      );
+    }
+    throw new Error(typeof err.detail === "string" ? err.detail : err.detail?.message || "Error subiendo archivo");
   }
   return res.json();
 }
@@ -777,6 +804,15 @@ export async function resumeExperiment(id: string): Promise<ExperimentDetail> {
     headers: getAuthHeaders(),
   });
   if (!res.ok) throw new Error("Error resuming experiment");
+  return res.json();
+}
+
+export async function retryFailedExperiment(id: string): Promise<ExperimentDetail> {
+  const res = await fetch(`${API_BASE}/experiments/${id}/retry-failed`, {
+    method: "POST",
+    headers: getAuthHeaders(),
+  });
+  if (!res.ok) throw new Error("Error retrying failed samples");
   return res.json();
 }
 

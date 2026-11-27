@@ -32,7 +32,6 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER:-benchmarker}:${POSTGRES_PASSWORD:-benchmarker_secret}@db:5432/${POSTGRES_DB:-llm_benchmark}
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
       UPLOAD_DIR: /app/uploads
-      SAMPLE_DIR: /app/dataset
       JWT_SECRET_KEY: ${JWT_SECRET_KEY:-calibrai-dev-jwt-secret-change-in-production}
       DEFAULT_ADMIN_USER: ${DEFAULT_ADMIN_USER:-}
       DEFAULT_ADMIN_PASSWORD: ${DEFAULT_ADMIN_PASSWORD:-}
@@ -45,7 +44,6 @@ services:
       - "${BACKEND_PORT:-8001}:8000"
     volumes:
       - ./backend/app:/app/backend/app
-      - ./dataset:/app/dataset:ro
       - backend_uploads:/app/uploads
       - /etc/hosts:/app/host_etc_hosts:ro
 

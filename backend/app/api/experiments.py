@@ -555,6 +555,18 @@ async def resume_experiment(
     db.refresh(exp)
     return exp
 
+@router.post("/{experiment_id}/retry-failed", response_model=ExperimentResponse)
+async def retry_failed_experiment_samples(
+    experiment_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    exp, _ = _get_accessible_experiment(experiment_id, current_user, db, require_edit=True)
+
+    await experiment_queue.retry_failed_samples(experiment_id)
+    db.refresh(exp)
+    return exp
+
 @router.post("/{experiment_id}/cancel", response_model=ExperimentResponse)
 async def cancel_experiment(
     experiment_id: str,

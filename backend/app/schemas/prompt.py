@@ -33,6 +33,7 @@ class EvaluationSpec(BaseModel):
     verbatim_field: Optional[str] = "verbatim_quote"
     source_text_col: Optional[str] = None
     rating_col: Optional[str] = None
+    ground_truth_col: Optional[str] = None
     metrics: List[str] = Field(default_factory=list)
     metric_bindings: Dict[str, Union[List[str], Dict[str, List[str]]]] = Field(default_factory=dict)
     metadata: Optional[Dict[str, Any]] = Field(default_factory=dict)

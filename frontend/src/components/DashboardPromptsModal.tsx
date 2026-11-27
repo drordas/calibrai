@@ -36,6 +36,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -44,6 +50,7 @@ import { Textarea } from "@/components/ui/textarea";
 import {
   AlertCircle,
   ArrowLeft,
+  ChevronDown,
   Database,
   Download,
   Eye,
@@ -130,9 +137,21 @@ function convertPlainPromptToMarkdown(raw: string): string {
   return out.join("\n").replace(/\n{3,}/g, "\n\n").trim();
 }
 
-function buildPromptDownloadContent(item: SavedPromptItem, format: "txt" | "md"): string {
+function buildPromptDownloadContent(item: SavedPromptItem, format: "txt" | "md" | "json"): string {
   const sys = (item.system_prompt || "").trim();
   const body = (item.model_prompt || "").trim();
+
+  if (format === "json") {
+    const payload: Record<string, any> = {
+      name: item.name || "Prompt",
+      dataset_id: item.dataset_id ?? null,
+      system_prompt: item.system_prompt || "",
+      model_prompt: item.model_prompt || "",
+    };
+    if (item.created_at) payload.created_at = item.created_at;
+    if (item.updated_at) payload.updated_at = item.updated_at;
+    return `${JSON.stringify(payload, null, 2)}\n`;
+  }
 
   if (format === "txt") {
     if (!sys) return body;
@@ -190,7 +209,6 @@ export const DashboardPromptsModal: React.FC<DashboardPromptsModalProps> = ({
 
   const [downloadTarget, setDownloadTarget] = useState<SavedPromptItem | null>(null);
   const [downloadFileName, setDownloadFileName] = useState("");
-  const [downloadFormat, setDownloadFormat] = useState<"txt" | "md">("txt");
 
   // Share prompt state
   const [shareTarget, setShareTarget] = useState<SavedPromptItem | null>(null);
@@ -287,15 +305,18 @@ export const DashboardPromptsModal: React.FC<DashboardPromptsModalProps> = ({
     const safeName = (item.name || "prompt").trim().replace(/[^\w\-. ]+/g, "_").replace(/\s+/g, "_");
     setDownloadTarget(item);
     setDownloadFileName(safeName || "prompt");
-    setDownloadFormat("txt");
   };
 
-  const handleConfirmDownload = () => {
+  const handleConfirmDownload = (ext: "txt" | "md" | "json") => {
     if (!downloadTarget) return;
-    const baseName = (downloadFileName.trim() || "prompt").replace(/\.(txt|md)$/i, "");
-    const ext = downloadFormat;
+    const baseName = (downloadFileName.trim() || "prompt").replace(/\.(txt|md|json)$/i, "");
     const content = buildPromptDownloadContent(downloadTarget, ext);
-    const mime = ext === "md" ? "text/markdown;charset=utf-8" : "text/plain;charset=utf-8";
+    const mime =
+      ext === "json"
+        ? "application/json;charset=utf-8"
+        : ext === "md"
+          ? "text/markdown;charset=utf-8"
+          : "text/plain;charset=utf-8";
     const blob = new Blob([content], { type: mime });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
@@ -788,7 +809,7 @@ export const DashboardPromptsModal: React.FC<DashboardPromptsModalProps> = ({
               <span>Descargar prompt</span>
             </DialogTitle>
             <DialogDescription className="text-xs text-muted-foreground">
-              Elige el nombre del archivo y el formato de exportación. Si eliges Markdown (<code>.md</code>), el contenido en texto plano se convertirá automáticamente a formato Markdown.
+              Elige el nombre del archivo y pulsa en <strong>Descargar</strong> para elegir el formato (<code>.txt</code>, <code>.md</code> o <code>.json</code>).
             </DialogDescription>
           </DialogHeader>
 
@@ -797,40 +818,13 @@ export const DashboardPromptsModal: React.FC<DashboardPromptsModalProps> = ({
               <Label htmlFor="download-prompt-name" className="text-xs font-medium">
                 Nombre del archivo
               </Label>
-              <div className="flex items-center gap-2">
-                <Input
-                  id="download-prompt-name"
-                  value={downloadFileName}
-                  onChange={(e) => setDownloadFileName(e.target.value)}
-                  placeholder="mi_prompt"
-                  className="h-8 text-xs font-mono rounded-sm"
-                />
-                <span className="text-xs font-mono text-muted-foreground shrink-0">.{downloadFormat}</span>
-              </div>
-            </div>
-
-            <div className="space-y-1.5">
-              <Label className="text-xs font-medium">Formato</Label>
-              <div className="grid grid-cols-2 gap-2">
-                <Button
-                  type="button"
-                  variant={downloadFormat === "txt" ? "default" : "outline"}
-                  size="sm"
-                  onClick={() => setDownloadFormat("txt")}
-                  className="h-8 text-xs font-mono rounded-sm"
-                >
-                  Texto plano (.txt)
-                </Button>
-                <Button
-                  type="button"
-                  variant={downloadFormat === "md" ? "default" : "outline"}
-                  size="sm"
-                  onClick={() => setDownloadFormat("md")}
-                  className="h-8 text-xs font-mono rounded-sm"
-                >
-                  Markdown (.md)
-                </Button>
-              </div>
+              <Input
+                id="download-prompt-name"
+                value={downloadFileName}
+                onChange={(e) => setDownloadFileName(e.target.value)}
+                placeholder="mi_prompt"
+                className="h-8 text-xs font-mono rounded-sm"
+              />
             </div>
           </div>
 
@@ -844,16 +838,40 @@ export const DashboardPromptsModal: React.FC<DashboardPromptsModalProps> = ({
             >
               Cancelar
             </Button>
-            <Button
-              type="button"
-              size="sm"
-              onClick={handleConfirmDownload}
-              disabled={!downloadFileName.trim()}
-              className="h-8 text-xs rounded-sm gap-1.5"
-            >
-              <Download className="w-3.5 h-3.5" />
-              <span>Descargar .{downloadFormat}</span>
-            </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  type="button"
+                  size="sm"
+                  disabled={!downloadFileName.trim()}
+                  className="h-8 text-xs rounded-sm gap-1.5"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  <span>Descargar</span>
+                  <ChevronDown className="w-3.5 h-3.5 opacity-80" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-44 rounded-sm">
+                <DropdownMenuItem
+                  onClick={() => handleConfirmDownload("txt")}
+                  className="text-xs font-mono cursor-pointer"
+                >
+                  Texto plano (.txt)
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={() => handleConfirmDownload("md")}
+                  className="text-xs font-mono cursor-pointer"
+                >
+                  Markdown (.md)
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={() => handleConfirmDownload("json")}
+                  className="text-xs font-mono cursor-pointer"
+                >
+                  JSON (.json)
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
         </DialogContent>
       </Dialog>

@@ -108,6 +108,26 @@ class ExperimentQueueManager:
         """Resumes a paused experiment from its row checkpoint."""
         await self.enqueue_or_start(exp_id)
 
+    async def retry_failed_samples(self, exp_id: str):
+        """Re-runs only failed or missing samples for a completed/failed experiment."""
+        if exp_id in self._active_tasks and not self._active_tasks[exp_id].done():
+            return
+        db: Session = SessionLocal()
+        try:
+            exp = db.query(Experiment).filter(Experiment.id == exp_id).first()
+            if not exp:
+                return
+            self._pause_flags[exp_id] = False
+            self._cancel_flags[exp_id] = False
+            exp.status = "running"
+            exp.error_message = None
+            db.commit()
+            await self.broadcast(exp_id, "status_change", {"status": "running"})
+            task = asyncio.create_task(self._retry_failed_loop(exp_id))
+            self._active_tasks[exp_id] = task
+        finally:
+            db.close()
+
     async def cancel_experiment(self, exp_id: str):
         """Cancels a running or queued experiment."""
         self._cancel_flags[exp_id] = True
@@ -148,6 +168,380 @@ class ExperimentQueueManager:
                     self._active_tasks[next_id] = task
             finally:
                 db.close()
+
+    def _load_experiment_context(self, db: Session, exp: Experiment) -> Dict[str, Any]:
+        """Loads API keys, cleaned prompt/eval_spec, aligned dataset rows, and GT baselines."""
+        user_config = db.query(UserConfiguration).filter(UserConfiguration.user_id == exp.user_id).first()
+        api_keys = dict(user_config.api_keys) if user_config and user_config.api_keys else {}
+
+        from backend.app.db.models import ConnectionProfile, ConnectionProfileShare
+        for key_name, prov_target in [
+            ("ollama_profile_id", "ollama_url"),
+            ("openai_profile_id", "openai"),
+            ("gemini_profile_id", "gemini"),
+            ("anthropic_profile_id", "anthropic"),
+            ("groq_profile_id", "groq"),
+        ]:
+            pid_raw = api_keys.get(key_name)
+            if pid_raw and not api_keys.get(prov_target):
+                try:
+                    pid = int(pid_raw)
+                    prof = db.query(ConnectionProfile).filter(ConnectionProfile.id == pid).first()
+                    if prof:
+                        has_access = prof.user_id == exp.user_id or (
+                            db.query(ConnectionProfileShare)
+                            .filter(
+                                ConnectionProfileShare.profile_id == pid,
+                                ConnectionProfileShare.target_user_id == exp.user_id,
+                            )
+                            .first()
+                            is not None
+                        )
+                        if has_access:
+                            api_keys[prov_target] = prof.ollama_url if prof.provider == "ollama" else prof.api_key
+                except (TypeError, ValueError):
+                    pass
+
+        clean_template, eval_spec = prompt_engine.extract_evaluation_spec(exp.template, exp.task_type)
+        if exp.eval_spec and isinstance(exp.eval_spec, dict):
+            for k, v in exp.eval_spec.items():
+                if v is not None and hasattr(eval_spec, k):
+                    setattr(eval_spec, k, v)
+
+        def extract_row_id(r_dict: dict) -> str:
+            for k in ["id", "review_id", "sample_id", "key"]:
+                if k in r_dict and r_dict[k] is not None:
+                    return str(r_dict[k]).strip()
+            if exp.id_column and exp.id_column in r_dict and r_dict[exp.id_column] is not None:
+                return str(r_dict[exp.id_column]).strip()
+            return ""
+
+        paginated = dataset_engine.get_paginated_rows(
+            dataset_id=exp.dataset_id,
+            offset=0,
+            limit=100000
+        )
+        raw_input_rows = paginated.rows
+
+        gt_id_list = list(exp.ground_truth_dataset_ids or [])
+        if exp.ground_truth_dataset_id and exp.ground_truth_dataset_id not in gt_id_list:
+            gt_id_list.append(exp.ground_truth_dataset_id)
+
+        gt_datasets_info = []
+        for gt_id in gt_id_list:
+            try:
+                gt_ds_meta = dataset_engine.get_dataset(gt_id)
+                ds_name = gt_ds_meta.name if gt_ds_meta else gt_id
+                gt_paginated = dataset_engine.get_paginated_rows(
+                    dataset_id=gt_id,
+                    offset=0,
+                    limit=100000
+                )
+                row_map = {}
+                for g_row in gt_paginated.rows:
+                    gid = extract_row_id(g_row)
+                    if gid:
+                        row_map[gid] = g_row
+                if row_map:
+                    gt_datasets_info.append((gt_id, ds_name, row_map))
+            except Exception as gt_err:
+                print(f"[ExperimentQueue] Error loading ground truth dataset {gt_id}: {gt_err}")
+
+        if gt_datasets_info:
+            aligned_input_rows = [
+                r for r in raw_input_rows
+                if all(extract_row_id(r) in item[2] for item in gt_datasets_info)
+            ]
+            rows = aligned_input_rows[:exp.sample_size]
+        else:
+            rows = raw_input_rows[:exp.sample_size]
+
+        total_rows = len(rows)
+        exp.total_samples = total_rows
+        db.commit()
+
+        model_ids = list(exp.model_ids)
+        raw_results: Dict[str, List[Dict[str, Any]]] = dict(exp.raw_results or {})
+        for m in model_ids:
+            if m not in raw_results:
+                raw_results[m] = []
+        summaries: Dict[str, Any] = dict(exp.summaries or {})
+
+        human_rater_ids = []
+        for gt_id, gt_display_name, gt_map in gt_datasets_info:
+            human_model_id = f"human_expert_{gt_id}" if len(gt_datasets_info) > 1 else "human_expert"
+            human_rater_ids.append(human_model_id)
+            try:
+                human_results = []
+                for idx, row in enumerate(rows):
+                    rid = extract_row_id(row)
+                    g_row = gt_map.get(rid, {})
+                    parsed_gt = {}
+                    if "_raw_json" in g_row and g_row["_raw_json"]:
+                        try:
+                            full_obj = json.loads(g_row["_raw_json"])
+                            parsed_gt = full_obj.get("ground_truth") or full_obj.get("target") or full_obj
+                        except Exception:
+                            parsed_gt = dict(g_row)
+                    else:
+                        reconstructed = {}
+                        for gk, gv in g_row.items():
+                            if gk.startswith("ground_truth.") or gk.startswith("target."):
+                                parts = gk.split(".")
+                                if len(parts) >= 3:
+                                    d_name, f_name = parts[1], parts[2]
+                                    if d_name not in reconstructed:
+                                        reconstructed[d_name] = {}
+                                    try:
+                                        reconstructed[d_name][f_name] = json.loads(gv) if (isinstance(gv, str) and gv.startswith("[")) else gv
+                                    except Exception:
+                                        reconstructed[d_name][f_name] = gv
+                        parsed_gt = reconstructed if reconstructed else dict(g_row)
+
+                    human_results.append({
+                        "sample_index": idx,
+                        "sample_id": rid,
+                        "row_context": row,
+                        "is_valid_json": True,
+                        "parsed_json": parsed_gt,
+                        "raw_response": json.dumps(parsed_gt, ensure_ascii=False),
+                        "latency_ms": 0.0,
+                        "prompt_tokens": 0,
+                        "completion_tokens": 0,
+                        "estimated_cost_usd": 0.0,
+                        "success": True,
+                        "model_id": human_model_id
+                    })
+
+                raw_results[human_model_id] = human_results
+                human_summary = metrics_engine.compute_model_metrics(
+                    model_id=human_model_id,
+                    results=human_results,
+                    eval_spec=eval_spec
+                )
+                h_dict = human_summary.model_dump()
+                h_dict["is_human_baseline"] = True
+                h_dict["model_name"] = gt_display_name if len(gt_datasets_info) > 1 else (exp.ground_truth_name or gt_display_name or "Experto Humano")
+                summaries[human_model_id] = h_dict
+            except Exception as gt_err:
+                print(f"[ExperimentQueue] Note: error computing ground truth baseline for {gt_id}: {gt_err}")
+
+        return {
+            "api_keys": api_keys,
+            "clean_template": clean_template,
+            "eval_spec": eval_spec,
+            "rows": rows,
+            "total_rows": total_rows,
+            "model_ids": model_ids,
+            "raw_results": raw_results,
+            "summaries": summaries,
+            "human_rater_ids": human_rater_ids,
+        }
+
+    async def _finalize_experiment(
+        self,
+        db: Session,
+        exp: Experiment,
+        raw_results: Dict[str, List[Dict[str, Any]]],
+        summaries: Dict[str, Any],
+        model_ids: List[str],
+        human_rater_ids: List[str],
+        eval_spec: Any,
+    ):
+        """Computes pairwise comparisons, best performers, and marks experiment completed."""
+        all_eval_raters = list(model_ids) + [h for h in human_rater_ids if h in raw_results]
+        if "human_expert" in raw_results and "human_expert" not in all_eval_raters:
+            all_eval_raters.append("human_expert")
+
+        pairwise_list: List[PairwiseComparison] = []
+        for i in range(len(all_eval_raters)):
+            for j in range(i + 1, len(all_eval_raters)):
+                ma = all_eval_raters[i]
+                mb = all_eval_raters[j]
+                pair_comp = metrics_engine.compute_pairwise_comparison(
+                    model_a=ma,
+                    results_a=raw_results.get(ma, []),
+                    model_b=mb,
+                    results_b=raw_results.get(mb, []),
+                    eval_spec=eval_spec
+                )
+                if (ma in human_rater_ids or ma == "human_expert") or (mb in human_rater_ids or mb == "human_expert"):
+                    pair_comp.is_vs_human = True
+                pairwise_list.append(pair_comp)
+
+        human_human_pairs = [
+            p for p in pairwise_list
+            if (p.model_a in human_rater_ids or p.model_a == "human_expert") and
+               (p.model_b in human_rater_ids or p.model_b == "human_expert")
+        ]
+        if human_human_pairs and human_human_pairs[0].cohens_kappa > 0:
+            h_kappa = human_human_pairs[0].cohens_kappa
+            for p in pairwise_list:
+                if p.is_vs_human:
+                    p.human_baseline_ratio = round(p.cohens_kappa / h_kappa, 4)
+
+        best_performers = self._calculate_best_performers(summaries)
+
+        exp.status = "completed"
+        exp.progress_pct = 100.0
+        exp.completed_at = datetime.datetime.utcnow()
+        exp.raw_results = raw_results
+        exp.summaries = summaries
+        exp.pairwise_matrix = [p.model_dump() for p in pairwise_list]
+        exp.best_performers = best_performers
+        eval_spec_dict = dict(exp.eval_spec or {}) if isinstance(exp.eval_spec, dict) else {}
+        eval_spec_dict["_runtime_phase"] = "completed"
+        exp.eval_spec = eval_spec_dict
+        db.commit()
+
+        completion_payload = {
+            "experiment_id": exp.id,
+            "status": "completed",
+            "summaries": summaries,
+            "pairwise_matrix": [p.model_dump() for p in pairwise_list],
+            "best_performers": best_performers
+        }
+        await self.broadcast(exp.id, "experiment_completed", completion_payload)
+
+    async def _retry_failed_loop(self, exp_id: str):
+        """Re-runs only failed or missing samples and re-finalizes experiment metrics."""
+        db: Session = SessionLocal()
+        try:
+            exp = db.query(Experiment).filter(Experiment.id == exp_id).first()
+            if not exp:
+                return
+
+            ctx = self._load_experiment_context(db, exp)
+            api_keys = ctx["api_keys"]
+            clean_template = ctx["clean_template"]
+            eval_spec = ctx["eval_spec"]
+            rows = ctx["rows"]
+            total_rows = ctx["total_rows"]
+            model_ids = ctx["model_ids"]
+            raw_results = ctx["raw_results"]
+            summaries = ctx["summaries"]
+            human_rater_ids = ctx["human_rater_ids"]
+
+            # Collect failed or missing sample indices per model
+            retry_plan: List[tuple[int, str, List[int]]] = []
+            for m_idx, model_id in enumerate(model_ids):
+                existing = {
+                    int(r.get("sample_index", i)): r
+                    for i, r in enumerate(raw_results.get(model_id, []))
+                }
+                failed_indices = [
+                    s_idx for s_idx in range(total_rows)
+                    if s_idx not in existing
+                    or not existing[s_idx].get("success", False)
+                    or bool(existing[s_idx].get("error_message"))
+                ]
+                if failed_indices:
+                    retry_plan.append((m_idx, model_id, failed_indices))
+
+            total_retry = sum(len(idxs) for _, _, idxs in retry_plan)
+            if total_retry == 0:
+                await self._finalize_experiment(
+                    db, exp, raw_results, summaries, model_ids, human_rater_ids, eval_spec
+                )
+                return
+
+            done_retry = 0
+            for m_idx, model_id, failed_indices in retry_plan:
+                exp.current_model_index = m_idx
+                model_temps = getattr(exp, "model_temperatures", {}) or (exp.eval_spec.get("model_temperatures") if isinstance(exp.eval_spec, dict) else {}) or {}
+                assigned_temp = model_temps.get(model_id)
+                if assigned_temp is None and "/" in model_id:
+                    assigned_temp = model_temps.get(model_id.split("/")[-1])
+
+                custom_ollama = api_keys.get("ollama_url") or api_keys.get("ollama")
+                await llm_manager.load_model(model_id, temperature=assigned_temp, custom_url=custom_ollama)
+
+                existing_map = {
+                    int(r.get("sample_index", i)): r
+                    for i, r in enumerate(raw_results.get(model_id, []))
+                }
+
+                for s_idx in failed_indices:
+                    if self._pause_flags.get(exp_id):
+                        exp.status = "paused"
+                        exp.paused_at = datetime.datetime.utcnow()
+                        db.commit()
+                        await self.broadcast(exp_id, "status_change", {"status": "paused"})
+                        return
+                    if self._cancel_flags.get(exp_id):
+                        exp.status = "cancelled"
+                        db.commit()
+                        await self.broadcast(exp_id, "status_change", {"status": "cancelled"})
+                        return
+
+                    row = rows[s_idx]
+                    prompt = prompt_engine.render_prompt_variables(clean_template, row)
+                    response = await llm_manager.invoke_model(
+                        model_id=model_id,
+                        prompt=prompt,
+                        system_prompt=exp.system_prompt,
+                        api_keys=api_keys,
+                        row_context=row,
+                        eval_spec=eval_spec,
+                        output_schema=eval_spec.output_schema if eval_spec else None,
+                    )
+                    existing_map[s_idx] = {
+                        "sample_index": s_idx,
+                        "row_context": row,
+                        **response.model_dump(),
+                    }
+                    raw_results[model_id] = [existing_map[k] for k in sorted(existing_map.keys())]
+
+                    current_summary = metrics_engine.compute_model_metrics(
+                        model_id=model_id,
+                        results=raw_results[model_id],
+                        eval_spec=eval_spec,
+                    )
+                    summaries[model_id] = current_summary.model_dump()
+                    done_retry += 1
+                    progress_pct = round(min(99.9, (done_retry / total_retry) * 100.0), 1)
+
+                    exp.current_sample_index = s_idx + 1
+                    exp.progress_pct = progress_pct
+                    exp.raw_results = raw_results
+                    exp.summaries = summaries
+                    eval_spec_dict = dict(exp.eval_spec or {}) if isinstance(exp.eval_spec, dict) else {}
+                    eval_spec_dict["_runtime_phase"] = "processing_rows"
+                    eval_spec_dict["_current_row"] = s_idx + 1
+                    exp.eval_spec = eval_spec_dict
+                    db.commit()
+
+                    await self.broadcast(exp_id, "sample_update", {
+                        "experiment_id": exp_id,
+                        "model_id": model_id,
+                        "model_index": m_idx + 1,
+                        "total_models": len(model_ids),
+                        "sample_index": s_idx + 1,
+                        "total_samples": total_rows,
+                        "progress_pct": progress_pct,
+                        "current_summary": current_summary.model_dump(),
+                    })
+                    await asyncio.sleep(0.01)
+
+                await self.broadcast(exp_id, "model_finished", {
+                    "model_id": model_id,
+                    "summary": summaries[model_id],
+                })
+
+            await self._finalize_experiment(
+                db, exp, raw_results, summaries, model_ids, human_rater_ids, eval_spec
+            )
+        except Exception as e:
+            print(f"[ExperimentQueue] Error retrying failed samples for {exp_id}: {e}")
+            exp = db.query(Experiment).filter(Experiment.id == exp_id).first()
+            if exp:
+                exp.status = "failed"
+                exp.error_message = str(e)
+                db.commit()
+            await self.broadcast(exp_id, "status_change", {"status": "failed", "error": str(e)})
+        finally:
+            db.close()
+            await self._check_next_in_queue()
 
     async def _run_experiment_loop(self, exp_id: str):
         """Main execution engine loop with row-by-row checkpointing."""
@@ -555,14 +949,22 @@ class ExperimentQueueManager:
             return {}
         best: Dict[str, str] = {}
         models = list(summaries.keys())
+        # Prefer models with 100% (or highest) success & schema validity over partial failures
+        max_rel = max(
+            min(summaries[m].get("success_rate", 100.0), summaries[m].get("json_validity_rate", 100.0))
+            for m in models
+        )
+        reliable = [
+            m for m in models
+            if min(summaries[m].get("success_rate", 100.0), summaries[m].get("json_validity_rate", 100.0)) >= max_rel
+        ] or models
 
-        # Safely determine lowest latency, highest throughput, lowest cost, etc.
         try:
-            best["latency"] = min(models, key=lambda m: summaries[m].get("mean_latency_ms", 999999))
-            best["throughput"] = max(models, key=lambda m: summaries[m].get("throughput_tokens_sec", 0))
-            best["cost"] = min(models, key=lambda m: summaries[m].get("total_cost_usd", 999999))
-            best["json_validity"] = max(models, key=lambda m: summaries[m].get("json_validity_rate", 0))
-            best["consistency"] = max(models, key=lambda m: summaries[m].get("internal_consistency_score", 0))
+            best["latency"] = min(reliable, key=lambda m: summaries[m].get("mean_latency_ms", 999999))
+            best["throughput"] = max(reliable, key=lambda m: summaries[m].get("throughput_tokens_sec", 0))
+            best["cost"] = min(reliable, key=lambda m: summaries[m].get("total_cost_usd", 999999))
+            best["json_validity"] = max(models, key=lambda m: (summaries[m].get("success_rate", 100.0), summaries[m].get("json_validity_rate", 0)))
+            best["consistency"] = max(reliable, key=lambda m: summaries[m].get("internal_consistency_score", 0))
         except Exception:
             pass
         return best

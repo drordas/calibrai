@@ -18,6 +18,8 @@ import {
   shareDatasetWithUser,
   updateDatasetShareMode,
   uploadDataset,
+  DuplicateDatasetError,
+  DuplicateDatasetMatch,
 } from "../services/api";
 import { ShareableUserItem, ShareUserPicker } from "./ShareUserPicker";
 import { useTranslation } from "../i18n";
@@ -119,6 +121,7 @@ export const DashboardDatasetsModal: React.FC<DashboardDatasetsModalProps> = ({
   // Upload dataset state
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [uploadType, setUploadType] = useState<"task" | "ground_truth">("task");
+  const [pendingDuplicateDatasets, setPendingDuplicateDatasets] = useState<DuplicateDatasetMatch[] | null>(null);
   const [uploadName, setUploadName] = useState("");
   const [uploadFile, setUploadFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
@@ -128,25 +131,27 @@ export const DashboardDatasetsModal: React.FC<DashboardDatasetsModalProps> = ({
 
   const previewColumns = useMemo<ColumnDef<ReturnType<typeof tableFeatures>, Record<string, any>, any>[]>(() => {
     if (!previewRows) return [];
-    return previewRows.columns.map((col) => ({
-      id: col,
-      accessorFn: (row: Record<string, any>) => row[col],
-      header: col,
-      cell: ({ getValue }: { getValue: () => any }) => {
-        const val = getValue();
-        const display =
-          val === null || val === undefined
-            ? ""
-            : typeof val === "object"
-              ? JSON.stringify(val)
-              : String(val);
-        return (
-          <span className="block truncate" title={display}>
-            {display}
-          </span>
-        );
-      },
-    }));
+    return previewRows.columns
+      .filter((col) => col !== "_raw_json")
+      .map((col) => ({
+        id: col,
+        accessorFn: (row: Record<string, any>) => row[col],
+        header: col,
+        cell: ({ getValue }: { getValue: () => any }) => {
+          const val = getValue();
+          const display =
+            val === null || val === undefined
+              ? ""
+              : typeof val === "object"
+                ? JSON.stringify(val)
+                : String(val);
+          return (
+            <span className="block max-w-[260px] truncate" title={display}>
+              {display}
+            </span>
+          );
+        },
+      }));
   }, [previewRows]);
 
   // Associated prompts per dataset
@@ -302,8 +307,7 @@ export const DashboardDatasetsModal: React.FC<DashboardDatasetsModalProps> = ({
     }
   };
 
-  const handleUploadSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const submitUpload = async (confirmDuplicate = false) => {
     if (!uploadFile) return;
     setUploading(true);
     setError(null);
@@ -312,19 +316,30 @@ export const DashboardDatasetsModal: React.FC<DashboardDatasetsModalProps> = ({
         uploadFile,
         uploadName.trim() || undefined,
         undefined,
-        uploadType === "ground_truth"
+        uploadType === "ground_truth",
+        confirmDuplicate
       );
       setShowUploadModal(false);
       setUploadFile(null);
       setUploadName("");
       setUploadType("task");
+      setPendingDuplicateDatasets(null);
       setFeedback(t("dashboardDatasets.uploadSuccess"));
       await loadDatasets();
     } catch (err: any) {
-      setError(err?.message || t("common.error"));
+      if (err instanceof DuplicateDatasetError) {
+        setPendingDuplicateDatasets(err.existingDatasets);
+      } else {
+        setError(err?.message || t("common.error"));
+      }
     } finally {
       setUploading(false);
     }
+  };
+
+  const handleUploadSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    await submitUpload(false);
   };
 
   const handleSaveRename = async (datasetId: string) => {
@@ -733,11 +748,11 @@ export const DashboardDatasetsModal: React.FC<DashboardDatasetsModalProps> = ({
 
       {/* Dataset Preview Dialog */}
       <Dialog open={Boolean(previewDataset)} onOpenChange={(open) => !open && setPreviewDataset(null)}>
-        <DialogContent className="sm:max-w-5xl bg-card border-border rounded-sm shadow-none">
-          <DialogHeader className="border-b border-border pb-3">
+        <DialogContent className="w-[95vw] sm:max-w-5xl max-h-[88vh] flex flex-col overflow-hidden bg-card border-border rounded-sm shadow-none">
+          <DialogHeader className="border-b border-border pb-3 shrink-0">
             <DialogTitle className="font-serif text-base font-bold text-foreground flex items-center gap-2">
-              <Eye className="w-4 h-4 text-primary" />
-              {t("dashboardDatasets.previewTitle")}: {previewDataset?.name}
+              <Eye className="w-4 h-4 text-primary shrink-0" />
+              <span className="truncate">{t("dashboardDatasets.previewTitle")}: {previewDataset?.name}</span>
             </DialogTitle>
             <DialogDescription className="text-xs font-mono text-muted-foreground">
               {previewRows
@@ -749,7 +764,7 @@ export const DashboardDatasetsModal: React.FC<DashboardDatasetsModalProps> = ({
             </DialogDescription>
           </DialogHeader>
 
-          <div className="border-t-2 border-b-2 border-foreground">
+          <div className="flex-1 min-h-0 min-w-0 w-full overflow-hidden border-t-2 border-b-2 border-foreground flex flex-col">
             {previewLoading ? (
               <div className="py-10 flex items-center justify-center gap-2 text-xs text-muted-foreground">
                 <Loader2 className="w-4 h-4 animate-spin text-primary" />
@@ -759,13 +774,13 @@ export const DashboardDatasetsModal: React.FC<DashboardDatasetsModalProps> = ({
               <DataTable
                 columns={previewColumns}
                 data={previewRows.rows}
-                containerClassName="max-h-[60vh] overflow-auto"
+                containerClassName="flex-1 min-h-0 w-full overflow-auto"
                 stickyHeader={true}
               />
             ) : null}
           </div>
 
-          <div className="flex justify-end pt-2">
+          <div className="flex justify-end pt-2 shrink-0">
             <Button
               type="button"
               variant="outline"
@@ -987,27 +1002,63 @@ export const DashboardDatasetsModal: React.FC<DashboardDatasetsModalProps> = ({
                 id="upload-ds-file"
                 type="file"
                 accept=".csv,.json,.jsonl,.xlsx,.xls"
-                onChange={(e) => setUploadFile(e.target.files?.[0] || null)}
+                onChange={(e) => {
+                  setUploadFile(e.target.files?.[0] || null);
+                  setPendingDuplicateDatasets(null);
+                }}
                 required
                 className="h-9 text-xs bg-background border-border rounded-sm file:mr-2 file:text-xs file:font-medium file:text-primary"
               />
             </div>
+
+            {pendingDuplicateDatasets && (
+              <div className="p-2.5 rounded-sm border border-amber-500/40 bg-amber-500/10 space-y-1.5 text-xs">
+                <div className="font-semibold text-amber-700 dark:text-amber-300">
+                  Este dataset ya ha sido guardado anteriormente:
+                </div>
+                <ul className="list-disc pl-4 space-y-0.5 text-foreground">
+                  {pendingDuplicateDatasets.map((ds) => (
+                    <li key={ds.id} className="truncate">
+                      <strong>{ds.name}</strong> ({ds.is_ground_truth ? "Ground Truth" : "Dataset de Tareas"})
+                    </li>
+                  ))}
+                </ul>
+                <p className="text-[11px] text-muted-foreground">
+                  Pulsa &quot;Guardar de todas formas&quot; si quieres subirlo igualmente.
+                </p>
+              </div>
+            )}
 
             <div className="flex justify-end gap-2 pt-2 border-t border-border">
               <Button
                 type="button"
                 variant="outline"
                 size="sm"
-                onClick={() => setShowUploadModal(false)}
+                onClick={() => {
+                  setPendingDuplicateDatasets(null);
+                  setShowUploadModal(false);
+                }}
                 disabled={uploading}
                 className="h-8 text-xs rounded-sm border-border"
               >
                 {t("common.cancel")}
               </Button>
-              <Button
-                type="submit"
-                size="sm"
-                disabled={uploading || !uploadFile}
+              {pendingDuplicateDatasets ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  disabled={uploading || !uploadFile}
+                  onClick={() => void submitUpload(true)}
+                  className="h-8 text-xs rounded-sm gap-1.5"
+                >
+                  {uploading && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                  <span>Guardar de todas formas</span>
+                </Button>
+              ) : (
+                <Button
+                  type="submit"
+                  size="sm"
+                  disabled={uploading || !uploadFile}
                 className="h-8 text-xs rounded-sm bg-primary text-primary-foreground hover:bg-primary/90 gap-1.5"
               >
                 {uploading ? (
@@ -1022,6 +1073,7 @@ export const DashboardDatasetsModal: React.FC<DashboardDatasetsModalProps> = ({
                   </>
                 )}
               </Button>
+              )}
             </div>
           </form>
         </DialogContent>

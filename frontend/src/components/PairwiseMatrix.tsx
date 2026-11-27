@@ -6,8 +6,6 @@ import {
   Layers,
   ArrowRightLeft,
   X,
-  Sparkles,
-  TrendingUp,
   UserCheck,
   Eye,
 } from "lucide-react";

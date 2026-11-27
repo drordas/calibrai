@@ -47,6 +47,11 @@ class PromptEngine:
                         function=cs.get("function", "suma"),
                         arguments=cs.get("arguments", []),
                         expression=cs.get("expression"),
+                        rules=cs.get("rules"),
+                        default_value=cs.get("default_value"),
+                        apply_to_nested=bool(cs.get("apply_to_nested", False)),
+                        target_blocks=cs.get("target_blocks"),
+                        inject_into_output=bool(cs.get("inject_into_output", False)),
                         ground_truth_col=cs.get("ground_truth_col"),
                         tolerance=float(cs.get("tolerance", 0.05)) if cs.get("tolerance") is not None else 0.05,
                         description=cs.get("description", "")
@@ -150,6 +155,7 @@ class PromptEngine:
                     verbatim_field=raw_dict.get("verbatim_field", "citas"),
                     source_text_col=raw_dict.get("source_text_col"),
                     rating_col=raw_dict.get("rating_col"),
+                    ground_truth_col=raw_dict.get("ground_truth_col"),
                     metrics=top_metrics,
                     metric_bindings=clean_bindings,
                     metadata=raw_dict.get("metadata", {}),
@@ -700,6 +706,20 @@ REGLAS DE EVALUACIÓN:
         # Issue 2: Validate Ground Truth columns defined in evaluation-spec
         has_gt = False
         gt_col_found = None
+        if getattr(eval_spec, "ground_truth_col", None):
+            gt_top = str(eval_spec.ground_truth_col).strip("{}")
+            if gt_top and gt_top != "none":
+                if dataset_cols and gt_top not in dataset_cols:
+                    closest = difflib.get_close_matches(gt_top, list(dataset_cols), n=1, cutoff=0.4)
+                    sugg = f"¿Quizás quisiste decir '{closest[0]}'?" if closest else None
+                    issues.append(PromptValidationIssue(
+                        severity="warning",
+                        message=f"La columna de Ground Truth '{gt_top}' no se encuentra en el dataset.",
+                        suggestion=sugg or "Se evaluará por Consenso Inter-Modelo (Unsupervised) en su lugar."
+                    ))
+                else:
+                    has_gt = True
+                    gt_col_found = gt_top
         for of in eval_spec.output_fields:
             if of.ground_truth_col:
                 gt_clean = of.ground_truth_col.strip("{}")

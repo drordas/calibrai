@@ -150,6 +150,8 @@ class ModelBenchmarkSummary(BaseModel):
     metric_cards: List[MetricCard] = Field(default_factory=list)
     computed_specs_summary: Dict[str, Dict[str, Any]] = Field(default_factory=dict)
     task_type: str = "generic"
+    failed_samples: int = 0
+    sample_errors: List[str] = Field(default_factory=list)
 
 def _to_numeric(val: Any) -> float:
     if isinstance(val, (int, float)):
@@ -173,10 +175,6 @@ def evaluate_safe_expression(expr: str, env: Dict[str, Any]) -> Any:
                 return _eval_raw(n.body)
             elif isinstance(n, ast.Constant):
                 return n.value
-            elif isinstance(n, ast.Num):
-                return n.n
-            elif isinstance(n, ast.Str):
-                return n.s
             elif isinstance(n, (ast.List, ast.Tuple)):
                 return [_eval_raw(el) for el in n.elts]
             elif isinstance(n, ast.Name):
@@ -408,11 +406,26 @@ def apply_computed_specs_to_parsed(
         rules = getattr(spec, "rules", None) or []
         default_val = getattr(spec, "default_value", None)
 
+        def _is_empty_derived(d: Dict[str, Any], key: str) -> bool:
+            if key not in d:
+                return True
+            v = d.get(key)
+            if v is None:
+                return True
+            if isinstance(v, str) and v.strip().lower() in ("", "blank", "none", "null"):
+                return True
+            return False
+
         def _eval_spec_on_env(target_env: Dict[str, Any]) -> Any:
             if fn == "conditional_rule":
                 return evaluate_conditional_rules(rules, default_val, target_env)
             if spec.expression and spec.expression.strip():
-                return evaluate_safe_math_expression(spec.expression, target_env)
+                raw_val = evaluate_safe_expression(spec.expression, target_env)
+                if raw_val is None:
+                    return 0.0
+                if isinstance(raw_val, (str, list, bool)):
+                    return raw_val
+                return _to_numeric(raw_val)
             return None
 
         if getattr(spec, "apply_to_nested", False):
@@ -430,13 +443,13 @@ def apply_computed_specs_to_parsed(
                 for dk, dv in target_container.items():
                     if allowed_blocks and str(dk).strip().lower() not in allowed_blocks:
                         continue
-                    if isinstance(dv, dict) and spec.name not in dv:
+                    if isinstance(dv, dict) and _is_empty_derived(dv, spec.name):
                         local_env = {**env, **dv}
                         derived = _eval_spec_on_env(local_env)
                         if derived is not None:
                             dv[spec.name] = derived
         else:
-            if spec.name not in eval_parsed:
+            if _is_empty_derived(eval_parsed, spec.name):
                 derived = _eval_spec_on_env(env)
                 if derived is not None:
                     eval_parsed[spec.name] = derived
@@ -879,20 +892,27 @@ def resolve_source_text(row_ctx: Dict[str, Any], eval_spec: Optional[Any] = None
     return ""
 
 
-def extract_aspect_items(parsed: Dict[str, Any]) -> List[Dict[str, Any]]:
+def extract_aspect_items(
+    parsed: Dict[str, Any],
+    quote_fields: Optional[List[str]] = None,
+) -> List[Dict[str, Any]]:
     """
     Extracts aspect/dimension items universally from:
     - {"aspectos": [...]} or any top-level list of dicts
     - {"dimensions": {...}} or {"ground_truth": {...}}
     - Top-level dimension objects (e.g. {"brand_awareness": {...}, "custom_dim": {...}})
     - Flat top-level quote/polarity structures (e.g. {"sentiment": "Positive", "quotes": [...]})
+    Supports custom `quote_fields` configured in methodology_config.pilar_1.
     """
     if not parsed or not isinstance(parsed, dict):
         return []
     
     if "aspectos" in parsed and isinstance(parsed["aspectos"], list):
         return parsed["aspectos"]
-        
+
+    configured_full = {str(qf).strip() for qf in (quote_fields or []) if str(qf).strip()}
+    configured_leaves = {qf.split(".")[-1] for qf in configured_full}
+
     dim_dict = None
     if "dimensions" in parsed and isinstance(parsed["dimensions"], dict):
         dim_dict = parsed["dimensions"]
@@ -902,12 +922,15 @@ def extract_aspect_items(parsed: Dict[str, Any]) -> List[Dict[str, Any]]:
         # Check if root has any nested dimension objects
         candidates = {
             k: v for k, v in parsed.items()
-            if isinstance(v, dict) and any(
-                sk in v for sk in [
-                    "sentiment", "polaridad", "polarity",
-                    "markers_positive", "markers_negative", "markers_neutral",
-                    "citas", "snippets", "quotes", "evidencias", "fragments"
-                ]
+            if isinstance(v, dict) and (
+                any(
+                    sk in v for sk in [
+                        "sentiment", "polaridad", "polarity",
+                        "markers_positive", "markers_negative", "markers_neutral",
+                        "citas", "snippets", "quotes", "evidencias", "fragments"
+                    ]
+                )
+                or any(sk in configured_leaves or f"{k}.{sk}" in configured_full for sk in v.keys())
             )
         }
         if candidates:
@@ -925,10 +948,20 @@ def extract_aspect_items(parsed: Dict[str, Any]) -> List[Dict[str, Any]]:
             if isinstance(pos_m, str): pos_m = [pos_m]
             if isinstance(neg_m, str): neg_m = [neg_m]
             if isinstance(neu_m, str): neu_m = [neu_m]
-            raw_snips = dv.get("snippets") or dv.get("citas") or dv.get("quotes") or dv.get("evidencias") or dv.get("fragments")
-            if isinstance(raw_snips, str):
-                raw_snips = [raw_snips]
-            snippets = raw_snips or (pos_m + neg_m + neu_m)
+            if configured_full:
+                custom_snips = []
+                for sk, sv in dv.items():
+                    if sk in configured_leaves or f"{dk}.{sk}" in configured_full:
+                        if isinstance(sv, list):
+                            custom_snips.extend(sv)
+                        elif isinstance(sv, str) and sv.strip():
+                            custom_snips.append(sv)
+                snippets = custom_snips
+            else:
+                raw_snips = dv.get("snippets") or dv.get("citas") or dv.get("quotes") or dv.get("evidencias") or dv.get("fragments")
+                if isinstance(raw_snips, str):
+                    raw_snips = [raw_snips]
+                snippets = raw_snips or (pos_m + neg_m + neu_m)
             items.append({
                 "dimension": dk,
                 "polaridad": str(pol).lower(),
@@ -946,7 +979,16 @@ def extract_aspect_items(parsed: Dict[str, Any]) -> List[Dict[str, Any]]:
     flat_pos = parsed.get("markers_positive") or parsed.get("citas_positivas") or []
     flat_neg = parsed.get("markers_negative") or parsed.get("citas_negativas") or []
     flat_neu = parsed.get("markers_neutral") or parsed.get("citas_neutras") or []
-    flat_quotes = parsed.get("citas") or parsed.get("quotes") or parsed.get("snippets") or parsed.get("evidencias") or parsed.get("verbatim_quote") or []
+    if configured_full:
+        flat_quotes = []
+        for qf in configured_full:
+            val = parsed.get(qf) if qf in parsed else parsed.get(qf.split(".")[-1])
+            if isinstance(val, list):
+                flat_quotes.extend(val)
+            elif isinstance(val, str) and val.strip():
+                flat_quotes.append(val)
+    else:
+        flat_quotes = parsed.get("citas") or parsed.get("quotes") or parsed.get("snippets") or parsed.get("evidencias") or parsed.get("verbatim_quote") or []
     if isinstance(flat_pos, str): flat_pos = [flat_pos]
     if isinstance(flat_neg, str): flat_neg = [flat_neg]
     if isinstance(flat_neu, str): flat_neu = [flat_neu]
@@ -1010,6 +1052,15 @@ class MetricsEngine:
         throughput = total_tokens / total_sec if total_sec > 0 else 0.0
         format_validity = (valid_format_count / total_samples) * 100.0 if total_samples > 0 else 0.0
         success_rate = (success_count / total_samples) * 100.0 if total_samples > 0 else 0.0
+        failed_samples = sum(
+            1 for r in results
+            if not r.get("success", False) or bool(r.get("error_message")) or not r.get("is_valid_json", False)
+        )
+        sample_errors = list(dict.fromkeys(
+            str(r.get("error_message")).strip()
+            for r in results
+            if r.get("error_message")
+        ))[:5]
 
         task_type = eval_spec.task_type if eval_spec else "generic"
 
@@ -1200,7 +1251,9 @@ class MetricsEngine:
                 verbatim_faithfulness_rate=round(exact_rate, 1),
                 rule_consistency_rate=round(tol_rate, 1),
                 metric_cards=cards,
-                task_type="numeric_math"
+                task_type="numeric_math",
+                failed_samples=failed_samples,
+                sample_errors=sample_errors,
             )
             return attach_computed_specs_to_summary(summary, results, eval_spec)
 
@@ -1235,10 +1288,13 @@ class MetricsEngine:
             net_sentiment_scores: List[float] = []
 
             verbatim_mode = "tolerant"
+            p1_quote_fields = None
             if eval_spec and getattr(eval_spec, "methodology_config", None):
                 p1_cfg = eval_spec.methodology_config.get("pilar_1") or {}
                 if p1_cfg.get("verbatim_mode") in ["strict", "tolerant"]:
                     verbatim_mode = p1_cfg["verbatim_mode"]
+                if isinstance(p1_cfg.get("quote_fields"), list) and p1_cfg.get("quote_fields"):
+                    p1_quote_fields = p1_cfg["quote_fields"]
 
             mb = (eval_spec.metric_bindings or {}) if eval_spec and getattr(eval_spec, "metric_bindings", None) else {}
             rc_bindings = mb.get("rating_congruence") if isinstance(mb, dict) else None
@@ -1298,7 +1354,7 @@ class MetricsEngine:
                             pass
 
                 # Universal extraction of aspect items
-                aspects_list = extract_aspect_items(parsed)
+                aspects_list = extract_aspect_items(parsed, quote_fields=p1_quote_fields)
 
                 # Disjointness check (Pos ∩ Neg = ∅, Pos ∩ Neu = ∅, Neg ∩ Neu = ∅)
                 pos_snippets = set()
@@ -1532,7 +1588,9 @@ class MetricsEngine:
                 rule_consistency_rate=round(rule_rate, 1),
                 dimension_activation_rates=activation_rates,
                 metric_cards=cards,
-                task_type="aspect_polarity"
+                task_type="aspect_polarity",
+                failed_samples=failed_samples,
+                sample_errors=sample_errors,
             )
             return attach_computed_specs_to_summary(summary, results, eval_spec)
 
@@ -1598,7 +1656,9 @@ class MetricsEngine:
                 success_rate=round(success_rate, 1),
                 internal_consistency_score=round(format_validity, 1),
                 metric_cards=cards,
-                task_type=task_type
+                task_type=task_type,
+                failed_samples=failed_samples,
+                sample_errors=sample_errors,
             )
             return attach_computed_specs_to_summary(summary, results, eval_spec)
 

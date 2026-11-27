@@ -227,6 +227,8 @@ export interface PromptValidationResponse {
   is_valid: boolean;
   output_format?: string;
   task_type?: string;
+  failed_samples?: number;
+  sample_errors?: string[];
   prompt_text?: string;
   output_schema?: Record<string, any>;
   computed_specs?: ComputedSpec[];
@@ -278,6 +280,8 @@ export interface ModelBenchmarkSummary {
     description?: string;
   }>;
   task_type?: string;
+  failed_samples?: number;
+  sample_errors?: string[];
   is_human_baseline?: boolean;
   model_name?: string;
 }
@@ -297,6 +301,8 @@ export interface PairwiseComparison {
   dimension_agreements?: Record<string, number>;
   evaluated_fields?: string[];
   task_type?: string;
+  failed_samples?: number;
+  sample_errors?: string[];
   is_vs_human?: boolean;
   human_baseline_ratio?: number;
 }
@@ -539,6 +545,8 @@ export interface ExperimentCreateRequest {
   template: string;
   system_prompt?: string;
   task_type?: string;
+  failed_samples?: number;
+  sample_errors?: string[];
   eval_spec?: Record<string, any>;
   sample_size: number;
   execution_mode: "sequential" | "parallel";

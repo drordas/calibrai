@@ -10,7 +10,7 @@ import {
 } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { BookOpen, FunctionSquare, Info, ShieldCheck, CheckCircle2 } from "lucide-react";
+import { BookOpen, FunctionSquare, CheckCircle2 } from "lucide-react";
 import { MathFormula } from "./MathFormula";
 
 interface MetricFormulaModalProps {

@@ -214,8 +214,15 @@ export const LaunchExperimentView: React.FC<LaunchExperimentViewProps> = ({
 
   // Extract all variables defined in the spec (JSON schema keys, nested keys, computed_specs, specColumns)
   // and any metric_bindings configured in Step 2 (Catálogo de Métricas)
-  const { availableSpecVariables, defaultSpecPilar2Fields, parsedMetricBindings } = useMemo(() => {
+  const {
+    availableSpecVariables,
+    defaultSpecPilar2Fields,
+    availablePilar1QuoteFields,
+    defaultPilar1QuoteFields,
+    parsedMetricBindings,
+  } = useMemo(() => {
     const vars: string[] = [];
+    const jsonLeafVars: string[] = [];
     const bindings: Record<string, string[] | Record<string, string[]>> = {};
     const text = template || "";
 
@@ -229,9 +236,11 @@ export const LaunchExperimentView: React.FC<LaunchExperimentViewProps> = ({
             if (v && typeof v === "object" && !Array.isArray(v)) {
               for (const subKey of Object.keys(v)) {
                 vars.push(`${k}.${subKey}`);
+                jsonLeafVars.push(`${k}.${subKey}`);
               }
             } else {
               vars.push(k);
+              jsonLeafVars.push(k);
             }
           }
         }
@@ -330,12 +339,37 @@ export const LaunchExperimentView: React.FC<LaunchExperimentViewProps> = ({
         ? sentimentVars
         : finalVars.slice(0, 4);
 
+    const uniqueJsonLeaves = Array.from(new Set(jsonLeafVars.filter(Boolean)));
+    const p1Available =
+      uniqueJsonLeaves.length > 0
+        ? uniqueJsonLeaves
+        : ["markers_positive", "markers_negative", "markers_neutral", "citas"];
+    const p1Matched = p1Available.filter((v) =>
+      /marker|cita|quote|evidenc|extract|frase|snip|fragment/i.test(v)
+    );
+    const p1Default = p1Matched.length > 0 ? p1Matched : p1Available;
+
     return {
       availableSpecVariables: finalVars,
       defaultSpecPilar2Fields: defaultP2.length > 0 ? defaultP2 : finalVars,
+      availablePilar1QuoteFields: p1Available,
+      defaultPilar1QuoteFields: p1Default,
       parsedMetricBindings: bindings,
     };
   }, [template, specColumns, contextColumns]);
+
+  const [pilar1QuoteFields, setPilar1QuoteFields] = useState<string[]>(
+    Array.isArray(initialMeth?.pilar_1?.quote_fields) && initialMeth.pilar_1.quote_fields.length > 0
+      ? initialMeth.pilar_1.quote_fields
+      : defaultPilar1QuoteFields
+  );
+
+  useEffect(() => {
+    setPilar1QuoteFields((prev) => {
+      const validPrev = prev.filter((f) => availablePilar1QuoteFields.includes(f));
+      return validPrev.length > 0 ? validPrev : defaultPilar1QuoteFields;
+    });
+  }, [availablePilar1QuoteFields, defaultPilar1QuoteFields]);
 
   // Pilar 2 Config: Target Fields for Cohen's Kappa & Krippendorff's Alpha (strictly from spec)
   const [pilar2Fields, setPilar2Fields] = useState<string[]>(
@@ -474,6 +508,7 @@ export const LaunchExperimentView: React.FC<LaunchExperimentViewProps> = ({
         pilar_1: {
           source_text_col: pilar1SourceCol,
           verbatim_mode: pilar1VerbatimMode,
+          quote_fields: pilar1QuoteFields,
         },
         pilar_2: {
           target_fields: pilar2Fields,
@@ -845,13 +880,33 @@ export const LaunchExperimentView: React.FC<LaunchExperimentViewProps> = ({
                   </Select>
                 </div>
                 <div className="space-y-1">
-                  <Label className="text-[11px] text-muted-foreground font-medium">Campos de Citas Extraídas (Auditados)</Label>
-                  <div className="flex flex-wrap gap-1 pt-1">
-                    {["markers_positive", "markers_negative", "markers_neutral", "citas"].map((f) => (
-                      <Badge key={f} variant="outline" className="text-[10px] font-mono bg-background/60">
-                        {f}
-                      </Badge>
-                    ))}
+                  <Label className="text-[11px] text-muted-foreground font-medium">Campos de Citas / Evidencias a Auditar</Label>
+                  <div className="flex flex-wrap gap-1.5 pt-1">
+                    {availablePilar1QuoteFields.map((f) => {
+                      const active = pilar1QuoteFields.includes(f);
+                      return (
+                        <button
+                          key={f}
+                          type="button"
+                          onClick={() =>
+                            setPilar1QuoteFields((prev) =>
+                              prev.includes(f)
+                                ? prev.length > 1
+                                  ? prev.filter((x) => x !== f)
+                                  : prev
+                                : [...prev, f]
+                            )
+                          }
+                          className={`px-2 py-0.5 rounded text-[10px] font-mono border transition-colors ${
+                            active
+                              ? "bg-primary/15 border-primary text-primary font-semibold"
+                              : "bg-background/60 border-border text-muted-foreground hover:text-foreground"
+                          }`}
+                        >
+                          {f}
+                        </button>
+                      );
+                    })}
                   </div>
                 </div>
               </div>
@@ -890,7 +945,7 @@ export const LaunchExperimentView: React.FC<LaunchExperimentViewProps> = ({
                 className="h-7 px-2 text-[11px] text-muted-foreground hover:text-foreground gap-1"
               >
                 <Settings2 className="w-3 h-3" />
-                <span>{expandedPilar === "pilar_2" ? "Ocultar" : "Personalizar Campos"}</span>
+                <span>{expandedPilar === "pilar_2" ? "Ocultar" : "Personalizar"}</span>
                 {expandedPilar === "pilar_2" ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
               </Button>
             </div>
@@ -1013,7 +1068,7 @@ export const LaunchExperimentView: React.FC<LaunchExperimentViewProps> = ({
                 className="h-7 px-2 text-[11px] text-muted-foreground hover:text-foreground gap-1 shrink-0 cursor-pointer"
               >
                 <Settings2 className="w-3 h-3" />
-                <span>{expandedPilar === "pilar_3" ? "Ocultar" : "Personalizar ICC"}</span>
+                <span>{expandedPilar === "pilar_3" ? "Ocultar" : "Personalizar"}</span>
                 {expandedPilar === "pilar_3" ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
               </Button>
             </div>
@@ -1155,7 +1210,7 @@ export const LaunchExperimentView: React.FC<LaunchExperimentViewProps> = ({
                 className="h-7 px-2 text-[11px] text-muted-foreground hover:text-foreground gap-1 shrink-0"
               >
                 <Settings2 className="w-3 h-3" />
-                <span>{expandedPilar === "pilar_4" ? "Ocultar" : "Variable Criterio"}</span>
+                <span>{expandedPilar === "pilar_4" ? "Ocultar" : "Personalizar"}</span>
                 {expandedPilar === "pilar_4" ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
               </Button>
             </div>

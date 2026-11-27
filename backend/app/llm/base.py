@@ -84,17 +84,17 @@ def parse_structured_block_format(text: str) -> Tuple[Optional[Dict[str, Any]], 
         dim_key = dim_raw.lower()
         content = m.group(2)
 
-        sent_m = re.search(r"SENTIMENT:\s*([^\n\r]+)", content, re.IGNORECASE)
-        raw_sentiment = sent_m.group(1).strip() if sent_m else "blank"
+        sent_m = re.search(r"SENTIMENT:[ \t]*([^\n\r]*)", content, re.IGNORECASE)
+        raw_sentiment = (sent_m.group(1).strip() if sent_m else "") or "blank"
 
-        pos_m = re.search(r"MARKERS_POSITIVE:\s*([^\n\r]+)", content, re.IGNORECASE)
-        pos_raw = pos_m.group(1).strip() if pos_m else "blank"
+        pos_m = re.search(r"MARKERS_POSITIVE:[ \t]*([^\n\r]*)", content, re.IGNORECASE)
+        pos_raw = (pos_m.group(1).strip() if pos_m else "") or "blank"
 
-        neg_m = re.search(r"MARKERS_NEGATIVE:\s*([^\n\r]+)", content, re.IGNORECASE)
-        neg_raw = neg_m.group(1).strip() if neg_m else "blank"
+        neg_m = re.search(r"MARKERS_NEGATIVE:[ \t]*([^\n\r]*)", content, re.IGNORECASE)
+        neg_raw = (neg_m.group(1).strip() if neg_m else "") or "blank"
 
-        neu_m = re.search(r"MARKERS_NEUTRAL:\s*([^\n\r]+)", content, re.IGNORECASE)
-        neu_raw = neu_m.group(1).strip() if neu_m else "blank"
+        neu_m = re.search(r"MARKERS_NEUTRAL:[ \t]*([^\n\r]*)", content, re.IGNORECASE)
+        neu_raw = (neu_m.group(1).strip() if neu_m else "") or "blank"
 
         pos_frags = clean_marker_fragments(pos_raw)
         neg_frags = clean_marker_fragments(neg_raw)
@@ -200,7 +200,7 @@ def parse_schema_structured_blocks(text: str, output_schema: Dict[str, Any]) -> 
         section_obj: Dict[str, Any] = {}
 
         for sub_k, sub_def in sub_schema.items():
-            sub_match = re.search(rf"(?i)\b{re.escape(sub_k)}\b\s*[:=]\s*([^\n\r]+)", content)
+            sub_match = re.search(rf"(?i)\b{re.escape(sub_k)}\b[ \t]*[:=][ \t]*([^\n\r]*)", content)
             raw_val = sub_match.group(1).strip() if sub_match else ""
 
             if isinstance(sub_def, list):
@@ -309,7 +309,7 @@ def assemble_backend_json(
                 continue
 
         # 4. Try regex search: "key": value or key: value or key = value
-        pattern = rf"(?:[\"']?{re.escape(key)}[\"']?\s*[:=]\s*)([^\n\r,}}]+)"
+        pattern = rf"(?:[\"']?{re.escape(key)}[\"']?[ \t]*[:=][ \t]*)([^\n\r,}}]+)"
         match = re.search(pattern, text_clean, re.IGNORECASE)
 
         if isinstance(default_val, dict):

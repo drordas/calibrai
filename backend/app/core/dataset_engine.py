@@ -2,6 +2,7 @@ import os
 import re
 import uuid
 import json
+import hashlib
 import threading
 import duckdb
 import pandas as pd
@@ -15,7 +16,6 @@ class DatasetEngine:
         self._lock = threading.RLock()
         self.conn = duckdb.connect(database=":memory:")
         self.datasets: Dict[str, Dict[str, Any]] = {}
-        self._load_sample_datasets()
         self._load_uploaded_datasets()
 
     def _load_sample_datasets(self):
@@ -36,6 +36,9 @@ class DatasetEngine:
                 for p in sorted(settings.upload_dir.glob("*.*")):
                     if p.suffix.lower() in [".csv", ".json", ".jsonl", ".xlsx", ".xls"]:
                         try:
+                            prefixed = re.match(r"^(ds_[a-f0-9]+)__(.+)$", p.name)
+                            resolved_id = prefixed.group(1) if prefixed else f"upload_{p.stem}"
+                            orig_stem = Path(prefixed.group(2)).stem if prefixed else p.stem
                             # Skip if already registered from sample_dir with the same filename
                             if any(
                                 meta.get("summary") and meta["summary"].filename == p.name
@@ -44,9 +47,10 @@ class DatasetEngine:
                                 continue
                             self.register_dataset(
                                 p,
-                                name=p.stem.replace("_", " ").title(),
+                                name=orig_stem.replace("_", " ").title(),
                                 is_sample=False,
-                                dataset_id=f"upload_{p.stem}",
+                                dataset_id=resolved_id,
+                                force_new=bool(prefixed),
                             )
                         except Exception as e:
                             print(f"Error loading uploaded dataset {p}: {e}")
@@ -98,7 +102,11 @@ class DatasetEngine:
         if matched_existing_id:
             dataset_id = matched_existing_id
         elif not dataset_id:
-            dataset_id = benchmark_id if benchmark_id else f"ds_{uuid.uuid4().hex[:10]}"
+            dataset_id = (
+                benchmark_id
+                if (benchmark_id and not force_new and benchmark_id not in self.datasets)
+                else f"ds_{uuid.uuid4().hex[:10]}"
+            )
 
         table_name = f"t_{re.sub(r'[^a-zA-Z0-9_]', '_', dataset_id)}"
 
@@ -285,6 +293,7 @@ class DatasetEngine:
         is_gt = bool(is_ground_truth) if is_ground_truth is not None else bool(has_gt_cols or has_eval_dims)
 
         file_size = file_path.stat().st_size if file_path.exists() else 0
+        file_hash = hashlib.sha256(file_path.read_bytes()).hexdigest() if file_path.exists() else None
 
         summary = DatasetSummary(
             id=dataset_id,
@@ -297,7 +306,8 @@ class DatasetEngine:
             is_sample=is_sample,
             detected_id_column=detected_id,
             is_ground_truth=is_gt,
-            benchmark_id=benchmark_id
+            benchmark_id=benchmark_id,
+            file_hash=file_hash,
         )
 
         # Pre-cache IDs for zero-latency compatibility checks without DuckDB query contention
@@ -316,10 +326,26 @@ class DatasetEngine:
             "summary": summary,
             "table_name": table_name,
             "file_path": file_path,
-            "cached_ids": cached_ids
+            "cached_ids": cached_ids,
+            "file_hash": file_hash,
         }
 
         return summary
+
+    def find_datasets_by_hash(self, file_hash: str) -> List[Dict[str, Any]]:
+        if not file_hash:
+            return []
+        matches = []
+        for meta in self.datasets.values():
+            if meta.get("file_hash") == file_hash and meta.get("summary"):
+                s: DatasetSummary = meta["summary"]
+                matches.append({
+                    "id": s.id,
+                    "name": s.name,
+                    "filename": s.filename,
+                    "is_ground_truth": bool(s.is_ground_truth),
+                })
+        return matches
 
     def list_datasets(self) -> List[DatasetSummary]:
         return [meta["summary"] for meta in self.datasets.values()]

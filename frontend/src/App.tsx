@@ -305,8 +305,13 @@ export function App() {
   const [isPromptLinterValid, setIsPromptLinterValid] = useState<boolean>(true);
 
   // Sequential Validation Rules:
-  // Paso 1 válido: Dataset seleccionado Y al menos una columna de Texto Principal asignada (o template ya cargado)
-  const isStep1Valid = Boolean(selectedDataset && (contextColumns.length > 0 || inputColumns.length > 0 || template.length > 0));
+  // Paso 1 válido: Dataset seleccionado, rol MUESTRA asignado a una columna, y rol ID asignado si hay Ground Truth
+  const hasGroundTruthSelected = Boolean(groundTruthDatasetId || groundTruthDatasetIds.length > 0);
+  const isStep1Valid = Boolean(
+    selectedDataset &&
+      inputColumns.length > 0 &&
+      (!hasGroundTruthSelected || Boolean(idColumn && idColumn.trim()))
+  );
   // Paso 2 válido: Paso 1 completado, plantilla no vacía y sin errores en el linter
   const isStep2Valid = isStep1Valid && template.trim().length > 0 && isPromptLinterValid;
   // Paso 3 válido: Paso 2 completado Y al menos un modelo seleccionado (Modelos & Hardware)
@@ -338,6 +343,7 @@ export function App() {
     setGroundTruthName(t("results.humanExpert"));
     setGroundTruthSchema(null);
     setInitialLaunchConfig(null);
+    setPromptEvalSpecPatch({});
     setCurrentExperimentId(null);
     setWizardLoadKey((k) => k + 1);
     setWizardStep(1);
@@ -353,15 +359,26 @@ export function App() {
   const [showSaveTemplateModal, setShowSaveTemplateModal] = useState<boolean>(false);
   const [templateNameInput, setTemplateNameInput] = useState<string>("");
   const [templateNameError, setTemplateNameError] = useState<string | null>(null);
+  const [promptEvalSpecPatch, setPromptEvalSpecPatch] = useState<Record<string, any>>({});
+  const [existingTemplatesForSave, setExistingTemplatesForSave] = useState<ExperimentSummary[]>([]);
+  const [selectedOverwriteTemplateId, setSelectedOverwriteTemplateId] = useState<string | null>(null);
 
   const handleSaveTemplateStep = () => {
     if (!selectedDataset) return;
+    setSelectedOverwriteTemplateId(editingTemplateId);
     setTemplateNameInput(
       initialLaunchConfig?.name?.trim() ||
         `Plantilla: ${selectedDataset.name.replace(/\.[^/.]+$/, "")} — ${taskType}`
     );
     setTemplateNameError(null);
     setShowSaveTemplateModal(true);
+    fetchExperiments()
+      .then((list) => {
+        setExistingTemplatesForSave(
+          list.filter((exp) => exp.status === "draft" || exp.id === editingTemplateId)
+        );
+      })
+      .catch(() => {});
   };
 
   const handleConfirmSaveTemplate = async (e: React.FormEvent) => {
@@ -376,6 +393,11 @@ export function App() {
     setTemplateSavedFeedback(false);
     setTemplateNameError(null);
     try {
+      const mergedEvalSpec = {
+        ...(initialLaunchConfig?.evalSpec || {}),
+        ...(promptEvalSpecPatch || {}),
+        spec_columns: specColumns,
+      };
       const payload = {
         name: cleanName,
         description: initialLaunchConfig?.description || "",
@@ -392,16 +414,14 @@ export function App() {
         template: template || "",
         system_prompt: systemPrompt || "",
         task_type: taskType,
-        eval_spec: {
-          ...(initialLaunchConfig?.evalSpec || {}),
-          spec_columns: specColumns,
-        },
+        eval_spec: mergedEvalSpec,
         sample_size: sampleSize,
         execution_mode: initialLaunchConfig?.executionMode || "sequential",
         model_temperatures: modelTemperatures || {},
       };
-      if (editingTemplateId) {
-        const updated = await updateExperimentTemplate(editingTemplateId, payload);
+      const targetOverwriteId = selectedOverwriteTemplateId;
+      if (targetOverwriteId) {
+        const updated = await updateExperimentTemplate(targetOverwriteId, payload);
         setEditingTemplateId(updated.id);
       } else {
         const created = await createExperiment(payload, false);
@@ -415,6 +435,7 @@ export function App() {
           evalSpec: {},
         }),
         name: cleanName,
+        evalSpec: mergedEvalSpec,
       }));
       setShowSaveTemplateModal(false);
       setTemplateSavedFeedback(true);
@@ -476,6 +497,7 @@ export function App() {
         executionMode: detail.execution_mode === "parallel" ? "parallel" : "sequential",
         evalSpec: detail.eval_spec || {},
       });
+      setPromptEvalSpecPatch(detail.eval_spec || {});
       setCurrentExperimentId(null);
       setIsTemplateMode(true);
       setEditingTemplateId(detail.status === "draft" ? detail.id : null);
@@ -1434,7 +1456,9 @@ export function App() {
                   <div className="flex items-center gap-3 flex-wrap justify-end">
                     {!isStep1Valid && (
                       <span className="text-[11px] text-amber-600 dark:text-amber-400 font-medium">
-                        {t("wizard.step1Warning")}
+                        {!selectedDataset || inputColumns.length === 0
+                          ? "Asigna el rol MUESTRA a una columna del dataset para continuar."
+                          : "Asigna el rol ID a una columna para comparar con el Ground Truth."}
                       </span>
                     )}
                     {isTemplateMode && selectedDataset && (
@@ -1494,6 +1518,8 @@ export function App() {
                     groundTruthDatasetIds={groundTruthDatasetIds}
                     groundTruthSchema={groundTruthSchema}
                     idColumn={idColumn}
+                    initialEvalSpec={initialLaunchConfig?.evalSpec}
+                    onEvalSpecChange={setPromptEvalSpecPatch}
                     onValidationStateChange={(isValid, isValidating) =>
                       setIsPromptLinterValid(isValid && !isValidating)
                     }
@@ -1949,14 +1975,52 @@ export function App() {
           <DialogHeader>
             <DialogTitle className="text-sm font-bold flex items-center gap-2">
               <Save className="w-4 h-4 text-primary" />
-              <span>{editingTemplateId ? "Actualizar Plantilla" : "Guardar Plantilla"}</span>
+              <span>{selectedOverwriteTemplateId ? "Actualizar / Sobrescribir Plantilla" : "Guardar Plantilla"}</span>
             </DialogTitle>
             <DialogDescription className="text-xs">
-              Introduce el nombre con el que quieres guardar esta plantilla de experimento.
+              Introduce un nombre nuevo o selecciona una plantilla existente para sobrescribirla.
             </DialogDescription>
           </DialogHeader>
 
           <form onSubmit={handleConfirmSaveTemplate} className="space-y-3">
+            {existingTemplatesForSave.length > 0 && (
+              <div className="space-y-1.5">
+                <Label className="text-[11px] font-semibold text-muted-foreground">
+                  Plantillas guardadas (haz clic para seleccionar y sobrescribir):
+                </Label>
+                <div className="max-h-32 overflow-y-auto rounded-sm border border-border bg-muted/15 divide-y divide-border/60">
+                  {existingTemplatesForSave.map((tpl) => {
+                    const isSelected = selectedOverwriteTemplateId === tpl.id;
+                    const isCurrent = editingTemplateId === tpl.id;
+                    return (
+                      <button
+                        key={tpl.id}
+                        type="button"
+                        onClick={() => {
+                          if (isSelected) {
+                            setSelectedOverwriteTemplateId(null);
+                          } else {
+                            setSelectedOverwriteTemplateId(tpl.id);
+                            setTemplateNameInput(tpl.name);
+                          }
+                        }}
+                        className={`w-full text-left px-2.5 py-1.5 text-xs flex items-center justify-between gap-2 transition-colors ${
+                          isSelected
+                            ? "bg-primary/15 text-primary font-semibold"
+                            : "hover:bg-muted/50 text-foreground"
+                        }`}
+                      >
+                        <span className="truncate">{tpl.name}</span>
+                        <span className="text-[10px] shrink-0 text-muted-foreground">
+                          {isSelected ? "✓ Sobrescribir" : isCurrent ? "Actual" : "Seleccionar"}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
             <div className="space-y-1.5">
               <Label htmlFor="save-template-name-input" className="text-xs font-semibold">
                 Nombre de la plantilla
@@ -1964,11 +2028,25 @@ export function App() {
               <Input
                 id="save-template-name-input"
                 value={templateNameInput}
-                onChange={(e) => setTemplateNameInput(e.target.value)}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setTemplateNameInput(val);
+                  if (selectedOverwriteTemplateId) {
+                    const matched = existingTemplatesForSave.find((t) => t.id === selectedOverwriteTemplateId);
+                    if (matched && matched.name !== val.trim()) {
+                      setSelectedOverwriteTemplateId(null);
+                    }
+                  }
+                }}
                 placeholder="Ej. Aaker Reviews v3 (Qwen + Gemini)"
                 autoFocus
                 className="text-xs h-9"
               />
+              {selectedOverwriteTemplateId && (
+                <p className="text-[11px] text-primary font-medium">
+                  Se sobrescribirá la plantilla seleccionada.
+                </p>
+              )}
             </div>
 
             {templateNameError && (
@@ -1993,7 +2071,7 @@ export function App() {
                 ) : (
                   <>
                     <Save className="w-3.5 h-3.5" />
-                    <span>Guardar</span>
+                    <span>{selectedOverwriteTemplateId ? "Sobrescribir" : "Guardar"}</span>
                   </>
                 )}
               </Button>

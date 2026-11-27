@@ -1,3 +1,4 @@
+import hashlib
 import shutil
 import uuid
 from collections import Counter
@@ -640,6 +641,7 @@ async def upload_dataset(
     name: Optional[str] = Form(None),
     expected_input_dataset_id: Optional[str] = Form(None),
     is_ground_truth: Optional[bool] = Form(None),
+    confirm_duplicate: bool = Form(False),
     current_user: Optional[User] = Depends(get_optional_current_user),
     db: Session = Depends(get_db),
 ):
@@ -650,15 +652,51 @@ async def upload_dataset(
             detail=f"Formato '{ext}' no soportado. Por favor sube archivos CSV, JSON o Excel (.xlsx/.xls)."
         )
 
-    file_path = settings.upload_dir / file.filename
+    raw_bytes = await file.read()
+    file_hash = hashlib.sha256(raw_bytes).hexdigest()
+
+    if not confirm_duplicate:
+        existing_matches: Dict[str, Dict[str, Any]] = {}
+        for m in dataset_engine.find_datasets_by_hash(file_hash):
+            existing_matches[m["id"]] = m
+        for rec in db.query(DatasetRecord).filter(DatasetRecord.file_hash == file_hash).all():
+            if rec.dataset_id not in dataset_engine.datasets:
+                continue
+            if rec.dataset_id in existing_matches:
+                if rec.display_name:
+                    existing_matches[rec.dataset_id]["name"] = rec.display_name
+            else:
+                existing_matches[rec.dataset_id] = {
+                    "id": rec.dataset_id,
+                    "name": rec.display_name or rec.dataset_id,
+                    "filename": rec.display_name or rec.dataset_id,
+                    "is_ground_truth": bool(rec.is_ground_truth),
+                }
+        if existing_matches:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "DUPLICATE_DATASET_HASH",
+                    "message": "Ya existe un dataset guardado con exactamente el mismo contenido.",
+                    "file_hash": file_hash,
+                    "existing_datasets": list(existing_matches.values()),
+                },
+            )
+
+    is_force_new = bool(expected_input_dataset_id or is_ground_truth or confirm_duplicate)
+    assigned_id = f"ds_{uuid.uuid4().hex[:10]}" if is_force_new else None
+    stored_filename = f"{assigned_id}__{file.filename}" if assigned_id else file.filename
+    file_path = settings.upload_dir / stored_filename
     try:
         with open(file_path, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
+            buffer.write(raw_bytes)
         
         summary = dataset_engine.register_dataset(
             file_path=file_path,
             name=name or Path(file.filename).stem.replace("_", " ").title(),
+            dataset_id=assigned_id,
             is_ground_truth=is_ground_truth,
+            force_new=is_force_new,
         )
 
         # If an expected input dataset ID is provided, validate compatibility
@@ -677,6 +715,7 @@ async def upload_dataset(
                 existing_rec.owner_user_id = current_user.id
                 existing_rec.display_name = summary.name
                 existing_rec.is_ground_truth = summary.is_ground_truth
+                existing_rec.file_hash = file_hash
             else:
                 db.add(
                     DatasetRecord(
@@ -684,6 +723,7 @@ async def upload_dataset(
                         owner_user_id=current_user.id,
                         display_name=summary.name,
                         is_ground_truth=summary.is_ground_truth,
+                        file_hash=file_hash,
                     )
                 )
             db.commit()

@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useCallback, ReactNode } from "react";
+import React, { createContext, useContext, useState, useCallback, ReactNode } from "react";
 import esDict from "../locales/es.json";
 import ukDict from "../locales/uk.json";
 import usaDict from "../locales/usa.json";

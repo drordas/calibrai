@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo } from "react";
 import { DatasetSummary, PaginatedRowsResponse } from "../types";
-import { fetchPaginatedRows, uploadDataset, deleteDataset, fetchCompatibleGroundTruths, CompatibleGroundTruth } from "../services/api";
+import { fetchPaginatedRows, uploadDataset, deleteDataset, fetchCompatibleGroundTruths, CompatibleGroundTruth, DuplicateDatasetError, DuplicateDatasetMatch } from "../services/api";
 import { useTranslation } from "../i18n";
 import {
   Database,
@@ -13,6 +13,7 @@ import {
   Sparkles,
   Trash2,
   Loader2,
+  AlertTriangle,
   AlertCircle,
   Key,
   CheckSquare,
@@ -113,6 +114,11 @@ export const DatasetViewer: React.FC<DatasetViewerProps> = ({
   const [loadingCompat, setLoadingCompat] = useState<boolean>(false);
   const [gtUploadError, setGtUploadError] = useState<string | null>(null);
   const [gtUploading, setGtUploading] = useState<boolean>(false);
+  const [pendingDuplicateUpload, setPendingDuplicateUpload] = useState<{
+    file: File;
+    kind: "task" | "ground_truth";
+    existingDatasets: DuplicateDatasetMatch[];
+  } | null>(null);
 
   // Separate Corpus vs Ground Truth datasets
   const corpusDatasets = datasets.filter((ds) => !ds.is_ground_truth);
@@ -213,25 +219,38 @@ export const DatasetViewer: React.FC<DatasetViewerProps> = ({
       .finally(() => setLoadingCompat(false));
   }, [selectedDataset, datasets]);
 
-  const handleGroundTruthUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (!e.target.files || e.target.files.length === 0) return;
-    const file = e.target.files[0];
+  const performGroundTruthUpload = async (file: File, confirmDuplicate = false) => {
     setGtUploading(true);
     setGtUploadError(null);
     try {
-      const summary = await uploadDataset(file, undefined, selectedDataset?.id);
+      const summary = await uploadDataset(file, undefined, selectedDataset?.id, undefined, confirmDuplicate);
       onRefreshDatasets();
       if (selectedDataset) {
         const res = await fetchCompatibleGroundTruths(selectedDataset.id);
         setCompatibleGroundTruths(res);
       }
-      updateSelectedGtIds([...selectedGtIds, summary.id]);
+      updateSelectedGtIds(Array.from(new Set([...selectedGtIds, summary.id])));
+      setPendingDuplicateUpload(null);
     } catch (err: any) {
-      setGtUploadError(err.message || t("dataset.gtUploadErrorFallback"));
+      if (err instanceof DuplicateDatasetError) {
+        setPendingDuplicateUpload({
+          file,
+          kind: "ground_truth",
+          existingDatasets: err.existingDatasets,
+        });
+      } else {
+        setGtUploadError(err.message || t("dataset.gtUploadErrorFallback"));
+      }
     } finally {
       setGtUploading(false);
-      e.target.value = "";
     }
+  };
+
+  const handleGroundTruthUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!e.target.files || e.target.files.length === 0) return;
+    const file = e.target.files[0];
+    e.target.value = "";
+    await performGroundTruthUpload(file, false);
   };
 
   const handleDelete = async (datasetId: string) => {
@@ -288,21 +307,34 @@ export const DatasetViewer: React.FC<DatasetViewerProps> = ({
     }
   };
 
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
+  const performTaskUpload = async (file: File, confirmDuplicate = false) => {
     setUploading(true);
     setUploadError(null);
     try {
-      const newDs = await uploadDataset(file);
+      const newDs = await uploadDataset(file, undefined, undefined, undefined, confirmDuplicate);
       onRefreshDatasets();
       onSelectDataset(newDs);
+      setPendingDuplicateUpload(null);
     } catch (err: any) {
-      setUploadError(err.message || t("dataset.uploadError"));
+      if (err instanceof DuplicateDatasetError) {
+        setPendingDuplicateUpload({
+          file,
+          kind: "task",
+          existingDatasets: err.existingDatasets,
+        });
+      } else {
+        setUploadError(err.message || t("dataset.uploadError"));
+      }
     } finally {
       setUploading(false);
     }
+  };
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = "";
+    await performTaskUpload(file, false);
   };
 
   // MUESTRA is single-select (one primary column per dataset, like ID).
@@ -1296,6 +1328,78 @@ export const DatasetViewer: React.FC<DatasetViewerProps> = ({
                   <span>{t("dataset.deleteModalConfirm")}</span>
                 </>
               )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Duplicate Dataset Hash Warning Modal */}
+      <Dialog
+        open={pendingDuplicateUpload !== null}
+        onOpenChange={(open) => {
+          if (!open && !uploading && !gtUploading) {
+            setPendingDuplicateUpload(null);
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-md glass-panel border-amber-500/40">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-amber-600 dark:text-amber-400">
+              <AlertTriangle className="w-5 h-5" />
+              <span>Dataset duplicado detectado</span>
+            </DialogTitle>
+            <DialogDescription className="text-xs text-muted-foreground pt-2">
+              El archivo{" "}
+              <strong className="text-foreground font-mono">
+                {pendingDuplicateUpload?.file.name}
+              </strong>{" "}
+              tiene el mismo hash que un dataset ya guardado anteriormente:
+            </DialogDescription>
+          </DialogHeader>
+
+          {pendingDuplicateUpload && (
+            <div className="space-y-1.5 max-h-36 overflow-y-auto rounded-sm border border-border bg-muted/20 p-2.5 text-xs">
+              {pendingDuplicateUpload.existingDatasets.map((ds) => (
+                <div key={ds.id} className="flex items-center justify-between gap-2">
+                  <span className="font-semibold text-foreground truncate">{ds.name}</span>
+                  <span className="text-[10px] font-mono text-muted-foreground shrink-0">
+                    {ds.is_ground_truth ? "Ground Truth" : "Dataset de Tareas"}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <p className="text-xs text-muted-foreground">
+            ¿Deseas guardarlo de todas formas como una nueva copia?
+          </p>
+
+          <DialogFooter className="gap-2 pt-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={uploading || gtUploading}
+              onClick={() => setPendingDuplicateUpload(null)}
+            >
+              {t("common.cancel")}
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              disabled={uploading || gtUploading}
+              onClick={() => {
+                if (!pendingDuplicateUpload) return;
+                if (pendingDuplicateUpload.kind === "ground_truth") {
+                  void performGroundTruthUpload(pendingDuplicateUpload.file, true);
+                } else {
+                  void performTaskUpload(pendingDuplicateUpload.file, true);
+                }
+              }}
+              className="gap-1.5"
+            >
+              {(uploading || gtUploading) && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+              <span>Guardar de todas formas</span>
             </Button>
           </DialogFooter>
         </DialogContent>
