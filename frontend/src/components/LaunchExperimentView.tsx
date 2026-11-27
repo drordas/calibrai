@@ -847,41 +847,43 @@ export const LaunchExperimentView: React.FC<LaunchExperimentViewProps> = ({
             </div>
 
             {expandedPilar === "pilar_1" && (
-              <div className="pt-2.5 border-t border-border/60 grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
-                <div className="space-y-1">
-                  <Label className="text-[11px] text-muted-foreground font-medium">Columna de Texto Original del Corpus</Label>
-                  <Select value={pilar1SourceCol} onValueChange={setPilar1SourceCol}>
-                    <SelectTrigger className="h-8 text-xs bg-background/80 font-mono">
-                      <SelectValue placeholder="Seleccionar columna textual asignada" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {pilar1TextColumns.map((col) => (
-                        <SelectItem key={col.name} value={col.name} className="text-xs font-mono">
-                          {col.name} ({col.role})
+              <div className="pt-2.5 border-t border-border/60 space-y-3 text-xs">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <Label className="text-[11px] text-muted-foreground font-medium">Columna de Texto Original del Corpus</Label>
+                    <Select value={pilar1SourceCol} onValueChange={setPilar1SourceCol}>
+                      <SelectTrigger className="h-8 text-xs bg-background/80 font-mono">
+                        <SelectValue placeholder="Seleccionar columna textual asignada" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {pilar1TextColumns.map((col) => (
+                          <SelectItem key={col.name} value={col.name} className="text-xs font-mono">
+                            {col.name} ({col.role})
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-[11px] text-muted-foreground font-medium">Rigor de Fidelidad Verbatim</Label>
+                    <Select value={pilar1VerbatimMode} onValueChange={(v: "tolerant" | "strict") => setPilar1VerbatimMode(v)}>
+                      <SelectTrigger className="h-8 text-xs bg-background/80">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="tolerant" className="text-xs">
+                          Tolerante a Erratas / Typos (&ge;88% sim.)
                         </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                        <SelectItem value="strict" className="text-xs">
+                          Estricto Literal (100% caracteres [sic])
+                        </SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
                 </div>
-                <div className="space-y-1">
-                  <Label className="text-[11px] text-muted-foreground font-medium">Rigor de Fidelidad Verbatim</Label>
-                  <Select value={pilar1VerbatimMode} onValueChange={(v: "tolerant" | "strict") => setPilar1VerbatimMode(v)}>
-                    <SelectTrigger className="h-8 text-xs bg-background/80">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="tolerant" className="text-xs">
-                        Tolerante a Erratas / Typos (&ge;88% sim.)
-                      </SelectItem>
-                      <SelectItem value="strict" className="text-xs">
-                        Estricto Literal (100% caracteres [sic])
-                      </SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-1">
+                <div className="space-y-1.5">
                   <Label className="text-[11px] text-muted-foreground font-medium">Campos de Citas / Evidencias a Auditar</Label>
-                  <div className="flex flex-wrap gap-1.5 pt-1">
+                  <div className="rounded-lg border border-border bg-background/50 p-2.5 flex flex-wrap gap-1.5 overflow-hidden">
                     {availablePilar1QuoteFields.map((f) => {
                       const active = pilar1QuoteFields.includes(f);
                       return (
@@ -897,7 +899,7 @@ export const LaunchExperimentView: React.FC<LaunchExperimentViewProps> = ({
                                 : [...prev, f]
                             )
                           }
-                          className={`px-2 py-0.5 rounded text-[10px] font-mono border transition-colors ${
+                          className={`px-2 py-0.5 rounded text-[10px] font-mono border transition-colors max-w-full break-all text-left ${
                             active
                               ? "bg-primary/15 border-primary text-primary font-semibold"
                               : "bg-background/60 border-border text-muted-foreground hover:text-foreground"

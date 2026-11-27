@@ -137,28 +137,247 @@ function convertPlainPromptToMarkdown(raw: string): string {
   return out.join("\n").replace(/\n{3,}/g, "\n\n").trim();
 }
 
-function buildPromptDownloadContent(item: SavedPromptItem, format: "txt" | "md" | "json"): string {
+function normalizeSectionKey(title: string): string {
+  return (
+    title
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "_")
+      .replace(/^_+|_+$/g, "") || "section"
+  );
+}
+
+function splitParagraphOrLines(block: string): string | string[] | Record<string, any> {
+  const lines = block
+    .split("\n")
+    .map((l) => l.trimEnd())
+    .filter((l) => l.trim().length > 0);
+  if (lines.length === 0) return "";
+  if (lines.length === 1) return lines[0].trim();
+
+  const kvLines = lines.filter((l) => /^[A-Z0-9_ ]{2,40}:\s*.+$/.test(l.trim()));
+  if (kvLines.length === lines.length) {
+    const obj: Record<string, string> = {};
+    for (const l of lines) {
+      const idx = l.indexOf(":");
+      const k = l.slice(0, idx).trim();
+      const v = l.slice(idx + 1).trim();
+      obj[k] = v;
+    }
+    return obj;
+  }
+
+  return lines.map((l) => l.trim());
+}
+
+function parseSectionContentToJson(content: string): any {
+  const trimmed = content.trim();
+  if (!trimmed) return "";
+
+  const numberedRe = /(?:^|\n)(\d+\.\s+[^\n]+)\n([\s\S]*?)(?=(?:\n\d+\.\s+[^\n]+\n)|\Z)/g;
+  const numberedMatches = Array.from(trimmed.matchAll(numberedRe));
+  if (numberedMatches.length >= 2) {
+    const firstStart = numberedMatches[0].index ?? 0;
+    const result: Record<string, any> = {};
+    const intro = trimmed.slice(0, firstStart).trim();
+    if (intro) result.intro = splitParagraphOrLines(intro);
+    for (const m of numberedMatches) {
+      const subTitle = m[1].trim();
+      const subBody = m[2].trim();
+      result[subTitle] = splitParagraphOrLines(subBody);
+    }
+    const lastMatch = numberedMatches[numberedMatches.length - 1];
+    const lastEnd = (lastMatch.index ?? 0) + lastMatch[0].length;
+    const tail = trimmed.slice(lastEnd).trim();
+    if (tail) result.inputs = splitParagraphOrLines(tail);
+    return result;
+  }
+
+  const blocks = trimmed
+    .split(/\n{2,}/)
+    .map((b) => b.trim())
+    .filter(Boolean);
+
+  if (blocks.length > 1) {
+    return blocks.map((b) => splitParagraphOrLines(b));
+  }
+
+  return splitParagraphOrLines(trimmed);
+}
+
+function parsePromptBodyToStructuredJson(cleanBody: string): Record<string, any> {
+  const text = cleanBody.replace(/\r\n/g, "\n").trim();
+  const variables = Array.from(
+    new Set(Array.from(text.matchAll(/\{([a-zA-Z0-9_.-]+)\}/g)).map((m) => m[1]))
+  );
+
+  const bannerRe = /(?:^|\n)[=\-_]{6,}\n([^\n]+)\n[=\-_]{6,}\n([\s\S]*?)(?=(?:\n[=\-_]{6,}\n[^\n]+\n[=\-_]{6,}\n)|\Z)/g;
+  const bannerMatches = Array.from(text.matchAll(bannerRe));
+
+  const sections: Record<string, any> = {};
+  if (bannerMatches.length > 0) {
+    const firstIdx = bannerMatches[0].index ?? 0;
+    const preamble = text.slice(0, firstIdx).trim();
+    if (preamble) {
+      sections.preamble = splitParagraphOrLines(preamble);
+    }
+    for (const m of bannerMatches) {
+      const key = normalizeSectionKey(m[1]);
+      sections[key] = parseSectionContentToJson(m[2]);
+    }
+  } else {
+    const mdRe = /(?:^|\n)#{1,3}\s+([^\n]+)\n([\s\S]*?)(?=(?:\n#{1,3}\s+[^\n]+\n)|\Z)/g;
+    const mdMatches = Array.from(text.matchAll(mdRe));
+    if (mdMatches.length > 0) {
+      for (const m of mdMatches) {
+        const key = normalizeSectionKey(m[1]);
+        sections[key] = parseSectionContentToJson(m[2]);
+      }
+    } else {
+      sections.content = splitParagraphOrLines(text);
+    }
+  }
+
+  return {
+    variables,
+    sections,
+  };
+}
+
+function extractPromptArtifacts(rawBody: string): {
+  cleanBody: string;
+  jsonBlockRaw: string | null;
+  specBlockRaw: string | null;
+  outputSchema: Record<string, any> | null;
+  evaluationSpec: Record<string, any> | null;
+} {
+  let cleanBody = (rawBody || "").replace(/\r\n/g, "\n").trim();
+  let jsonBlockRaw: string | null = null;
+  let specBlockRaw: string | null = null;
+  let outputSchema: Record<string, any> | null = null;
+  let evaluationSpec: Record<string, any> | null = null;
+
+  const specMatch = cleanBody.match(/```(?:evaluation-spec|eval-spec)\s*([\s\S]*?)\s*```/i);
+  if (specMatch) {
+    specBlockRaw = specMatch[0];
+    const specText = specMatch[1].trim();
+    const taskMatch = specText.match(/task_type:\s*([^\n]+)/i);
+    evaluationSpec = {
+      task_type: taskMatch ? taskMatch[1].trim() : "generic",
+      raw_yaml: specText,
+    };
+    cleanBody = (
+      cleanBody.slice(0, specMatch.index) +
+      "\n" +
+      cleanBody.slice((specMatch.index ?? 0) + specMatch[0].length)
+    ).trim();
+  }
+
+  const jsonMatch = cleanBody.match(/```json\s*([\s\S]*?)\s*```/i);
+  if (jsonMatch) {
+    jsonBlockRaw = jsonMatch[0];
+    try {
+      outputSchema = JSON.parse(jsonMatch[1].trim());
+    } catch {
+      outputSchema = null;
+    }
+    cleanBody = (
+      cleanBody.slice(0, jsonMatch.index) +
+      "\n" +
+      cleanBody.slice((jsonMatch.index ?? 0) + jsonMatch[0].length)
+    ).trim();
+  }
+
+  if (!outputSchema) {
+    const blockRe = /(?:^|\n)([A-Z][A-Z0-9_]{2,})\n((?:[A-Z][A-Z0-9_]{1,}:[^\n]*(?:\n|$))+)/g;
+    const inferred: Record<string, any> = {};
+    for (const m of cleanBody.matchAll(blockRe)) {
+      const dimKey = m[1].toLowerCase();
+      const fieldsObj: Record<string, any> = {};
+      const fieldLines = m[2].trim().split("\n");
+      for (const fl of fieldLines) {
+        const idx = fl.indexOf(":");
+        if (idx === -1) continue;
+        const fk = fl.slice(0, idx).trim().toLowerCase();
+        const fv = fl.slice(idx + 1).trim().toLowerCase();
+        fieldsObj[fk] = fv.includes("||") || fk.includes("marker") || fk.includes("cita") ? ["string"] : "string";
+      }
+      if (Object.keys(fieldsObj).length > 0) {
+        inferred[dimKey] = fieldsObj;
+      }
+    }
+    if (Object.keys(inferred).length > 0) {
+      outputSchema = inferred;
+    }
+  }
+
+  if (!evaluationSpec && outputSchema) {
+    evaluationSpec = {
+      task_type: "aspect_polarity",
+      output_schema: outputSchema,
+    };
+  }
+
+  return { cleanBody, jsonBlockRaw, specBlockRaw, outputSchema, evaluationSpec };
+}
+
+function buildPromptDownloadContent(
+  item: SavedPromptItem,
+  format: "txt" | "md" | "json",
+  includeOutputAndSpec: boolean = false
+): string {
   const sys = (item.system_prompt || "").trim();
-  const body = (item.model_prompt || "").trim();
+  const rawBody = (item.model_prompt || "").trim();
+  const artifacts = extractPromptArtifacts(rawBody);
+  const body = artifacts.cleanBody;
 
   if (format === "json") {
     const payload: Record<string, any> = {
       name: item.name || "Prompt",
       dataset_id: item.dataset_id ?? null,
-      system_prompt: item.system_prompt || "",
-      model_prompt: item.model_prompt || "",
+      system_prompt: sys,
+      prompt: parsePromptBodyToStructuredJson(body),
     };
+    if (includeOutputAndSpec) {
+      if (artifacts.outputSchema) payload.output_schema = artifacts.outputSchema;
+      if (artifacts.evaluationSpec) payload.evaluation_spec = artifacts.evaluationSpec;
+    }
     if (item.created_at) payload.created_at = item.created_at;
     if (item.updated_at) payload.updated_at = item.updated_at;
     return `${JSON.stringify(payload, null, 2)}\n`;
   }
 
-  if (format === "txt") {
-    if (!sys) return body;
-    return `=== SYSTEM PROMPT ===\n${sys}\n\n=== PLANTILLA DE PROMPT ===\n${body}\n`;
+  let effectiveBody = body;
+  if (includeOutputAndSpec) {
+    const extras: string[] = [];
+    if (artifacts.jsonBlockRaw) {
+      extras.push(artifacts.jsonBlockRaw);
+    } else if (artifacts.outputSchema) {
+      extras.push(`\`\`\`json\n${JSON.stringify(artifacts.outputSchema, null, 2)}\n\`\`\``);
+    }
+    if (artifacts.specBlockRaw) {
+      extras.push(artifacts.specBlockRaw);
+    } else if (artifacts.evaluationSpec) {
+      const schemaYaml = artifacts.outputSchema
+        ? Object.entries(artifacts.outputSchema)
+            .map(([k, v]) => `  ${k}: ${JSON.stringify(v)}`)
+            .join("\n")
+        : "";
+      extras.push(
+        `\`\`\`evaluation-spec\ntask_type: ${artifacts.evaluationSpec.task_type || "generic"}${schemaYaml ? `\noutput_schema:\n${schemaYaml}` : ""}\n\`\`\``
+      );
+    }
+    if (extras.length > 0) {
+      effectiveBody = `${body}\n\n${extras.join("\n\n")}`;
+    }
   }
 
-  const mdBody = convertPromptTextIfNeeded(body);
+  if (format === "txt") {
+    if (!sys) return effectiveBody;
+    return `=== SYSTEM PROMPT ===\n${sys}\n\n=== PLANTILLA DE PROMPT ===\n${effectiveBody}\n`;
+  }
+
+  const mdBody = convertPromptTextIfNeeded(effectiveBody);
   const parts: string[] = [`# ${item.name.trim() || "Prompt"}`];
   if (sys) {
     parts.push(`## System Prompt\n\n${convertPromptTextIfNeeded(sys)}`);
@@ -209,6 +428,7 @@ export const DashboardPromptsModal: React.FC<DashboardPromptsModalProps> = ({
 
   const [downloadTarget, setDownloadTarget] = useState<SavedPromptItem | null>(null);
   const [downloadFileName, setDownloadFileName] = useState("");
+  const [includeOutputAndSpec, setIncludeOutputAndSpec] = useState(false);
 
   // Share prompt state
   const [shareTarget, setShareTarget] = useState<SavedPromptItem | null>(null);
@@ -305,12 +525,13 @@ export const DashboardPromptsModal: React.FC<DashboardPromptsModalProps> = ({
     const safeName = (item.name || "prompt").trim().replace(/[^\w\-. ]+/g, "_").replace(/\s+/g, "_");
     setDownloadTarget(item);
     setDownloadFileName(safeName || "prompt");
+    setIncludeOutputAndSpec(false);
   };
 
   const handleConfirmDownload = (ext: "txt" | "md" | "json") => {
     if (!downloadTarget) return;
     const baseName = (downloadFileName.trim() || "prompt").replace(/\.(txt|md|json)$/i, "");
-    const content = buildPromptDownloadContent(downloadTarget, ext);
+    const content = buildPromptDownloadContent(downloadTarget, ext, includeOutputAndSpec);
     const mime =
       ext === "json"
         ? "application/json;charset=utf-8"
@@ -826,6 +1047,23 @@ export const DashboardPromptsModal: React.FC<DashboardPromptsModalProps> = ({
                 className="h-8 text-xs font-mono rounded-sm"
               />
             </div>
+
+            <label className="flex items-start gap-2 p-2.5 rounded-sm border border-border bg-muted/20 cursor-pointer hover:bg-muted/40 transition-colors">
+              <input
+                type="checkbox"
+                checked={includeOutputAndSpec}
+                onChange={(e) => setIncludeOutputAndSpec(e.target.checked)}
+                className="mt-0.5 accent-primary"
+              />
+              <span className="text-xs leading-snug">
+                <span className="font-medium text-foreground block">
+                  Incluir JSON resultante y SPEC
+                </span>
+                <span className="text-[11px] text-muted-foreground">
+                  Añade el esquema de salida (<code>output_schema</code>) y la especificación de evaluación (<code>evaluation-spec</code>) en la exportación.
+                </span>
+              </span>
+            </label>
           </div>
 
           <div className="flex items-center justify-end gap-2 pt-2 border-t border-border">
